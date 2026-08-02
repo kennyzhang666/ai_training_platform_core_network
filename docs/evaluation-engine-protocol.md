@@ -1,6 +1,15 @@
 # 赛题评测引擎协议
 
-每个赛题版本独立配置一个评测引擎。平台只负责锁定交付件快照、生成输入清单、校验结果并写入报告；评测逻辑由管理员在本地命令或 CodeAgent 中执行。
+每个赛题版本独立配置一个评测引擎，`evaluationEngine` 是该赛题如何被评测的唯一事实来源；训战场次不再携带任何执行器配置。平台负责锁定交付件快照、按引擎分发执行、校验结果并写入报告。
+
+`mode` 决定平台如何分发，也决定该赛题的训战能选哪些评测方式：
+
+| mode | 执行者 | 允许的评测方式 | 必须提供 `local` |
+|---|---|---|---|
+| `PLATFORM_LOCAL` | 平台内置执行器 | 自动评估 / 管理员安排 / 线下结果录入 | 是 |
+| `EXTERNAL_CLI` | 管理员本地命令或 CodeAgent | 仅线下结果录入 | 否（提供会被拒绝） |
+
+创建或修改训战时，如果评测方式与引擎能力不符，平台直接拒绝并返回 `ENGINE_TRIGGER_UNSUPPORTED`，不会等到执行评估时才失败。
 
 ## 赛题配置
 
@@ -10,7 +19,14 @@
 {
   "id": "parking-fee-evaluator",
   "version": "1.0.0",
-  "mode": "EXTERNAL_CLI",
+  "mode": "PLATFORM_LOCAL",
+  "local": {
+    "contractPath": "challenges/parking-fee-v1/submission-contract.json",
+    "testsDir": "challenges/parking-fee-v1/hidden-tests",
+    "entry": "src/parking.py",
+    "function": "calculate_fee",
+    "language": "python"
+  },
   "input": {
     "format": "JSON",
     "schemaVersion": "1.0",
@@ -24,7 +40,11 @@
 }
 ```
 
-`contractPath` 是仓库内的 JSON 契约路径，不能使用绝对路径、反斜杠或 `..`。评测引擎标识和版本会参与评测幂等键计算；修改引擎版本后，平台会把它视为新的评测契约。
+所有路径（`input.contractPath`、`output.contractPath` 以及 `local` 下的各项）都是仓库内相对路径，不能使用绝对路径、盘符、反斜杠或 `..`。
+
+`local` 只属于 `PLATFORM_LOCAL`：它是内置执行器的参数，不会出现在下发给外部评测者的输入清单里。
+
+评测引擎标识和版本以 `id@version` 的形式参与**三种评测方式**的幂等键计算，因此修改引擎版本会让该赛题的历史结果失效并需要重跑；这一点对自动评估、管理员安排和线下录入完全一致。
 
 ## 线下评测流程
 
@@ -45,6 +65,5 @@
 
 ## 其他评测方式
 
-- 「自动评估」继续由平台队列处理，适合接入自动化执行器。
-- 「手动评估」由管理员选择提交后安排运行，适合平台本地执行器。
-- GitLab 自动评测适配器不在本协议范围内，后续可复用同一结果契约接入。
+- 「自动评估」由平台队列在提交后立即调度，「管理员安排」由管理员选择提交后触发；两者都要求引擎为 `PLATFORM_LOCAL`，并使用同一份 `local` 配置执行。
+- GitLab 自动评测适配器不在本协议范围内，接入时复用同一 `GradingExecutor` 接口和同一结果契约，引擎配置无需改动。

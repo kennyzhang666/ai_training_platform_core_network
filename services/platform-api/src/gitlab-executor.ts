@@ -1,6 +1,5 @@
 import { Injectable, NotImplementedException } from '@nestjs/common';
-import { EventConfig, GradingRun, SubmissionRecord } from './domain';
-import { GradingExecutor } from './grading-executor';
+import { GradingExecutionRequest, GradingExecutor } from './grading-executor';
 
 /**
  * Stable seam for the final production adapter.  The platform domain only
@@ -21,7 +20,7 @@ export interface GitLabPipelineClient {
 export class GitLabGradingExecutor implements GradingExecutor {
   constructor(private readonly client?: GitLabPipelineClient) {}
 
-  async execute(input: { event: EventConfig; submission: SubmissionRecord; run: GradingRun }): Promise<Record<string, unknown>> {
+  async execute(input: GradingExecutionRequest): Promise<Record<string, unknown>> {
     if (!this.client) throw new NotImplementedException('GitLab grading adapter is intentionally deferred; use LocalGradingExecutor locally');
     const repository = input.submission.snapshot.repository ?? input.event.deliveryConfig?.repository;
     const branch = input.submission.snapshot.branch;

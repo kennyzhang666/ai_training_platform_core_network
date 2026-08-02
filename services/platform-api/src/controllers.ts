@@ -503,7 +503,7 @@ export class PlatformController {
       if (currentRun.status === 'RUNNING') continue;
       const run = this.store.markRunRunning(submission.gradingRunId);
       try {
-        const result = await this.localGrader.execute({ event: this.store.getEvent(eventId), submission, run });
+        const result = await this.localGrader.execute({ event: this.store.getEvent(eventId), submission, run, engine: this.store.evaluationEngineForSubmission(submission) });
         executions.push({ run: this.store.getRun(run.id), stored: this.store.completeRun(run.id, result) });
       } catch (error) {
         this.store.failRun(run.id, error instanceof Error ? error.message : String(error));
@@ -621,7 +621,7 @@ export class PlatformController {
     const run = this.store.markRunRunning(runId);
     if (run.status === 'GRADED' && submission.resultId) return { run, stored: this.store.getReport(submission.id) };
     try {
-      const result = await this.localGrader.execute({ event: this.store.getEvent(submission.eventId), submission, run });
+      const result = await this.localGrader.execute({ event: this.store.getEvent(submission.eventId), submission, run, engine: this.store.evaluationEngineForSubmission(submission) });
       return { run: this.store.getRun(runId), stored: this.store.completeRun(runId, result) };
     } catch (error) {
       this.store.failRun(runId, error instanceof Error ? error.message : String(error));

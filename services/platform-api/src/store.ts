@@ -68,12 +68,10 @@ function plainText(value?: string): string {
   return (value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-// Must track GRADER_VERSION in grader/src/drill_grader/cli.py: a change to the
-// scoring rules has to produce new idempotency keys, otherwise a re-grade
-// returns the result computed by the previous rules.
-export const LOCAL_GRADER_VERSION = '0.3.0';
-
-function idempotencyKey(snapshotHash: string, challengeVersion: string, rubricVersion = '1.0', graderVersion = LOCAL_GRADER_VERSION, attempt = 1): string {
+// The grader component of the key is the challenge's evaluation engine
+// identity (`id@version`), so changing a challenge's rule set invalidates
+// cached results for every trigger, not just for external evaluation.
+function idempotencyKey(snapshotHash: string, challengeVersion: string, rubricVersion: string, graderVersion: string, attempt = 1): string {
   const attemptPart = attempt > 1 ? `|attempt:${attempt}` : '';
   return createHash('sha256').update(`${snapshotHash}|${rubricVersion}|${graderVersion}|${challengeVersion}${attemptPart}`).digest('hex');
 }
@@ -96,6 +94,12 @@ function evaluationEngineForVersion(version: ChallengeVersion): EvaluationEngine
   };
 }
 
+function assertRepositoryPath(value: string, label: string): void {
+  if (!value?.trim() || value.includes('..') || value.startsWith('/') || value.includes('\\') || /^[A-Za-z]:/.test(value)) {
+    throw new BadRequestException(`${label} must be a repository-relative path`);
+  }
+}
+
 function validateEvaluationEngine(engine?: EvaluationEngineConfig): void {
   if (!engine) return;
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$/.test(engine.id)) throw new BadRequestException('evaluation engine id is invalid');
@@ -105,9 +109,40 @@ function validateEvaluationEngine(engine?: EvaluationEngineConfig): void {
     if (!contract || contract.format !== 'JSON' || !contract.schemaVersion?.trim() || !contract.contractPath?.trim()) {
       throw new BadRequestException(`evaluation engine ${label} contract is incomplete`);
     }
-    if (contract.contractPath.includes('..') || contract.contractPath.startsWith('/') || contract.contractPath.includes('\\')) {
-      throw new BadRequestException(`evaluation engine ${label} contract path is invalid`);
+    assertRepositoryPath(contract.contractPath, `evaluation engine ${label} contract path`);
+  }
+  // The mode is a dispatch decision, not a label: PLATFORM_LOCAL is only
+  // runnable if it carries the parameters the built-in grader needs, and
+  // EXTERNAL_CLI must not pretend to be runnable in-process.
+  if (engine.mode === 'PLATFORM_LOCAL') {
+    const local = engine.local;
+    if (!local?.contractPath?.trim() || !local.entry?.trim() || !local.function?.trim()) {
+      throw new BadRequestException('PLATFORM_LOCAL engine requires local.contractPath, local.entry and local.function');
     }
+    assertRepositoryPath(local.contractPath, 'evaluation engine local.contractPath');
+    assertRepositoryPath(local.entry, 'evaluation engine local.entry');
+    if (local.testsDir) assertRepositoryPath(local.testsDir, 'evaluation engine local.testsDir');
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(local.function)) throw new BadRequestException('evaluation engine local.function is invalid');
+  } else if (engine.local) {
+    throw new BadRequestException('EXTERNAL_CLI engine must not declare a local executor configuration');
+  }
+}
+
+const PARKING_FEE_LOCAL_ENGINE: EvaluationEngineConfig['local'] = {
+  contractPath: 'challenges/parking-fee-v1/submission-contract.json',
+  testsDir: 'challenges/parking-fee-v1/hidden-tests',
+  entry: 'src/parking.py',
+  function: 'calculate_fee',
+  language: 'python',
+};
+
+/** A trigger is only offered when the challenge engine can actually serve it. */
+function assertTriggerMatchesEngine(engine: EvaluationEngineConfig, trigger: TriggerType): void {
+  if (engine.mode === 'EXTERNAL_CLI' && trigger !== 'IMPORT') {
+    throw new BadRequestException({
+      code: 'ENGINE_TRIGGER_UNSUPPORTED',
+      message: `赛题的评测引擎为外部命令（EXTERNAL_CLI），只能选择线下结果录入；当前选择了 ${trigger}`,
+    });
   }
 }
 
@@ -142,15 +177,8 @@ export class PlatformStore {
     const localTrainingStartsAt = '2026-08-01T09:00:00+08:00';
     const localTrainingEndsAt = '2026-08-08T18:00:00+08:00';
     const localEvent = this.events.get('event-local');
-    if (localEvent && (!localEvent.localGrading || !localEvent.deliveryConfig || !localEvent.startsAt || !localEvent.endsAt)) {
+    if (localEvent && (!localEvent.deliveryConfig || !localEvent.startsAt || !localEvent.endsAt)) {
       localEvent.deliveryConfig ??= { allowedFormats: ['zip'], maxBytes: 50 * 1024 * 1024 };
-      localEvent.localGrading ??= {
-        contractPath: 'challenges/parking-fee-v1/submission-contract.json',
-        testsDir: 'challenges/parking-fee-v1/hidden-tests',
-        entry: 'src/parking.py',
-        function: 'calculate_fee',
-        language: 'python',
-      };
       localEvent.startsAt ??= localTrainingStartsAt;
       localEvent.endsAt ??= localTrainingEndsAt;
       seeded = true;
@@ -167,13 +195,6 @@ export class PlatformStore {
         startsAt: localTrainingStartsAt,
         endsAt: localTrainingEndsAt,
         deliveryConfig: { allowedFormats: ['zip'], maxBytes: 50 * 1024 * 1024 },
-        localGrading: {
-          contractPath: 'challenges/parking-fee-v1/submission-contract.json',
-          testsDir: 'challenges/parking-fee-v1/hidden-tests',
-          entry: 'src/parking.py',
-          function: 'calculate_fee',
-          language: 'python',
-        },
       });
       seeded = true;
     }
@@ -189,13 +210,6 @@ export class PlatformStore {
         startsAt: localTrainingStartsAt,
         endsAt: localTrainingEndsAt,
         deliveryConfig: { repository: 'training/parking-fee', branchTemplate: 'drill/{subjectId}' },
-        localGrading: {
-          contractPath: 'challenges/parking-fee-v1/submission-contract.json',
-          testsDir: 'challenges/parking-fee-v1/hidden-tests',
-          entry: 'src/parking.py',
-          function: 'calculate_fee',
-          language: 'python',
-        },
       });
       seeded = true;
     }
@@ -298,6 +312,7 @@ export class PlatformStore {
           id: 'parking-fee-evaluator',
           version: '1.0.0',
           mode: 'PLATFORM_LOCAL',
+          local: { ...PARKING_FEE_LOCAL_ENGINE! },
           input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
           output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
         },
@@ -357,15 +372,34 @@ export class PlatformStore {
       }
       for (const version of challenge.versions) {
         if (version.evaluationEngine) continue;
+        const local = version.id === 'parking-fee-01@1' ? { ...PARKING_FEE_LOCAL_ENGINE! } : undefined;
         version.evaluationEngine = {
           id: `${challenge.id}-evaluator`,
           version: '1.0.0',
-          mode: version.id === 'parking-fee-01@1' ? 'PLATFORM_LOCAL' : 'EXTERNAL_CLI',
+          mode: local ? 'PLATFORM_LOCAL' : 'EXTERNAL_CLI',
+          ...(local ? { local } : {}),
           input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
           output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
         };
         seeded = true;
       }
+    }
+    // Executor configuration used to live on the session (`event.localGrading`),
+    // so the same challenge could be graded by different rules depending on
+    // which session received the delivery, and only the hard-coded parking-fee
+    // session was runnable at all. Lift any persisted session config onto its
+    // challenge version, which is now the single source of truth.
+    for (const event of this.events.values()) {
+      const legacy = event.localGrading;
+      if (!legacy) continue;
+      for (const challenge of this.challenges.values()) {
+        const version = challenge.versions.find((item) => item.id === event.challengeVersion);
+        if (!version?.evaluationEngine || version.evaluationEngine.local) continue;
+        version.evaluationEngine = { ...version.evaluationEngine, mode: 'PLATFORM_LOCAL', local: { ...legacy } };
+        seeded = true;
+      }
+      delete event.localGrading;
+      seeded = true;
     }
     const catalogMetadata: Record<string, Partial<ChallengeVersion>> = {
       'parking-fee-01@1': {
@@ -1523,6 +1557,20 @@ export class PlatformStore {
     return submission.challengeVersionSnapshot ?? this.getEvent(submission.eventId).challengeVersion;
   }
 
+  /**
+   * The evaluation engine that owns a delivery, resolved through the challenge
+   * version captured at submission time so a later challenge edit cannot change
+   * how an already-submitted delivery is graded.
+   */
+  evaluationEngineForSubmission(submission: SubmissionRecord): EvaluationEngineConfig {
+    return evaluationEngineForVersion(this.getChallengeVersion(this.submissionChallengeVersion(submission)));
+  }
+
+  /** Identity of the rule set, used as the grader component of an idempotency key. */
+  private engineIdentity(engine: EvaluationEngineConfig): string {
+    return `${engine.id}@${engine.version}`;
+  }
+
   private submissionRubricVersion(submission: SubmissionRecord): string {
     if (submission.rubricVersionSnapshot) return submission.rubricVersionSnapshot;
     const event = this.getEvent(submission.eventId);
@@ -2409,24 +2457,17 @@ export class PlatformStore {
       throw new BadRequestException('AUTO events must pin Git snapshots at SUBMIT');
     }
     if (input.trigger === 'AUTO' && !deliveryConfig.pinAt) deliveryConfig.pinAt = 'SUBMIT';
-    // The local employee/admin console should be able to create another
-    // parking-fee practice session and run it immediately without requiring a
-    // hidden JSON field. Production-created events can still provide their
-    // own executor configuration (or omit it for GitLab/CI execution).
-    const localGrading = input.localGrading ?? (challengeVersion.id === 'parking-fee-01@1' ? {
-      contractPath: 'challenges/parking-fee-v1/submission-contract.json',
-      testsDir: 'challenges/parking-fee-v1/hidden-tests',
-      entry: 'src/parking.py',
-      function: 'calculate_fee',
-      language: 'python',
-    } : undefined);
+    // The challenge version owns its executor, so a session cannot be created
+    // with a trigger the engine cannot serve. Rejecting here beats accepting
+    // the session and only failing when an administrator presses "evaluate".
+    assertTriggerMatchesEngine(evaluationEngineForVersion(challengeVersion), input.trigger);
     const accessPolicy = this.normalizeAccessPolicy(input.accessPolicy);
     this.assertAdminAccessPolicyScope(accessPolicy, actorId);
+    const { localGrading: _legacyLocalGrading, ...eventInput } = input;
     const event: EventConfig = {
-      ...input,
+      ...eventInput,
       ...(accessPolicy ? { accessPolicy, participantMode: accessPolicy.mode === 'RESTRICTED' ? 'ALLOWLIST' : 'OPEN' } : {}),
       deliveryConfig,
-      ...(localGrading ? { localGrading } : {}),
       status: input.status ?? 'OPEN',
     };
     this.events.set(event.id, event);
@@ -2481,8 +2522,10 @@ export class PlatformStore {
     if (next.mode === 'WINDOW' && next.startsAt && next.endsAt && next.startsAt >= next.endsAt) {
       throw new BadRequestException('event startsAt must be before endsAt');
     }
+    assertTriggerMatchesEngine(evaluationEngineForVersion(challengeVersion), next.trigger);
+    const { localGrading: _legacyLocalGrading, ...eventPatch } = patch;
     Object.assign(event, {
-      ...patch,
+      ...eventPatch,
       deliveryConfig: next.deliveryConfig,
       ...(patch.accessPolicy !== undefined && nextAccessPolicy ? { accessPolicy: nextAccessPolicy, participantMode: nextAccessPolicy.mode === 'RESTRICTED' ? 'ALLOWLIST' as const : 'OPEN' as const } : {}),
     });
@@ -2609,7 +2652,7 @@ export class PlatformStore {
         submission.snapshot.snapshotHash,
         challengeVersionId,
         rubricVersion,
-        `${engine.id}@${engine.version}`,
+        this.engineIdentity(engine),
         submission.gradingAttempt ?? 1,
       );
       let run = submission.gradingRunId ? this.runs.get(submission.gradingRunId) : undefined;
@@ -2658,7 +2701,14 @@ export class PlatformStore {
         submissionSource: event.submissionSource,
         reveal: event.reveal,
       },
-      challenge: { id: this.challengeForVersion(event.challengeVersion).id, title: this.getChallengeVersion(event.challengeVersion).title, version: this.getChallengeVersion(event.challengeVersion).version, evaluationEngine: evaluationEngineForVersion(this.getChallengeVersion(event.challengeVersion)) },
+      // `local` is in-process executor configuration; an external evaluator
+      // must not receive repository paths it has no business reading.
+      challenge: (({ local: _local, ...engine }) => ({
+        id: this.challengeForVersion(event.challengeVersion).id,
+        title: this.getChallengeVersion(event.challengeVersion).title,
+        version: this.getChallengeVersion(event.challengeVersion).version,
+        evaluationEngine: engine,
+      }))(evaluationEngineForVersion(this.getChallengeVersion(event.challengeVersion))),
       submissions: prepared,
     };
   }
@@ -2780,13 +2830,17 @@ export class PlatformStore {
     if (submission.gradingRunId) return this.getRun(submission.gradingRunId);
     const challengeVersion = this.submissionChallengeVersion(submission);
     const rubricVersion = this.submissionRubricVersion(submission);
+    // All three triggers key on the same engine identity, so bumping the
+    // engine version invalidates cached results consistently instead of only
+    // on the external-evaluation path.
+    const graderVersion = this.engineIdentity(this.evaluationEngineForSubmission(submission));
     const run: GradingRun = {
       id: `run-${randomUUID()}`,
       submissionId: submission.id,
       triggerType,
       triggeredBy: actorId,
       status: 'QUEUED',
-      idempotencyKey: idempotencyKey(submission.snapshot.snapshotHash, challengeVersion, rubricVersion, LOCAL_GRADER_VERSION, submission.gradingAttempt ?? 1),
+      idempotencyKey: idempotencyKey(submission.snapshot.snapshotHash, challengeVersion, rubricVersion, graderVersion, submission.gradingAttempt ?? 1),
       createdAt: now(),
       attempt: submission.gradingAttempt ?? 1,
     };

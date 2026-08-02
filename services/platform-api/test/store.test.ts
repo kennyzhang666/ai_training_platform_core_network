@@ -216,6 +216,12 @@ test('event listings enforce challenge organization and participant scope', () =
       id: 'org-private-01@1', challengeId: 'org-private-01', version: 1, title: '组织私有题', zone: 'YELLOW',
       languagePolicy: { mode: 'fixed', languages: ['python'] }, deliveryPolicy: { allowedSources: ['UPLOAD'], upload: { formats: ['zip'] } },
       rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'PUBLISHED',
+      evaluationEngine: {
+        id: 'org-private-evaluator', version: '1.0.0', mode: 'PLATFORM_LOCAL',
+        local: { contractPath: 'challenges/parking-fee-v1/submission-contract.json', testsDir: 'challenges/parking-fee-v1/hidden-tests', entry: 'src/parking.py', function: 'calculate_fee', language: 'python' },
+        input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
+        output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
+      },
     }],
   });
   store.createEvent({ id: 'event-org-private', challengeVersion: 'org-private-01@1', submissionSource: 'UPLOAD', trigger: 'MANUAL', reveal: 'IMMEDIATE' });
@@ -272,14 +278,20 @@ test('automatic events pin snapshots at submission time', () => {
   assert.equal(event.deliveryConfig?.pinAt, 'SUBMIT');
 });
 
-test('local admin-created parking sessions inherit the runnable local grader contract', () => {
+test('a session resolves its executor from the challenge engine, not from the session', () => {
   const store = new PlatformStore(':memory:');
   const event = store.createEvent({
     id: 'event-admin-parking-local', challengeVersion: 'parking-fee-01@1', submissionSource: 'UPLOAD', trigger: 'MANUAL', reveal: 'IMMEDIATE',
     deliveryConfig: { allowedFormats: ['zip'], maxBytes: 50 * 1024 * 1024 },
   });
-  assert.equal(event.localGrading?.entry, 'src/parking.py');
-  assert.equal(event.localGrading?.testsDir, 'challenges/parking-fee-v1/hidden-tests');
+  // Executor configuration is owned by the challenge version so that one
+  // challenge cannot be graded by two rule sets depending on the session.
+  assert.equal(event.localGrading, undefined);
+  const submission = store.createSubmission(event.id, 'w00124', { ...uploadSnapshot, snapshotHash: '9999999999999999999999999999999999999999999999999999999999999999' });
+  const engine = store.evaluationEngineForSubmission(submission);
+  assert.equal(engine.mode, 'PLATFORM_LOCAL');
+  assert.equal(engine.local?.entry, 'src/parking.py');
+  assert.equal(engine.local?.testsDir, 'challenges/parking-fee-v1/hidden-tests');
 });
 
 test('manual Git events can defer commit pinning until the deadline', () => {
@@ -462,4 +474,86 @@ test('re-evaluating the same delivery keeps the previous result intact', () => {
   assert.deepEqual(store.getSubmission(submission.id).previousResultIds, [first.resultId]);
   assert.equal(store.getSubmission(submission.id).resultId, second.resultId);
   assert.equal((store.getReport(submission.id).result as { total: number }).total, 35);
+});
+
+// `evaluationEngine.mode` used to be a label nothing dispatched on: a session
+// could be created with AUTO/MANUAL on a challenge that has no in-platform
+// executor, and only failed when an administrator pressed "evaluate".
+test('a session cannot use a trigger its challenge engine cannot serve', () => {
+  const store = new PlatformStore(':memory:');
+  const externalVersion = {
+    id: 'external-only-01@1', challengeId: 'external-only-01', version: 1, title: '外部评测题', zone: 'YELLOW' as const,
+    languagePolicy: { mode: 'fixed', languages: ['python'] }, deliveryPolicy: { allowedSources: ['UPLOAD'], upload: { formats: ['zip'] } },
+    rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'PUBLISHED' as const,
+    evaluationEngine: {
+      id: 'external-only-evaluator', version: '1.0.0', mode: 'EXTERNAL_CLI' as const,
+      input: { format: 'JSON' as const, schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
+      output: { format: 'JSON' as const, schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
+    },
+  };
+  store.createChallenge({ id: 'external-only-01', ownerOrgPath: '/', origin: 'OFFICIAL', status: 'PUBLISHED', versions: [externalVersion] }, 'w00123');
+
+  for (const trigger of ['AUTO', 'MANUAL'] as const) {
+    assert.throws(
+      () => store.createEvent({ id: `event-external-${trigger}`, challengeVersion: 'external-only-01@1', submissionSource: 'UPLOAD', trigger, reveal: 'IMMEDIATE' }, 'w00123'),
+      /EXTERNAL_CLI|线下结果录入/,
+    );
+  }
+  const imported = store.createEvent({ id: 'event-external-import', challengeVersion: 'external-only-01@1', submissionSource: 'UPLOAD', trigger: 'IMPORT', reveal: 'IMMEDIATE' }, 'w00123');
+  assert.equal(imported.trigger, 'IMPORT');
+  assert.throws(() => store.updateEvent(imported.id, { trigger: 'MANUAL' }, 'w00123'), /EXTERNAL_CLI|线下结果录入/);
+});
+
+// A PLATFORM_LOCAL engine has to carry the parameters the built-in grader
+// needs, and an EXTERNAL_CLI engine must not pretend it is runnable in-process.
+test('engine mode and executor configuration are validated together', () => {
+  const store = new PlatformStore(':memory:');
+  const version = (engine: Record<string, unknown>) => ({
+    id: 'engine-validation-01@1', challengeId: 'engine-validation-01', version: 1, title: '引擎校验题', zone: 'YELLOW' as const,
+    languagePolicy: { mode: 'fixed', languages: ['python'] }, deliveryPolicy: { allowedSources: ['UPLOAD'], upload: { formats: ['zip'] } },
+    rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'DRAFT' as const,
+    evaluationEngine: engine,
+  });
+  const base = {
+    id: 'engine-validation-evaluator', version: '1.0.0',
+    input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
+    output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
+  };
+  const create = (engine: Record<string, unknown>) => store.createChallenge({ id: 'engine-validation-01', ownerOrgPath: '/', origin: 'OFFICIAL', status: 'DRAFT', versions: [version(engine) as never] }, 'w00123');
+
+  assert.throws(() => create({ ...base, mode: 'PLATFORM_LOCAL' }), /PLATFORM_LOCAL engine requires/);
+  assert.throws(() => create({ ...base, mode: 'EXTERNAL_CLI', local: { contractPath: 'a.json', entry: 'b.py', function: 'c' } }), /must not declare a local executor/);
+  assert.throws(() => create({ ...base, mode: 'PLATFORM_LOCAL', local: { contractPath: '../escape.json', entry: 'b.py', function: 'c' } }), /repository-relative path/);
+  const created = create({ ...base, mode: 'PLATFORM_LOCAL', local: { contractPath: 'challenges/x/contract.json', entry: 'src/x.py', function: 'solve' } });
+  assert.equal(created.versions[0].evaluationEngine?.local?.function, 'solve');
+});
+
+// The engine identity is the grader component of the idempotency key on every
+// trigger, so publishing a challenge version with a new engine version has to
+// produce a different key instead of reusing a score computed by older rules.
+test('the engine version participates in the idempotency key for every trigger', () => {
+  const store = new PlatformStore(':memory:');
+  const local = { contractPath: 'challenges/parking-fee-v1/submission-contract.json', testsDir: 'challenges/parking-fee-v1/hidden-tests', entry: 'src/parking.py', function: 'calculate_fee', language: 'python' };
+  const makeVersion = (versionNumber: number, engineVersion: string) => ({
+    id: `engine-key-01@${versionNumber}`, challengeId: 'engine-key-01', version: versionNumber, title: '引擎版本题', zone: 'YELLOW' as const,
+    languagePolicy: { mode: 'fixed', languages: ['python'] }, deliveryPolicy: { allowedSources: ['UPLOAD'], upload: { formats: ['zip'] } },
+    rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'DRAFT' as const,
+    evaluationEngine: {
+      id: 'engine-key-evaluator', version: engineVersion, mode: 'PLATFORM_LOCAL' as const, local,
+      input: { format: 'JSON' as const, schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
+      output: { format: 'JSON' as const, schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
+    },
+  });
+  store.createChallenge({ id: 'engine-key-01', ownerOrgPath: '/', origin: 'OFFICIAL', status: 'DRAFT', versions: [makeVersion(1, '1.0.0')] }, 'w00123');
+  store.publishChallengeVersion('engine-key-01', 'engine-key-01@1', 'w00123');
+  store.addChallengeVersion('engine-key-01', makeVersion(2, '2.0.0'), 'w00123');
+  store.publishChallengeVersion('engine-key-01', 'engine-key-01@2', 'w00123');
+
+  const snapshot = { ...uploadSnapshot, snapshotHash: 'eaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaea' };
+  const keys = ['engine-key-01@1', 'engine-key-01@2'].map((challengeVersion, index) => {
+    const event = store.createEvent({ id: `event-engine-key-${index}`, challengeVersion, submissionSource: 'UPLOAD', trigger: 'MANUAL', reveal: 'IMMEDIATE' }, 'w00123');
+    const submission = store.createSubmission(event.id, 'w00124', snapshot);
+    return store.startGrading(submission.id, 'w00123').idempotencyKey;
+  });
+  assert.notEqual(keys[0], keys[1]);
 });

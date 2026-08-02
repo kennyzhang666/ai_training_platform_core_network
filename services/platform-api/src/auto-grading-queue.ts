@@ -55,7 +55,8 @@ export class AutoGradingQueue implements OnModuleInit {
       const submission = this.store.getSubmission(submissionId);
       if (!submission.gradingRunId || submission.resultId) return;
       const run = this.store.markRunRunning(submission.gradingRunId);
-      const result = await this.grader.execute({ event: this.store.getEvent(submission.eventId), submission, run });
+      const engine = this.store.evaluationEngineForSubmission(submission);
+      const result = await this.grader.execute({ event: this.store.getEvent(submission.eventId), submission, run, engine });
       this.store.completeRun(run.id, result);
     } catch (error) {
       try {

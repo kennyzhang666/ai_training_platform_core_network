@@ -53,13 +53,13 @@ export interface EventConfig {
     mentorIds?: string[];
   };
   rubricVersion?: string;
-  localGrading?: {
-    contractPath: string;
-    testsDir?: string;
-    entry: string;
-    function: string;
-    language?: string;
-  };
+  /**
+   * @deprecated Executor configuration now lives on the challenge version as
+   * `evaluationEngine.local`, so one challenge cannot be graded by two
+   * different rule sets depending on which session it was delivered to. This
+   * field is only read once, to migrate sessions persisted before the move.
+   */
+  localGrading?: LocalEvaluationConfig;
 }
 
 export interface SubmissionSnapshot {
@@ -120,10 +120,25 @@ export interface GradingRun {
  * Per-challenge evaluation contract. The platform owns the transport and
  * result validation; the configured engine owns the actual evaluation logic.
  */
+/**
+ * How the platform runs the built-in grader for a `PLATFORM_LOCAL` engine.
+ * All paths are repository-relative; absolute paths, backslashes and `..` are
+ * rejected so a challenge cannot point the executor outside the repository.
+ */
+export interface LocalEvaluationConfig {
+  contractPath: string;
+  testsDir?: string;
+  entry: string;
+  function: string;
+  language?: string;
+}
+
 export interface EvaluationEngineConfig {
   id: string;
   version: string;
   mode: EvaluationEngineMode;
+  /** Required by PLATFORM_LOCAL, rejected for EXTERNAL_CLI. */
+  local?: LocalEvaluationConfig;
   input: {
     format: 'JSON';
     schemaVersion: string;

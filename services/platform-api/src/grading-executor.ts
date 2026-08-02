@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { isAbsolute, join, relative as relativePath, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { EventConfig, GradingRun, SubmissionRecord } from './domain';
+import { EvaluationEngineConfig, EventConfig, GradingRun, SubmissionRecord } from './domain';
 import { ArtifactStore } from './artifact-store';
 import { computeDirectorySnapshotHash } from './snapshot-hash';
 
@@ -30,8 +30,20 @@ const ZIP_EXTRACTOR = [
   '        target.write_bytes(z.read(info))',
 ].join('\n');
 
+/**
+ * The engine is resolved from the challenge version the delivery was submitted
+ * against, so an executor never has to guess which rule set applies and a
+ * session cannot override the challenge's own grading configuration.
+ */
+export interface GradingExecutionRequest {
+  event: EventConfig;
+  submission: SubmissionRecord;
+  run: GradingRun;
+  engine: EvaluationEngineConfig;
+}
+
 export interface GradingExecutor {
-  execute(input: { event: EventConfig; submission: SubmissionRecord; run: GradingRun }): Promise<Record<string, unknown>>;
+  execute(input: GradingExecutionRequest): Promise<Record<string, unknown>>;
 }
 
 export const GRADING_EXECUTOR = 'GRADING_EXECUTOR';
@@ -78,9 +90,16 @@ export class LocalGradingExecutor implements GradingExecutor {
     }
   }
 
-  async execute(input: { event: EventConfig; submission: SubmissionRecord; run: GradingRun }): Promise<Record<string, unknown>> {
-    const config = input.event.localGrading;
-    if (!config) throw new BadRequestException('event has no localGrading configuration');
+  async execute(input: GradingExecutionRequest): Promise<Record<string, unknown>> {
+    const engine = input.engine;
+    if (engine.mode !== 'PLATFORM_LOCAL') {
+      throw new BadRequestException({
+        code: 'ENGINE_NOT_LOCAL',
+        message: `赛题的评测引擎为 ${engine.mode}，请使用线下结果录入而不是平台本地执行`,
+      });
+    }
+    const config = engine.local;
+    if (!config) throw new BadRequestException({ code: 'ENGINE_LOCAL_CONFIG_MISSING', message: '赛题的本地评测引擎缺少执行配置' });
     const workspacePath = input.submission.snapshot.workspacePath;
     let temporaryWorkspace: string | undefined;
     let workspace: string;

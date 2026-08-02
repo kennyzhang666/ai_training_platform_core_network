@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: AI 训战平台 API
-  version: 0.2.1
+  version: 0.3.0
   description: 一期评测提交、触发和结果导入接口
 servers:
   - url: http://localhost:3000
@@ -864,7 +864,13 @@ components:
             allowedFormats: { type: array, items: { type: string } }
             maxBytes: { type: integer, minimum: 1 }
             maxFiles: { type: integer, minimum: 1 }
-        localGrading: { type: object, additionalProperties: true }
+        localGrading:
+          type: object
+          additionalProperties: true
+          deprecated: true
+          description: >-
+            已废弃。执行器配置改由赛题版本的 evaluationEngine.local 承载，
+            平台只在加载历史数据时读取一次以完成迁移，写入时会被忽略。
     UploadSubmission:
       type: object
       required: [subjectId, snapshot]
@@ -1071,7 +1077,23 @@ components:
       properties:
         id: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$' }
         version: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$' }
-        mode: { type: string, enum: [EXTERNAL_CLI, PLATFORM_LOCAL] }
+        mode:
+          type: string
+          enum: [EXTERNAL_CLI, PLATFORM_LOCAL]
+          description: >-
+            PLATFORM_LOCAL 由平台内置执行器运行，必须提供 local；
+            EXTERNAL_CLI 由管理员在平台外运行，禁止提供 local，
+            且该赛题的训战只能使用 trigger=IMPORT。
+        local:
+          type: object
+          description: PLATFORM_LOCAL 引擎的执行参数，路径均为仓库内相对路径。
+          required: [contractPath, entry, function]
+          properties:
+            contractPath: { type: string }
+            testsDir: { type: string }
+            entry: { type: string }
+            function: { type: string, pattern: '^[A-Za-z_][A-Za-z0-9_]*$' }
+            language: { type: string }
         input:
           type: object
           required: [format, schemaVersion, contractPath]
