@@ -423,3 +423,43 @@ test('equal event scores share a rank and earn the same season points', () => {
   // Ranks are 1, 1, 3 of 3 participants: round(100 * (1 - 2/3)) = 33.
   assert.equal(points.get('w00125'), 33);
 });
+
+// Every attempt must keep its own immutable record. The grader derives its
+// resultId from the snapshot alone, so a re-evaluation proposes the same id;
+// storing it verbatim overwrote the earlier attempt and `previousResultIds`
+// then resolved to a record holding the new score.
+test('re-evaluating the same delivery keeps the previous result intact', () => {
+  const store = new PlatformStore(':memory:');
+  const snapshotHash = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+  const submission = store.createSubmission('event-local', 'w00124', { sourceType: 'UPLOAD', snapshotHash, artifactHash: snapshotHash, submittedAt: '2026-08-01T10:00:00Z' });
+  const graderResult = (total: number) => ({
+    schemaVersion: '1.0', resultId: 'result-derived-from-snapshot', gradingRunId: 'replaced-by-platform',
+    challengeVersion: 'parking-fee-01@1', rubricVersion: '1.0', graderVersion: '0.3.0',
+    idempotencyKey: 'replaced-by-platform', triggerType: 'MANUAL', status: 'COMPLETE',
+    submission: { sourceType: 'UPLOAD', snapshotHash, artifactHash: snapshotHash, submittedAt: '2026-08-01T10:00:00Z' },
+    dimensions: {
+      verify: { score: total, max: 40, evaluated: true },
+      spec: { score: null, max: 25, evaluated: false },
+      code: { score: null, max: 20, evaluated: false },
+      collab: { score: null, max: 15, evaluated: false },
+    },
+    criteria: [{ key: 'V1', dim: 'verify', name: '基础', max: 40, level: 'A', score: total, source: 'auto', rule: 'fixture' }],
+    total, validationDiagnostics: [], gradedBy: 'ci',
+    startedAt: '2026-08-01T10:00:00Z', finishedAt: '2026-08-01T10:00:01Z', durationMs: 1000,
+  });
+
+  const firstRun = store.startGrading(submission.id, 'w00123');
+  store.markRunRunning(firstRun.id);
+  const first = store.completeRun(firstRun.id, graderResult(10));
+  assert.equal((first.result as { total: number }).total, 10);
+
+  store.regradeSubmission(submission.id, 'w00123');
+  const secondRun = store.startGrading(submission.id, 'w00123');
+  store.markRunRunning(secondRun.id);
+  const second = store.completeRun(secondRun.id, graderResult(35));
+
+  assert.notEqual(second.resultId, first.resultId);
+  assert.deepEqual(store.getSubmission(submission.id).previousResultIds, [first.resultId]);
+  assert.equal(store.getSubmission(submission.id).resultId, second.resultId);
+  assert.equal((store.getReport(submission.id).result as { total: number }).total, 35);
+});

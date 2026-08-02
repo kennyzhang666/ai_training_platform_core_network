@@ -2830,6 +2830,22 @@ export class PlatformStore {
     return run;
   }
 
+  /**
+   * Result records are immutable history, so one may never overwrite another.
+   * The grader derives its `resultId` from the snapshot alone, which means every
+   * re-evaluation of the same delivery proposes the identical id; storing it as
+   * is replaced the earlier attempt, and `previousResultIds` then pointed at a
+   * record holding the *new* score.
+   */
+  private uniqueResultId(proposed: string, runId: string): string {
+    const base = proposed || `result-${runId}`;
+    const existing = this.results.get(base);
+    if (!existing || existing.gradingRunId === runId) return base;
+    const suffix = createHash('sha256').update(runId).digest('hex').slice(0, 12);
+    const candidate = `${base}.${suffix}`;
+    return this.results.has(candidate) ? `${base}.${suffix}.${this.results.size + 1}` : candidate;
+  }
+
   completeRun(runId: string, rawResult: Record<string, unknown>): StoredResult {
     const run = this.getRun(runId);
     const submission = this.getSubmission(run.submissionId);
@@ -2862,6 +2878,7 @@ export class PlatformStore {
         orgPath: submission.orgPathSnapshot ?? subject.orgPath,
       },
       submission: { ...(rawResult.submission as Record<string, unknown> | undefined), ...snapshotForResult },
+      resultId: this.uniqueResultId(String(rawResult.resultId ?? ''), run.id),
     } as Record<string, any>;
     const errors = validateEvaluationResult(result);
     if (errors.length) {

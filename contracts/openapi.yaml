@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: AI 训战平台 API
-  version: 0.2.0
+  version: 0.2.1
   description: 一期评测提交、触发和结果导入接口
 servers:
   - url: http://localhost:3000
