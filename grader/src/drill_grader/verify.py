@@ -94,11 +94,17 @@ def run_tier(root: Path, tests_dir: Path, tier: str, entry: str, function: str, 
 def verify_submission(root: Path, tests_dir: Path, entry: str, function: str, timeout: int = 10, weights: dict[str, float] | None = None) -> dict[str, Any]:
     tier_weights = weights or DEFAULT_VERIFY_WEIGHTS
     tiers = [run_tier(root, tests_dir, tier, entry, function, timeout, tier_weights) for tier in TIERS]
-    weighted_total = sum(item["total"] * item["weight"] for item in tiers)
-    weighted_passed = sum(item["passed"] * item["weight"] for item in tiers)
+    # weightedScore is the Verify dimension score: each tier contributes its own
+    # configured weight in proportion to the cases it passed. A tier the
+    # challenge does not ship contributes neither score nor maximum, so its
+    # points are not silently deducted from the submission.
+    graded = [item for item in tiers if item["total"] > 0]
+    available = sum(item["weight"] for item in graded)
+    earned = sum(item["weight"] * item["passed"] / item["total"] for item in graded)
     return {
         "tiers": {item["tier"]: item for item in tiers},
         "passed": sum(item["passed"] for item in tiers),
         "total": sum(item["total"] for item in tiers),
-        "weightedScore": round(40.0 * weighted_passed / weighted_total, 4) if weighted_total else 0.0,
+        "availableScore": round(available, 4),
+        "weightedScore": round(earned, 4) if available else 0.0,
     }

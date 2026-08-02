@@ -19,7 +19,7 @@ export class AutoGradingQueue implements OnModuleInit {
     // Rehydrate only AUTO work after a local API restart. MANUAL and IMPORT
     // runs must remain administrator-controlled even when their state is
     // persisted as QUEUED.
-    for (const submission of this.store.listSubmissions()) {
+    for (const submission of this.store.systemSubmissions()) {
       if (!submission.gradingRunId || submission.resultId) continue;
       let run;
       try { run = this.store.getRun(submission.gradingRunId); } catch { continue; }

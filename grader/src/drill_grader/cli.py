@@ -17,7 +17,7 @@ from .submission import validate_submission
 from .verify import DEFAULT_VERIFY_WEIGHTS, verify_submission
 
 
-GRADER_VERSION = "0.2.0"
+GRADER_VERSION = "0.3.0"
 
 
 def _load_profile(zone: str) -> dict[str, Any]:
@@ -103,6 +103,14 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def cmd_extract(args: argparse.Namespace) -> int:
+    """Collect the raw documents a model extractor would read.
+
+    Structured extraction itself (the yes/no/unclear + verbatim quote pass) is
+    phase two. Until a real extractor and quote matcher exist, this command must
+    not claim evidence: answering "yes" with `quoteVerified: true` for a quote it
+    copied out of the file itself is a tautology, and downstream scoring would
+    treat fabricated confirmations as verified evidence.
+    """
     root = Path(args.submission)
     extractions: list[dict[str, Any]] = []
     for name in ("SPEC.md", "transcript.md"):
@@ -110,16 +118,20 @@ def cmd_extract(args: argparse.Namespace) -> int:
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        quote = text[:2000]
         extractions.append({
             "id": f"extract-{path.stem}",
             "q": "交付件是否包含可审计的需求或澄清记录？",
-            "a": "yes",
-            "quote": quote,
-            "quoteVerified": bool(quote) and quote in text,
+            "a": "unclear",
+            "quote": "",
+            "quoteVerified": False,
             "source": name,
+            "chars": len(text),
         })
-    _write_json(Path(args.out) if args.out else None, {"extractions": extractions, "snapshotHash": snapshot_hash(root)})
+    _write_json(Path(args.out) if args.out else None, {
+        "extractorStatus": "NOT_IMPLEMENTED",
+        "extractions": extractions,
+        "snapshotHash": snapshot_hash(root),
+    })
     return 0
 
 
@@ -140,7 +152,13 @@ def _heuristic_criteria(root: Path, contract: Path, language: str, tests_dir: Pa
     verify_max = {tier: float(weight) for tier, weight in profile["verifyWeights"].items()}
     for key, tier in zip(("V1", "V2", "V3", "V4"), ("basic", "boundary", "clarification", "change")):
         detail = verify_detail.get("tiers", {}).get(tier, {"passed": 0, "total": 0})
-        ratio = float(detail.get("passed", 0)) / float(detail.get("total", 1) or 1)
+        total_cases = int(detail.get("total", 0) or 0)
+        # A tier the challenge does not ship cannot be earned, so it must not be
+        # scored either. Emitting a D-level criterion with its full maximum
+        # deducted the tier's points from every submission.
+        if total_cases <= 0:
+            continue
+        ratio = float(detail.get("passed", 0)) / float(total_cases)
         level = "A" if ratio >= 1 else "B" if ratio >= 0.75 else "C" if ratio >= 0.5 else "D"
         criteria.append({"key": key, "dim": "verify", "name": f"{tier} 验证", "max": verify_max[tier], "level": level, "score": round(verify_max[tier] * ratio, 4), "useProvidedScore": True, "source": "auto", "rule": f"{tier} 隐藏测试通过率", "evidenceType": "test", "evidence": detail})
     configured = profile.get("criteria", {})

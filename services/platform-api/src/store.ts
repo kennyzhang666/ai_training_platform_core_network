@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
@@ -68,7 +68,12 @@ function plainText(value?: string): string {
   return (value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function idempotencyKey(snapshotHash: string, challengeVersion: string, rubricVersion = '1.0', graderVersion = '0.2.0', attempt = 1): string {
+// Must track GRADER_VERSION in grader/src/drill_grader/cli.py: a change to the
+// scoring rules has to produce new idempotency keys, otherwise a re-grade
+// returns the result computed by the previous rules.
+export const LOCAL_GRADER_VERSION = '0.3.0';
+
+function idempotencyKey(snapshotHash: string, challengeVersion: string, rubricVersion = '1.0', graderVersion = LOCAL_GRADER_VERSION, attempt = 1): string {
   const attemptPart = attempt > 1 ? `|attempt:${attempt}` : '';
   return createHash('sha256').update(`${snapshotHash}|${rubricVersion}|${graderVersion}|${challengeVersion}${attemptPart}`).digest('hex');
 }
@@ -575,7 +580,12 @@ export class PlatformStore {
   private persist(): void {
     if (this.dataFile === ':memory:') return;
     mkdirSync(dirname(this.dataFile), { recursive: true });
-    writeFileSync(this.dataFile, JSON.stringify({
+    // Write-then-rename: a crash or a full disk during a direct overwrite left
+    // a truncated JSON file behind, and `load()` then refused to start the API
+    // at all. rename(2) is atomic on the same filesystem, so a reader always
+    // sees either the previous or the complete new state.
+    const temporary = `${this.dataFile}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify({
       events: [...this.events.values()],
       submissions: [...this.submissions.values()],
       runs: [...this.runs.values()],
@@ -589,6 +599,7 @@ export class PlatformStore {
       hardProblems: [...this.hardProblems.values()],
       participants: [...this.participants.values()],
     }, null, 2), 'utf8');
+    renameSync(temporary, this.dataFile);
   }
 
   private audit(actorId: string, action: string, target: string, before?: unknown, after?: unknown): void {
@@ -1748,11 +1759,18 @@ export class PlatformStore {
     }
     const sorted = [...best.entries()].sort((a, b) => b[1].score - a[1].score || a[0].localeCompare(b[0]));
     const count = sorted.length;
-    return new Map(sorted.map(([subjectId, row], index) => [subjectId, {
-      score: Number(row.score.toFixed(4)),
-      points: count === 1 ? 100 : Math.round(100 * (1 - index / count)),
-      submissions: row.submissions,
-    }]));
+    // Season points are `round(100 * (1 - (rank - 1) / participants))`. Equal
+    // scores must share a rank, otherwise two identical deliveries receive
+    // different season points purely because of the tie-break ordering.
+    let rankIndex = 0;
+    return new Map(sorted.map(([subjectId, row], index) => {
+      if (index > 0 && Math.abs(row.score - sorted[index - 1][1].score) > 0.0001) rankIndex = index;
+      return [subjectId, {
+        score: Number(row.score.toFixed(4)),
+        points: Math.round(100 * (1 - rankIndex / count)),
+        submissions: row.submissions,
+      }];
+    }));
   }
 
   leaderboard(seasonId: string): Array<Record<string, unknown>> {
@@ -1773,7 +1791,7 @@ export class PlatformStore {
 
   profile(subjectId: string): Record<string, unknown> {
     const user = this.getUser(subjectId);
-    const submissions = this.listSubmissions().filter((item) => item.subjectId === subjectId);
+    const submissions = this.systemSubmissions().filter((item) => item.subjectId === subjectId);
     const visible = submissions.filter((submission) => {
       if (!submission.resultId) return false;
       const event = this.getEvent(submission.eventId);
@@ -1799,7 +1817,8 @@ export class PlatformStore {
   capabilities(subjectId: string, options: { includeSealed?: boolean } = {}): Record<string, unknown> {
     const includeSealed = options.includeSealed === true;
     const subject = this.getUser(subjectId);
-    const visible = this.listSubmissions(undefined, subjectId)
+    const visible = this.systemSubmissions()
+      .filter((submission) => submission.subjectId === subjectId)
       .filter((submission) => submission.resultId)
       .filter((submission) => {
         const event = this.getEvent(submission.eventId);
@@ -2644,6 +2663,20 @@ export class PlatformStore {
     };
   }
 
+  /**
+   * Every submission, without an authorization filter. Platform-internal jobs
+   * and aggregate statistics must use this: routing them through
+   * `listSubmissions` made them depend on the seeded `w00123` account, so they
+   * silently returned nothing on a deployment whose users come from SSO.
+   * Never return the result of this method directly to an HTTP caller.
+   */
+  systemSubmissions(eventId?: string): SubmissionRecord[] {
+    for (const submission of this.submissions.values()) this.syncSubmissionLifecycle(submission);
+    return [...this.submissions.values()]
+      .filter((item) => !eventId || item.eventId === eventId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   listSubmissions(eventId?: string, actorId = 'w00123'): SubmissionRecord[] {
     for (const submission of this.submissions.values()) this.syncSubmissionLifecycle(submission);
     let adminAccess: AdminAccess | undefined;
@@ -2753,7 +2786,7 @@ export class PlatformStore {
       triggerType,
       triggeredBy: actorId,
       status: 'QUEUED',
-      idempotencyKey: idempotencyKey(submission.snapshot.snapshotHash, challengeVersion, rubricVersion, '0.2.0', submission.gradingAttempt ?? 1),
+      idempotencyKey: idempotencyKey(submission.snapshot.snapshotHash, challengeVersion, rubricVersion, LOCAL_GRADER_VERSION, submission.gradingAttempt ?? 1),
       createdAt: now(),
       attempt: submission.gradingAttempt ?? 1,
     };
@@ -3050,7 +3083,7 @@ export class PlatformStore {
       if (!dimension.evaluated) recommendations.push(`${dimension.label}尚未纳入本次自动评估，可在人工评审后补齐。`);
       else if (dimension.percent !== null && dimension.percent < 70) recommendations.push(`优先提升${dimension.label}，本次得分率为 ${dimension.percent}%。`);
     }
-    const visible = this.listSubmissions(submission.eventId).filter((candidate) => {
+    const visible = this.systemSubmissions(submission.eventId).filter((candidate) => {
       if (!candidate.resultId) return false;
       const candidateEvent = this.getEvent(candidate.eventId);
       return candidateEvent.reveal === 'IMMEDIATE' || candidate.state === 'REVEALED';
@@ -3156,7 +3189,10 @@ export class PlatformStore {
     const beforeStatus = event.status;
     event.status = 'RELEASED';
     let count = 0;
-    for (const submission of this.listSubmissions(eventId, actorId)) {
+    // Revealing is an event-level transition: once the event is RELEASED every
+    // sealed delivery in it must become visible, including deliveries outside
+    // the revealing administrator's own subject scope.
+    for (const submission of this.systemSubmissions(eventId)) {
       if (submission.state === 'SEALED') {
         submission.state = 'REVEALED';
         count += 1;

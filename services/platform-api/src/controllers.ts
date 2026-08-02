@@ -523,7 +523,10 @@ export class PlatformController {
     const actorId = this.requireAdmin(employeeId);
     const event = this.store.getEvent(eventId, actorId);
     if (event.submissionSource === 'GIT_REF' && event.deliveryConfig?.pinAt === 'DEADLINE') {
-      const pending = this.store.listSubmissions(eventId).filter((submission) => !submission.resultId && !submission.gradingRunId);
+      // Deadline pinning must cover every delivery in the event, not just the
+      // ones inside the closing administrator's subject scope; the event scope
+      // itself was already asserted above.
+      const pending = this.store.systemSubmissions(eventId).filter((submission) => !submission.resultId && !submission.gradingRunId);
       if (pending.length && !this.localGit.enabled) {
         throw new BadRequestException('DEADLINE Git pinning requires LOCAL_GIT_ROOT in local mode');
       }

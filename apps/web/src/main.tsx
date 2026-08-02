@@ -461,7 +461,10 @@ function App() {
       if (source === 'UPLOAD') {
         if (file) {
           const bytes = await file.arrayBuffer();
-          snapshot = { sourceType: 'UPLOAD', artifactHash: '', submittedAt: new Date().toISOString() };
+          // Hashes are computed server-side from the stored bytes. Sending an
+          // empty artifactHash only worked because the server treats it as
+          // absent; omit it instead of relying on that coercion.
+          snapshot = { sourceType: 'UPLOAD', submittedAt: new Date().toISOString() };
           await request(`/events/${selectedEvent.id}/submissions:upload`, {
             method: 'POST',
             body: JSON.stringify({ subjectId, snapshot, fileName: file.name, artifactBase64: toBase64(new Uint8Array(bytes)) }),

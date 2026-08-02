@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { BadRequestException } from '@nestjs/common';
 import { PlatformStore } from '../src/store';
 
@@ -333,4 +333,93 @@ test('administrator overview and announcements expose operational state', () => 
   assert.ok(overview.eventStats.length >= 2);
   store.deleteAnnouncement(announcement.id, 'admin-test');
   assert.equal(store.listAnnouncements().some((item) => item.id === announcement.id), false);
+});
+
+// Aggregation used to run through listSubmissions() with its `w00123` default
+// actor. On a deployment whose accounts come from SSO that account does not
+// exist, so the authorization filter fell through to "only w00123's own rows"
+// and personal profiles, report statistics and the AUTO queue silently emptied.
+test('profiles and report statistics do not depend on the seeded local account', () => {
+  const dataFile = join(__dirname, '..', 'tmp', `store-sso-${process.pid}.json`);
+  mkdirSync(dirname(dataFile), { recursive: true });
+  rmSync(dataFile, { force: true });
+  writeFileSync(dataFile, JSON.stringify({
+    orgUnits: [
+      { id: 'org-root', path: '/', level: 0, label: '集团', name: '华为' },
+      { id: 'org-125', parentId: 'org-root', path: '/1/12/125/', level: 3, label: '团队', name: 'AI 工程团队' },
+    ],
+    users: [
+      { id: 'e10001', employeeNo: 'e10001', name: '员工甲', orgUnitId: 'org-125', orgPath: '/1/12/125/', roles: ['learner'], status: 'ACTIVE' },
+      { id: 'e10002', employeeNo: 'e10002', name: '员工乙', orgUnitId: 'org-125', orgPath: '/1/12/125/', roles: ['learner'], status: 'ACTIVE' },
+      { id: 'e10003', employeeNo: 'e10003', name: '管理员', orgUnitId: 'org-125', orgPath: '/1/12/125/', roles: ['global_admin'], roleBindings: [{ role: 'global_admin', scopeOrgPath: '/' }], status: 'ACTIVE' },
+    ],
+  }), 'utf8');
+  try {
+    const store = new PlatformStore(dataFile);
+    assert.throws(() => store.getUser('w00123'), /not found/);
+    const first = store.createSubmission('event-local', 'e10001', { ...uploadSnapshot, snapshotHash: '5555555555555555555555555555555555555555555555555555555555555555' });
+    store.createSubmission('event-local', 'e10002', { ...uploadSnapshot, snapshotHash: '6666666666666666666666666666666666666666666666666666666666666666' });
+
+    assert.equal(store.systemSubmissions().length, 2);
+    assert.equal(store.systemSubmissions('event-local').length, 2);
+    const profile = store.profile('e10001') as { stats: { submissions: number } };
+    assert.equal(profile.stats.submissions, 1);
+    assert.equal((store.profile('e10002') as { stats: { submissions: number } }).stats.submissions, 1);
+    assert.equal(store.getSubmission(first.id).subjectId, 'e10001');
+  } finally {
+    rmSync(dataFile, { force: true });
+  }
+});
+
+// An administrator's own capability profile aggregated every employee's result,
+// because listSubmissions() was called with the subject as the acting user and
+// the rows were never filtered back down to that subject.
+test('a capability profile only aggregates the subject own deliveries', () => {
+  const store = new PlatformStore(':memory:');
+  store.createSubmission('event-local', 'w00124', { ...uploadSnapshot, snapshotHash: '7777777777777777777777777777777777777777777777777777777777777777' });
+  store.createSubmission('event-local', 'w00126', { ...uploadSnapshot, snapshotHash: '8888888888888888888888888888888888888888888888888888888888888888' });
+  const adminCapabilities = store.capabilities('w00123') as { summary: { gradedSubmissions: number } };
+  assert.equal(adminCapabilities.summary.gradedSubmissions, 0);
+});
+
+// Season points are derived from the event rank. Two identical scores have the
+// same rank, so they must earn the same points regardless of tie-break order.
+test('equal event scores share a rank and earn the same season points', () => {
+  const store = new PlatformStore(':memory:');
+  const importEvent = store.createEvent({ id: 'event-tie', challengeVersion: 'parking-fee-01@1', submissionSource: 'UPLOAD', trigger: 'IMPORT', reveal: 'IMMEDIATE' }, 'admin-test');
+  store.createSeason({ id: 'season-tie', name: '并列赛季', eventIds: [importEvent.id], status: 'RUNNING' }, 'admin-test');
+  const template = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'contracts', 'examples', 'evaluation-result.valid.json'), 'utf8')) as Record<string, any>;
+
+  const subjects = ['w00124', 'w00126', 'w00125'] as const;
+  const totals = [70, 70, 40];
+  subjects.forEach((subjectId, index) => {
+    const snapshotHash = String(index + 1).repeat(64).slice(0, 64);
+    const artifactHash = String((index + 5) % 10).repeat(64).slice(0, 64);
+    store.createSubmission(importEvent.id, subjectId, { sourceType: 'UPLOAD', snapshotHash, artifactHash, submittedAt: '2026-08-01T10:00:00Z' });
+    const criteria = [{ key: 'V1', dim: 'verify', name: '基础', max: 100, level: 'A', score: totals[index], source: 'auto', rule: 'fixture' }];
+    store.importResult({
+      ...template,
+      resultId: `result-tie-${index}`,
+      gradingRunId: `run-tie-${index}`,
+      idempotencyKey: `abababababababab${index}`,
+      triggerType: 'IMPORT',
+      subject: { kind: 'person', id: subjectId },
+      criteria,
+      dimensions: {
+        verify: { score: totals[index], max: 100, evaluated: true },
+        spec: { score: null, max: 25, evaluated: false },
+        code: { score: null, max: 20, evaluated: false },
+        collab: { score: null, max: 15, evaluated: false },
+      },
+      total: totals[index],
+      submission: { sourceType: 'UPLOAD', snapshotHash, artifactHash, submittedAt: '2026-08-01T10:00:00Z' },
+    }, 'admin-test', { eventId: importEvent.id, subjectId });
+  });
+
+  const board = store.leaderboard('season-tie') as Array<{ subjectId: string; points: number }>;
+  const points = new Map(board.map((row) => [row.subjectId, row.points]));
+  assert.equal(points.get('w00124'), points.get('w00126'));
+  assert.equal(points.get('w00124'), 100);
+  // Ranks are 1, 1, 3 of 3 participants: round(100 * (1 - 2/3)) = 33.
+  assert.equal(points.get('w00125'), 33);
 });

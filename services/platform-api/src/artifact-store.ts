@@ -36,6 +36,22 @@ const ZIP_SNAPSHOT = [
   'print(digest.hexdigest())',
 ].join('\n');
 
+// The caller must be able to tell "this upload is not a ZIP archive" (a legal
+// state for metadata-only local fixtures) apart from "the hasher could not
+// run at all". Only the first may fall back to a plain byte hash; swallowing
+// the second produced a byte hash that can never match the canonical tree hash
+// of the same content delivered through Git.
+const NOT_AN_ARCHIVE = 'NOT_AN_ARCHIVE';
+const ZIP_SNAPSHOT_GUARDED = [
+  'import zipfile',
+  'def _snapshot():',
+  ...ZIP_SNAPSHOT.split('\n').map((line) => `    ${line}`),
+  'try:',
+  '    _snapshot()',
+  'except zipfile.BadZipFile:',
+  `    print("${NOT_AN_ARCHIVE}")`,
+].join('\n');
+
 const ZIP_VALIDATE = [
   'import pathlib, stat, sys, zipfile',
   'archive = pathlib.Path(sys.argv[1])',
@@ -112,17 +128,32 @@ export class ArtifactStore {
     if (!path.toLowerCase().endsWith('.zip')) return createHash('sha256').update(await readFile(path)).digest('hex');
     const projectRoot = resolve(process.env.PROJECT_ROOT ?? (existsSync(join(process.cwd(), 'grader', 'run_grader.py')) ? process.cwd() : join(process.cwd(), '..', '..')));
     const python = process.env.PYTHON ?? (existsSync(join(projectRoot, '.venv', 'Scripts', 'python.exe')) ? join(projectRoot, '.venv', 'Scripts', 'python.exe') : 'python');
+    let stdout: string;
     try {
-      const result = await execFileAsync(python, ['-c', ZIP_SNAPSHOT, path], { cwd: projectRoot, maxBuffer: 1024 * 1024, windowsHide: true });
-      const hash = result.stdout.trim();
-      if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('invalid snapshot hash');
-      return hash;
+      const result = await execFileAsync(python, ['-c', ZIP_SNAPSHOT_GUARDED, path], {
+        cwd: projectRoot,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+        env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' },
+      });
+      stdout = result.stdout.trim();
     } catch (error) {
+      const details = error as { stderr?: string; message?: string };
+      throw new BadRequestException({
+        code: 'SNAPSHOT_HASHER_UNAVAILABLE',
+        message: `无法计算交付件内容哈希: ${(details.stderr ?? details.message ?? '').trim().slice(-500)}`,
+      });
+    }
+    if (stdout.endsWith(NOT_AN_ARCHIVE)) {
       // A metadata-only or deliberately malformed local fixture still gets a
-      // stable byte hash; the executor will surface the extraction error when
+      // stable byte hash; the executor surfaces the extraction error when
       // grading is actually requested.
       return createHash('sha256').update(await readFile(path)).digest('hex');
     }
+    if (!/^[a-f0-9]{64}$/.test(stdout)) {
+      throw new BadRequestException({ code: 'SNAPSHOT_HASHER_UNAVAILABLE', message: '内容哈希计算返回了非预期结果' });
+    }
+    return stdout;
   }
 
   /** Validate an uploaded ZIP before it enters an evaluation queue. */

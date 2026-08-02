@@ -5,10 +5,21 @@ import { join, relative, resolve } from 'node:path';
 const IGNORED_DIRS = new Set(['.git', '.venv', '__pycache__', '.mypy_cache', '.pytest_cache']);
 const IGNORED_SUFFIXES = new Set(['.pyc', '.pyo']);
 
+/**
+ * Order paths by UTF-16 code point, which is what Python's `sorted()` produces
+ * for the same strings. `localeCompare` is locale-aware (it ignores `_`/`-` at
+ * the primary level and sorts lower case before upper case), so using it here
+ * makes this hasher disagree with the Python grader and the ZIP hasher for any
+ * tree that mixes, for example, `__init__.py` with `SPEC.md`.
+ */
+function byCodePoint(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function files(root: string): Array<{ path: string; absolute: string }> {
   const result: Array<{ path: string; absolute: string }> = [];
   const walk = (directory: string) => {
-    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => byCodePoint(a.name, b.name))) {
       if (IGNORED_DIRS.has(entry.name)) continue;
       const absolute = join(directory, entry.name);
       const relativePath = relative(root, absolute).split('\\').join('/');
@@ -18,7 +29,7 @@ function files(root: string): Array<{ path: string; absolute: string }> {
     }
   };
   walk(root);
-  return result.sort((a, b) => a.path.localeCompare(b.path));
+  return result.sort((a, b) => byCodePoint(a.path, b.path));
 }
 
 function canonicalBytes(value: Buffer): Buffer {
