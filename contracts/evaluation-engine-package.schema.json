@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-training-platform.local/contracts/evaluation-engine-package.schema.json",
+  "title": "Evaluation Engine Package Manifest",
+  "description": "engine.json，位于评测引擎包的根目录。一个包 = 一道题完整的评测能力：判题脚本、隐藏测试和提交契约。上传后按内容哈希固化，不可修改。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "version", "runtime"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$",
+      "description": "引擎标识，同一道题的不同版本应保持一致。"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$",
+      "description": "引擎版本。它与包内容哈希共同决定评测幂等键；改判据必须升版本。"
+    },
+    "description": { "type": "string", "maxLength": 500 },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "entrypoint"],
+      "properties": {
+        "type": { "const": "python" },
+        "entrypoint": {
+          "$ref": "#/$defs/packagePath",
+          "description": "包内的判题入口脚本。平台以 `python -I <entrypoint> --input <in.json> --output <out.json>` 调用。"
+        },
+        "requirements": {
+          "$ref": "#/$defs/packagePath",
+          "description": "可选。声明式依赖清单；运行主机会为该引擎版本创建一次性虚拟环境并安装，之后按包哈希复用。"
+        },
+        "pythonVersion": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "可选的建议解释器版本，仅记录与提示，不参与执行选择。"
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "单份提交的执行上限。平台会与全局上限取较小值。",
+      "properties": {
+        "wallClockSeconds": { "type": "integer", "minimum": 1, "maximum": 1800 },
+        "memoryMB": { "type": "integer", "minimum": 64, "maximum": 4096 },
+        "outputBytes": { "type": "integer", "minimum": 1024, "maximum": 33554432 }
+      }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "包内随判据一起冻结的资产。路径相对于包根目录。",
+      "properties": {
+        "submissionContract": { "$ref": "#/$defs/packagePath" },
+        "testsDir": { "$ref": "#/$defs/packagePath" },
+        "referenceDir": {
+          "$ref": "#/$defs/packagePath",
+          "description": "可选的参考实现目录。提供后，发布赛题版本时平台会用它自检引擎。"
+        }
+      }
+    },
+    "selfCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "发布前自检的期望结果。参考实现跑不出期望分数，说明判据或测试本身有问题。",
+      "properties": {
+        "expectMinTotal": { "type": "number", "minimum": 0, "maximum": 100 },
+        "expectStatus": { "enum": ["COMPLETE", "PARTIAL"] }
+      }
+    },
+    "metadata": { "type": "object", "additionalProperties": true }
+  },
+  "$defs": {
+    "packagePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^(?!/)(?!.*\\.\\.)(?!.*\\\\)(?![A-Za-z]:).+$",
+      "description": "包内相对路径，禁止绝对路径、盘符、反斜杠和 `..`。"
+    }
+  }
+}

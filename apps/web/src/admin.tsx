@@ -12,11 +12,21 @@ type VersionStatus = 'DRAFT' | 'PUBLISHED';
 type Source = 'UPLOAD' | 'GIT_REF';
 type Trigger = 'AUTO' | 'MANUAL' | 'IMPORT';
 type LocalEvaluationConfig = { contractPath: string; testsDir?: string; entry: string; function: string; language?: string };
+type EnginePackageReference = { packageHash: string; size?: number; fileName?: string; uploadedAt?: string; uploadedBy?: string };
+type EnginePackageUpload = {
+  packageHash: string; size: number; fileName?: string;
+  engine: { id: string; version: string; description?: string };
+  runtime: { type: string; entrypoint: string; requirements?: string };
+  limits?: { wallClockSeconds?: number; memoryMB?: number; outputBytes?: number } | null;
+  assets?: { submissionContract?: string; testsDir?: string; referenceDir?: string } | null;
+};
+type EngineMode = 'EXTERNAL_CLI' | 'PLATFORM_LOCAL' | 'PACKAGED';
 type EvaluationEngineConfig = {
   id: string;
   version: string;
-  mode: 'EXTERNAL_CLI' | 'PLATFORM_LOCAL';
+  mode: EngineMode;
   local?: LocalEvaluationConfig;
+  package?: EnginePackageReference;
   input: { format: 'JSON'; schemaVersion: string; contractPath: string };
   output: { format: 'JSON'; schemaVersion: string; contractPath: string };
 };
@@ -107,7 +117,9 @@ type ChallengeDraft = {
   submissionContract: string;
   evaluationEngineId: string;
   evaluationEngineVersion: string;
-  evaluationEngineMode: 'EXTERNAL_CLI' | 'PLATFORM_LOCAL';
+  evaluationEngineMode: EngineMode;
+  enginePackage: EnginePackageReference | null;
+  enginePackageSummary: string;
   localContractPath: string;
   localTestsDir: string;
   localEntry: string;
@@ -174,6 +186,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, Math.min(index + chunkSize, bytes.length)));
+  }
+  return btoa(binary);
 }
 
 function lines(value: string): string[] {
@@ -292,7 +313,8 @@ function auditTargetLabel(target: string): string {
 /** Only a PLATFORM_LOCAL engine can be driven by the platform's own executor. */
 function engineSupportsPlatformExecution(versionId: string, challenges: Challenge[]): boolean {
   const version = challenges.flatMap((challenge) => challenge.versions).find((item) => item.id === versionId);
-  return version?.evaluationEngine?.mode === 'PLATFORM_LOCAL';
+  const mode = version?.evaluationEngine?.mode;
+  return mode === 'PLATFORM_LOCAL' || mode === 'PACKAGED';
 }
 
 function versionTitle(versionId: string, challenges: Challenge[]): string {
@@ -300,7 +322,7 @@ function versionTitle(versionId: string, challenges: Challenge[]): string {
 }
 
 function blankChallenge(): ChallengeDraft {
-  return { id: '', title: '', category: 'TRAINING', description: '', objectives: '', requirements: '', constraints: '', deliverables: '', tags: '', estimatedMinutes: '45', zone: 'YELLOW', languages: 'python', allowUpload: true, allowGit: true, repository: '', branchTemplate: 'drill/{subjectId}', rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', evaluationEngineId: '', evaluationEngineVersion: '1.0.0', evaluationEngineMode: 'EXTERNAL_CLI', localContractPath: '', localTestsDir: '', localEntry: '', localFunction: '', localLanguage: 'python', evaluationInputContract: 'contracts/evaluation-input.schema.json', evaluationOutputContract: 'contracts/evaluation-result.schema.json' };
+  return { id: '', title: '', category: 'TRAINING', description: '', objectives: '', requirements: '', constraints: '', deliverables: '', tags: '', estimatedMinutes: '45', zone: 'YELLOW', languages: 'python', allowUpload: true, allowGit: true, repository: '', branchTemplate: 'drill/{subjectId}', rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', evaluationEngineId: '', evaluationEngineVersion: '1.0.0', evaluationEngineMode: 'EXTERNAL_CLI', enginePackage: null, enginePackageSummary: '', localContractPath: '', localTestsDir: '', localEntry: '', localFunction: '', localLanguage: 'python', evaluationInputContract: 'contracts/evaluation-input.schema.json', evaluationOutputContract: 'contracts/evaluation-result.schema.json' };
 }
 
 function blankEvent(versionId = '', challenges: Challenge[] = []): EventDraft {
@@ -342,7 +364,7 @@ function draftFromVersion(version?: ChallengeVersion): ChallengeDraft {
   const languages = (version?.languagePolicy.languages as string[] | undefined) ?? ['python'];
   const allowed = version?.deliveryPolicy.allowedSources ?? ['UPLOAD', 'GIT_REF'];
   const engine = version?.evaluationEngine;
-  return { id: version?.challengeId ?? '', title: version?.title ?? '', category: 'TRAINING', description: version?.description ?? '', objectives: (version?.objectives ?? []).join('\n'), requirements: (version?.requirements ?? []).join('\n'), constraints: (version?.constraints ?? []).join('\n'), deliverables: (version?.deliverables ?? []).join('\n'), tags: (version?.tags ?? []).join('\n'), estimatedMinutes: String(version?.estimatedMinutes ?? 45), zone: version?.zone ?? 'YELLOW', languages: languages.join('\n'), allowUpload: allowed.includes('UPLOAD'), allowGit: allowed.includes('GIT_REF'), repository: String(git.repository ?? ''), branchTemplate: String(git.branchTemplate ?? 'drill/{subjectId}'), rubricVersion: version?.rubricVersion ?? '1.0', submissionContract: version?.submissionContract ?? 'contracts/submission-contract.schema.json', evaluationEngineId: engine?.id ?? `${version?.challengeId ?? 'challenge'}-evaluator`, evaluationEngineVersion: engine?.version ?? '1.0.0', evaluationEngineMode: engine?.mode ?? 'EXTERNAL_CLI', localContractPath: engine?.local?.contractPath ?? '', localTestsDir: engine?.local?.testsDir ?? '', localEntry: engine?.local?.entry ?? '', localFunction: engine?.local?.function ?? '', localLanguage: engine?.local?.language ?? 'python', evaluationInputContract: engine?.input.contractPath ?? 'contracts/evaluation-input.schema.json', evaluationOutputContract: engine?.output.contractPath ?? 'contracts/evaluation-result.schema.json' };
+  return { id: version?.challengeId ?? '', title: version?.title ?? '', category: 'TRAINING', description: version?.description ?? '', objectives: (version?.objectives ?? []).join('\n'), requirements: (version?.requirements ?? []).join('\n'), constraints: (version?.constraints ?? []).join('\n'), deliverables: (version?.deliverables ?? []).join('\n'), tags: (version?.tags ?? []).join('\n'), estimatedMinutes: String(version?.estimatedMinutes ?? 45), zone: version?.zone ?? 'YELLOW', languages: languages.join('\n'), allowUpload: allowed.includes('UPLOAD'), allowGit: allowed.includes('GIT_REF'), repository: String(git.repository ?? ''), branchTemplate: String(git.branchTemplate ?? 'drill/{subjectId}'), rubricVersion: version?.rubricVersion ?? '1.0', submissionContract: version?.submissionContract ?? 'contracts/submission-contract.schema.json', evaluationEngineId: engine?.id ?? `${version?.challengeId ?? 'challenge'}-evaluator`, evaluationEngineVersion: engine?.version ?? '1.0.0', evaluationEngineMode: engine?.mode ?? 'EXTERNAL_CLI', enginePackage: engine?.package ?? null, enginePackageSummary: engine?.package ? `${engine.package.fileName ?? '引擎包'} · ${engine.package.packageHash.slice(0, 12)}…` : '', localContractPath: engine?.local?.contractPath ?? '', localTestsDir: engine?.local?.testsDir ?? '', localEntry: engine?.local?.entry ?? '', localFunction: engine?.local?.function ?? '', localLanguage: engine?.local?.language ?? 'python', evaluationInputContract: engine?.input.contractPath ?? 'contracts/evaluation-input.schema.json', evaluationOutputContract: engine?.output.contractPath ?? 'contracts/evaluation-result.schema.json' };
 }
 
 export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
@@ -456,6 +478,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
         mode: form.evaluationEngineMode,
         // Only a PLATFORM_LOCAL engine carries executor parameters; the API
         // rejects them on an EXTERNAL_CLI engine.
+        ...(form.evaluationEngineMode === 'PACKAGED' && form.enginePackage ? { package: form.enginePackage } : {}),
         ...(form.evaluationEngineMode === 'PLATFORM_LOCAL' ? {
           local: {
             contractPath: form.localContractPath.trim(),
@@ -478,15 +501,44 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     if (!challengeForm.allowUpload && !challengeForm.allowGit) { setMessage('至少选择一种提交方式'); return; }
     if (!lines(challengeForm.languages).length) { setMessage('至少填写一种支持的编程语言'); return; }
     if (challengeForm.allowGit && !/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+$/.test(challengeForm.repository.trim())) { setMessage('Git 仓库路径格式不正确'); return; }
-    if (!localEngineComplete(challengeForm)) { setMessage('平台本地执行器需要填写提交契约路径、入口文件和入口函数'); return; }
+    if (!localEngineComplete(challengeForm)) { setMessage(challengeForm.evaluationEngineMode === 'PACKAGED' ? '请先上传评测引擎包' : '平台本地执行器需要填写提交契约路径、入口文件和入口函数'); return; }
     const version = buildVersion(challengeForm, challengeForm.id.trim(), 1);
     await runAction(() => request('/challenges', { method: 'POST', body: JSON.stringify({ id: challengeForm.id.trim(), ownerOrgPath: '/', origin: challengeForm.category === 'HARD_PROBLEM' ? 'BOUNTY' : 'OFFICIAL', category: challengeForm.category, status: 'DRAFT', versions: [version], actorId: 'admin-local' }) }), '赛题草稿已创建');
     setChallengeForm(null);
   }
 
   function localEngineComplete(form: ChallengeDraft): boolean {
+    if (form.evaluationEngineMode === 'PACKAGED') return Boolean(form.enginePackage?.packageHash);
     if (form.evaluationEngineMode !== 'PLATFORM_LOCAL') return true;
     return Boolean(form.localContractPath.trim() && form.localEntry.trim() && form.localFunction.trim());
+  }
+
+  /** Upload an engine package and pin the returned content hash onto the draft. */
+  async function uploadEnginePackage(file: File, form: ChallengeDraft, setForm: (next: ChallengeDraft) => void): Promise<void> {
+    if (!file.name.toLowerCase().endsWith('.zip')) { setMessage('引擎包必须是 zip 文件'); return; }
+    setBusy(true);
+    setMessage('正在上传并校验引擎包…');
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const uploaded = await request<EnginePackageUpload>('/evaluation-engines', {
+        method: 'POST',
+        body: JSON.stringify({ packageBase64: toBase64(bytes), fileName: file.name }),
+      });
+      setForm({
+        ...form,
+        evaluationEngineMode: 'PACKAGED',
+        evaluationEngineId: uploaded.engine.id,
+        evaluationEngineVersion: uploaded.engine.version,
+        enginePackage: { packageHash: uploaded.packageHash, size: uploaded.size, fileName: uploaded.fileName },
+        enginePackageSummary: `${uploaded.fileName ?? file.name} · ${(uploaded.size / 1024).toFixed(1)} KB · ${uploaded.packageHash.slice(0, 12)}…`,
+        evaluationInputContract: 'contracts/engine-invocation.schema.json',
+      });
+      setMessage(`引擎包已入库：${uploaded.engine.id}@${uploaded.engine.version}，入口 ${uploaded.runtime.entrypoint}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '引擎包上传失败');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveVersion() {
@@ -494,7 +546,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     if (!richTextPreview(versionForm.description)) { setMessage('请填写赛题详情'); return; }
     if (!lines(versionForm.languages).length) { setMessage('至少填写一种支持的编程语言'); return; }
     if (versionForm.allowGit && !/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+$/.test(versionForm.repository.trim())) { setMessage('Git 仓库路径格式不正确'); return; }
-    if (!localEngineComplete(versionForm)) { setMessage('平台本地执行器需要填写提交契约路径、入口文件和入口函数'); return; }
+    if (!localEngineComplete(versionForm)) { setMessage(versionForm.evaluationEngineMode === 'PACKAGED' ? '请先上传评测引擎包' : '平台本地执行器需要填写提交契约路径、入口文件和入口函数'); return; }
     if (versionEditId) {
       const current = selectedChallenge.versions.find((item) => item.id === versionEditId);
       if (!current) return;
@@ -657,7 +709,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
         {message && <div className="admin-message">{message}</div>}
         {section === 'overview' && <OverviewSection overview={overview} challenges={challenges} events={events} submissions={submissions} onSection={setSection} />}
         {section === 'organization' && <OrganizationSection users={users} orgUnits={orgUnits} adminAccess={adminAccess} busy={busy} onSaved={() => void refresh()} onMessage={setMessage} />}
-        {section === 'challenges' && <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">赛题库</p><h2>赛题库</h2></div><button className="primary compact" onClick={() => { setChallengeView('active'); setChallengeForm(blankChallenge()); }}>＋ 新建赛题</button></div>{challengeForm && <ChallengeEditor form={challengeForm} setForm={setChallengeForm} onCancel={() => setChallengeForm(null)} onSave={() => void saveChallenge()} busy={busy} title="创建赛题草稿" />}{versionForm && selectedChallenge && <ChallengeEditor form={versionForm} setForm={setVersionForm} onCancel={() => { setVersionForm(null); setVersionEditId(''); }} onSave={() => void saveVersion()} busy={busy} title={versionEditId ? `编辑 ${selectedChallenge.id} 草稿` : `创建 ${selectedChallenge.id} 新版本`} />}{!challengeForm && !versionForm && <ChallengeList challenges={visibleChallenges} view={challengeView} activeCount={challenges.filter((challenge) => challenge.status !== 'ARCHIVED').length} trashCount={challenges.filter((challenge) => challenge.status === 'ARCHIVED').length} onViewChange={setChallengeView} selectedId={selectedChallengeId} onSelect={setSelectedChallengeId} onPublish={(id) => void runAction(() => request(`/challenges/${id}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已发布')} onTrash={(id) => void runAction(() => request(`/challenges/${id}/trash`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已移入垃圾箱')} onRestore={(id) => void runAction(() => request(`/challenges/${id}/restore`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已恢复')} />}{selectedChallenge && !challengeForm && !versionForm && <ChallengeDetail challenge={selectedChallenge} events={events} onNewVersion={() => { setVersionEditId(''); setVersionForm(draftFromVersion(selectedChallenge.versions[selectedChallenge.versions.length - 1])); }} onEditVersion={(version) => { setVersionEditId(version.id); setVersionForm(draftFromVersion(version)); }} onCategoryChange={(category) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ category, actorId: 'admin-local' }) }), '赛题类型已更新')} onSolutionVisibilityChange={(solutionVisibility) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ solutionVisibility, actorId: 'admin-local' }) }), '交付件展示策略已更新')} onPublish={(versionId) => void runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionId}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题版本已发布')} />}</section>}
+        {section === 'challenges' && <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">赛题库</p><h2>赛题库</h2></div><button className="primary compact" onClick={() => { setChallengeView('active'); setChallengeForm(blankChallenge()); }}>＋ 新建赛题</button></div>{challengeForm && <ChallengeEditor form={challengeForm} setForm={setChallengeForm} onCancel={() => setChallengeForm(null)} onSave={() => void saveChallenge()} onUploadPackage={(file) => uploadEnginePackage(file, challengeForm, setChallengeForm)} busy={busy} title="创建赛题草稿" />}{versionForm && selectedChallenge && <ChallengeEditor form={versionForm} setForm={setVersionForm} onCancel={() => { setVersionForm(null); setVersionEditId(''); }} onSave={() => void saveVersion()} onUploadPackage={(file) => uploadEnginePackage(file, versionForm, setVersionForm)} busy={busy} title={versionEditId ? `编辑 ${selectedChallenge.id} 草稿` : `创建 ${selectedChallenge.id} 新版本`} />}{!challengeForm && !versionForm && <ChallengeList challenges={visibleChallenges} view={challengeView} activeCount={challenges.filter((challenge) => challenge.status !== 'ARCHIVED').length} trashCount={challenges.filter((challenge) => challenge.status === 'ARCHIVED').length} onViewChange={setChallengeView} selectedId={selectedChallengeId} onSelect={setSelectedChallengeId} onPublish={(id) => void runAction(() => request(`/challenges/${id}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已发布')} onTrash={(id) => void runAction(() => request(`/challenges/${id}/trash`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已移入垃圾箱')} onRestore={(id) => void runAction(() => request(`/challenges/${id}/restore`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已恢复')} />}{selectedChallenge && !challengeForm && !versionForm && <ChallengeDetail challenge={selectedChallenge} events={events} onNewVersion={() => { setVersionEditId(''); setVersionForm(draftFromVersion(selectedChallenge.versions[selectedChallenge.versions.length - 1])); }} onEditVersion={(version) => { setVersionEditId(version.id); setVersionForm(draftFromVersion(version)); }} onCategoryChange={(category) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ category, actorId: 'admin-local' }) }), '赛题类型已更新')} onSolutionVisibilityChange={(solutionVisibility) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ solutionVisibility, actorId: 'admin-local' }) }), '交付件展示策略已更新')} onPublish={(versionId) => void runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionId}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题版本已发布')} />}</section>}
         {section === 'events' && <EventsSection events={events} challenges={challenges} overview={overview} users={users} orgUnits={orgUnits} eventForm={eventForm} setEventForm={setEventForm} eventEditId={eventEditId} onNew={() => { setEventEditId(''); setEventForm(blankEvent(publishedVersions[0]?.id ?? '', challenges)); }} onEdit={(event) => { setEventEditId(event.id); setEventForm(draftFromEvent(event)); }} onCreate={() => void saveEvent()} onAction={(event, action) => void eventAction(event, action)} busy={busy} />}
         {section === 'participants' && <ParticipantSection events={events} eventId={participantEventId} setEventId={setParticipantEventId} text={participantText} setText={setParticipantText} onLoad={(id) => void loadParticipants(id)} onSave={() => void saveParticipants()} busy={busy} />}
         {section === 'capabilities' && <CapabilityAdminSection data={adminCapabilities} users={capabilityUsers} orgUnits={orgUnits} orgPath={capabilityOrgPath} selectedIds={capabilitySubjectIds} onOrgPathChange={(path) => { setCapabilityOrgPath(path); setCapabilitySubjectIds([]); }} onToggle={toggleCapabilitySubject} onSelectAll={selectAllCapabilityUsers} onClear={() => setCapabilitySubjectIds([])} onViewAll={() => void loadAdminCapabilities('ALL')} onViewSelected={() => void loadAdminCapabilities('SELECTED')} busy={busy} />}
@@ -895,7 +947,7 @@ function RichTextEditor({ value, onChange }: { value: string; onChange: (value: 
   </div>;
 }
 
-function ChallengeEditor({ form, setForm, onCancel, onSave, busy, title }: { form: ChallengeDraft; setForm: (form: ChallengeDraft) => void; onCancel: () => void; onSave: () => void; busy: boolean; title: string }) {
+function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, busy, title }: { form: ChallengeDraft; setForm: (form: ChallengeDraft) => void; onCancel: () => void; onSave: () => void; onUploadPackage: (file: File) => Promise<void>; busy: boolean; title: string }) {
   const update = <K extends keyof ChallengeDraft>(key: K, value: ChallengeDraft[K]) => setForm({ ...form, [key]: value });
   const creatingChallenge = title === '创建赛题草稿';
   return <section className="panel admin-editor">
@@ -915,7 +967,7 @@ function ChallengeEditor({ form, setForm, onCancel, onSave, busy, title }: { for
       <label>支持的编程语言<textarea value={form.languages} onChange={(event) => update('languages', event.target.value)} rows={3} /></label>
     </div>
      <div className="delivery-policy-editor"><div><strong>提交方式</strong><small>配置员工可用的提交方式。</small></div><label className="check-label"><input type="checkbox" checked={form.allowUpload} onChange={(event) => update('allowUpload', event.target.checked)} /> 上传 ZIP</label><label className="check-label"><input type="checkbox" checked={form.allowGit} onChange={(event) => update('allowGit', event.target.checked)} /> Git 仓库路径</label>{form.allowGit && <><label>Git 仓库路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label></>}<label>评分标准版本<input value={form.rubricVersion} onChange={(event) => update('rubricVersion', event.target.value)} /></label></div>
-     <div className="evaluation-engine-editor"><div><strong>评测引擎</strong><small>每个赛题版本独立配置评测引擎，管理员按输入契约执行并上传标准结果。</small></div><div className="form-grid"><label>引擎标识<input value={form.evaluationEngineId} onChange={(event) => update('evaluationEngineId', event.target.value)} placeholder="例如 parking-fee-evaluator" /></label><label>引擎版本<input value={form.evaluationEngineVersion} onChange={(event) => update('evaluationEngineVersion', event.target.value)} /></label><label>执行方式<select value={form.evaluationEngineMode} onChange={(event) => update('evaluationEngineMode', event.target.value as ChallengeDraft['evaluationEngineMode'])}><option value="EXTERNAL_CLI">管理员本地命令</option><option value="PLATFORM_LOCAL">平台本地执行器</option></select></label><label>输入契约路径<input value={form.evaluationInputContract} onChange={(event) => update('evaluationInputContract', event.target.value)} /></label><label className="span-2">输出契约路径<input value={form.evaluationOutputContract} onChange={(event) => update('evaluationOutputContract', event.target.value)} /></label>{form.evaluationEngineMode === 'PLATFORM_LOCAL' && <><label>提交契约路径<span className="field-hint">仓库内相对路径</span><input value={form.localContractPath} onChange={(event) => update('localContractPath', event.target.value)} placeholder="challenges/xxx/submission-contract.json" /></label><label>隐藏测试目录<span className="field-hint">可留空</span><input value={form.localTestsDir} onChange={(event) => update('localTestsDir', event.target.value)} placeholder="challenges/xxx/hidden-tests" /></label><label>入口文件<input value={form.localEntry} onChange={(event) => update('localEntry', event.target.value)} placeholder="src/parking.py" /></label><label>入口函数<input value={form.localFunction} onChange={(event) => update('localFunction', event.target.value)} placeholder="calculate_fee" /></label><label>语言<input value={form.localLanguage} onChange={(event) => update('localLanguage', event.target.value)} /></label></>}</div><small className="field-hint">选择「平台本地执行器」后，训战可使用自动评估或管理员安排；选择「管理员本地命令」的赛题只能使用线下结果录入。</small></div>
+     <div className="evaluation-engine-editor"><div><strong>评测引擎</strong><small>每个赛题版本独立配置评测引擎，管理员按输入契约执行并上传标准结果。</small></div><div className="form-grid"><label>引擎标识<input value={form.evaluationEngineId} onChange={(event) => update('evaluationEngineId', event.target.value)} placeholder="例如 parking-fee-evaluator" /></label><label>引擎版本<input value={form.evaluationEngineVersion} onChange={(event) => update('evaluationEngineVersion', event.target.value)} /></label><label>执行方式<select value={form.evaluationEngineMode} onChange={(event) => update('evaluationEngineMode', event.target.value as ChallengeDraft['evaluationEngineMode'])}><option value="EXTERNAL_CLI">管理员本地命令（线下录入）</option><option value="PLATFORM_LOCAL">平台内置执行器</option><option value="PACKAGED">上传评测引擎包</option></select></label><label>输入契约路径<input value={form.evaluationInputContract} onChange={(event) => update('evaluationInputContract', event.target.value)} /></label><label className="span-2">输出契约路径<input value={form.evaluationOutputContract} onChange={(event) => update('evaluationOutputContract', event.target.value)} /></label>{form.evaluationEngineMode === 'PACKAGED' && <label className="span-2">评测引擎包<span className="field-hint">zip：engine.json + 判题脚本 + 隐藏测试 + 提交契约</span><input type="file" accept=".zip" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUploadPackage(file); event.target.value = ''; }} />{form.enginePackageSummary ? <small className="engine-package-summary">已绑定：{form.enginePackageSummary}</small> : <small className="field-hint">上传后平台会校验 engine.json 并按内容哈希固化；引擎包变更等于判据变更，历史成绩需要重跑。</small>}</label>}{form.evaluationEngineMode === 'PLATFORM_LOCAL' && <><label>提交契约路径<span className="field-hint">仓库内相对路径</span><input value={form.localContractPath} onChange={(event) => update('localContractPath', event.target.value)} placeholder="challenges/xxx/submission-contract.json" /></label><label>隐藏测试目录<span className="field-hint">可留空</span><input value={form.localTestsDir} onChange={(event) => update('localTestsDir', event.target.value)} placeholder="challenges/xxx/hidden-tests" /></label><label>入口文件<input value={form.localEntry} onChange={(event) => update('localEntry', event.target.value)} placeholder="src/parking.py" /></label><label>入口函数<input value={form.localFunction} onChange={(event) => update('localFunction', event.target.value)} placeholder="calculate_fee" /></label><label>语言<input value={form.localLanguage} onChange={(event) => update('localLanguage', event.target.value)} /></label></>}</div><small className="field-hint">选择「平台本地执行器」后，训战可使用自动评估或管理员安排；选择「管理员本地命令」的赛题只能使用线下结果录入。</small></div>
     <div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy} onClick={onSave}>{busy ? '保存中…' : '保存草稿'}</button></div>
   </section>;
 }

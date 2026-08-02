@@ -29,6 +29,7 @@ import {
   AdminAccess,
   EvaluationEngineConfig,
   EvaluationInputBatch,
+  EnginePackageRecord,
   SsoIdentity,
 } from './domain';
 import { validateEvaluationResult } from './contract-validator';
@@ -104,7 +105,7 @@ function validateEvaluationEngine(engine?: EvaluationEngineConfig): void {
   if (!engine) return;
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$/.test(engine.id)) throw new BadRequestException('evaluation engine id is invalid');
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$/.test(engine.version)) throw new BadRequestException('evaluation engine version is invalid');
-  if (engine.mode !== 'EXTERNAL_CLI' && engine.mode !== 'PLATFORM_LOCAL') throw new BadRequestException('evaluation engine mode is invalid');
+  if (!['EXTERNAL_CLI', 'PLATFORM_LOCAL', 'PACKAGED'].includes(engine.mode)) throw new BadRequestException('evaluation engine mode is invalid');
   for (const [label, contract] of [['input', engine.input], ['output', engine.output]] as const) {
     if (!contract || contract.format !== 'JSON' || !contract.schemaVersion?.trim() || !contract.contractPath?.trim()) {
       throw new BadRequestException(`evaluation engine ${label} contract is incomplete`);
@@ -124,7 +125,14 @@ function validateEvaluationEngine(engine?: EvaluationEngineConfig): void {
     if (local.testsDir) assertRepositoryPath(local.testsDir, 'evaluation engine local.testsDir');
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(local.function)) throw new BadRequestException('evaluation engine local.function is invalid');
   } else if (engine.local) {
-    throw new BadRequestException('EXTERNAL_CLI engine must not declare a local executor configuration');
+    throw new BadRequestException(`${engine.mode} engine must not declare a local executor configuration`);
+  }
+  if (engine.mode === 'PACKAGED') {
+    if (!/^[a-f0-9]{64}$/.test(engine.package?.packageHash ?? '')) {
+      throw new BadRequestException({ code: 'ENGINE_PACKAGE_REQUIRED', message: 'PACKAGED 引擎必须先上传引擎包并绑定 packageHash' });
+    }
+  } else if (engine.package) {
+    throw new BadRequestException(`${engine.mode} engine must not reference an engine package`);
   }
 }
 
@@ -144,6 +152,12 @@ function assertTriggerMatchesEngine(engine: EvaluationEngineConfig, trigger: Tri
       message: `赛题的评测引擎为外部命令（EXTERNAL_CLI），只能选择线下结果录入；当前选择了 ${trigger}`,
     });
   }
+}
+
+/** The grader component of the idempotency key; a new package is new rules. */
+function engineIdentityOf(engine: EvaluationEngineConfig): string {
+  const packageHash = engine.mode === 'PACKAGED' ? engine.package?.packageHash : undefined;
+  return packageHash ? `${engine.id}@${engine.version}+${packageHash.slice(0, 16)}` : `${engine.id}@${engine.version}`;
 }
 
 // The grading key describes an immutable snapshot and rubric. It is stable
@@ -1566,9 +1580,40 @@ export class PlatformStore {
     return evaluationEngineForVersion(this.getChallengeVersion(this.submissionChallengeVersion(submission)));
   }
 
+  /** Audit an engine package upload so a rule-set change is always traceable. */
+  recordEnginePackageUpload(record: EnginePackageRecord, actorId: string): void {
+    this.audit(actorId, 'engine-package.upload', `engine-package:${record.packageHash}`, undefined, {
+      packageHash: record.packageHash,
+      size: record.size,
+      engineId: record.manifest.id,
+      engineVersion: record.manifest.version,
+      entrypoint: record.manifest.runtime.entrypoint,
+    });
+    this.persist();
+  }
+
+  /** Engine plus the challenge context an executor needs, both pinned to the submitted version. */
+  gradingContextForSubmission(submission: SubmissionRecord): {
+    engine: EvaluationEngineConfig;
+    challenge: { id: string; title: string; challengeVersion: string; rubricVersion: string; zone?: 'YELLOW' | 'BLUE' };
+  } {
+    const challengeVersionId = this.submissionChallengeVersion(submission);
+    const version = this.getChallengeVersion(challengeVersionId);
+    return {
+      engine: evaluationEngineForVersion(version),
+      challenge: {
+        id: this.challengeForVersion(challengeVersionId).id,
+        title: version.title,
+        challengeVersion: challengeVersionId,
+        rubricVersion: this.submissionRubricVersion(submission),
+        zone: version.zone,
+      },
+    };
+  }
+
   /** Identity of the rule set, used as the grader component of an idempotency key. */
   private engineIdentity(engine: EvaluationEngineConfig): string {
-    return `${engine.id}@${engine.version}`;
+    return engineIdentityOf(engine);
   }
 
   private submissionRubricVersion(submission: SubmissionRecord): string {

@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-training-platform.local/contracts/engine-invocation.schema.json",
+  "title": "Engine Invocation Input",
+  "description": "平台在沙箱内交给打包评测引擎的单份输入（`--input` 指向的 JSON）。与 evaluation-input.schema.json 的区别：那份是下发给平台外评测者的批量清单，这份是引擎进程一次调用的输入，含沙箱内的真实路径。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "engine", "challenge", "grading", "subject", "submission", "workspace", "outputPath"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "packageHash", "packageRoot"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "packageHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "packageRoot": { "type": "string", "minLength": 1, "description": "解包后的引擎目录，隐藏测试和提交契约都在其中。" },
+        "assets": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "engine.json 声明的资产，已解析为沙箱内的绝对路径。",
+          "properties": {
+            "submissionContract": { "type": "string" },
+            "testsDir": { "type": "string" },
+            "referenceDir": { "type": "string" }
+          }
+        }
+      }
+    },
+    "challenge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "challengeVersion", "rubricVersion"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "challengeVersion": { "type": "string", "minLength": 1 },
+        "rubricVersion": { "type": "string", "minLength": 1 },
+        "zone": { "enum": ["YELLOW", "BLUE"] },
+        "languagePolicy": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "grading": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "idempotencyKey", "triggerType", "attempt"],
+      "description": "结果 JSON 必须原样带回 runId / idempotencyKey / triggerType，平台据此确认结果归属。",
+      "properties": {
+        "runId": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "pattern": "^[a-f0-9]{16,128}$" },
+        "triggerType": { "enum": ["AUTO", "MANUAL", "IMPORT"] },
+        "attempt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "description": "引擎不得用它改写身份；平台在入库时以登记值为准覆盖。仅用于生成可读报告。",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "orgPath": { "type": "string" }
+      }
+    },
+    "submission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sourceType", "snapshotHash", "submittedAt"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sourceType": { "enum": ["UPLOAD", "GIT_REF"] },
+        "snapshotHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "artifactHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "repository": { "type": "string" },
+        "branch": { "type": "string" },
+        "commitSha": { "type": "string", "pattern": "^[a-f0-9]{7,64}$" },
+        "submittedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "workspace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "已规范化的交付件目录，引擎只读。"
+    },
+    "outputPath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "引擎必须把符合 evaluation-result.schema.json 的结果写到这里。"
+    },
+    "scratchDir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "引擎唯一可写的临时目录；沙箱退出后清除。"
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "沙箱实际生效的上限，供引擎自行留出余量。",
+      "properties": {
+        "wallClockSeconds": { "type": "integer", "minimum": 1 },
+        "memoryMB": { "type": "integer", "minimum": 1 },
+        "outputBytes": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

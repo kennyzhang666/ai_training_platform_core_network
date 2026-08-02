@@ -5,7 +5,14 @@ export type EventMode = 'LIVE' | 'WINDOW';
 export type EventStatus = 'OPEN' | 'CLOSED' | 'RELEASED';
 export type EventAccessMode = 'OPEN' | 'RESTRICTED';
 export type EventPurpose = 'TRAINING' | 'HARD_PROBLEM';
-export type EvaluationEngineMode = 'EXTERNAL_CLI' | 'PLATFORM_LOCAL';
+/**
+ * How a challenge is evaluated.
+ * - EXTERNAL_CLI  : run outside the platform, results come back through import.
+ * - PLATFORM_LOCAL: the built-in drill-grader, parameterised per challenge.
+ * - PACKAGED      : an author-uploaded engine package, run by the platform in
+ *                   a controlled subprocess.
+ */
+export type EvaluationEngineMode = 'EXTERNAL_CLI' | 'PLATFORM_LOCAL' | 'PACKAGED';
 export type SubmissionState =
   | 'RECEIVED'
   | 'QUEUED'
@@ -133,12 +140,59 @@ export interface LocalEvaluationConfig {
   language?: string;
 }
 
+/** engine.json, frozen inside an uploaded engine package. */
+export interface EnginePackageManifest {
+  schemaVersion: '1.0';
+  id: string;
+  version: string;
+  description?: string;
+  runtime: {
+    type: 'python';
+    entrypoint: string;
+    requirements?: string;
+    pythonVersion?: string;
+  };
+  limits?: {
+    wallClockSeconds?: number;
+    memoryMB?: number;
+    outputBytes?: number;
+  };
+  assets?: {
+    submissionContract?: string;
+    testsDir?: string;
+    referenceDir?: string;
+  };
+  selfCheck?: {
+    expectMinTotal?: number;
+    expectStatus?: 'COMPLETE' | 'PARTIAL';
+  };
+  metadata?: Record<string, unknown>;
+}
+
+export interface EnginePackageRecord {
+  packageHash: string;
+  size: number;
+  manifest: EnginePackageManifest;
+  uploadedFileName?: string;
+}
+
+/** The immutable engine package a PACKAGED challenge version is pinned to. */
+export interface EnginePackageReference {
+  packageHash: string;
+  size?: number;
+  fileName?: string;
+  uploadedAt?: string;
+  uploadedBy?: string;
+}
+
 export interface EvaluationEngineConfig {
   id: string;
   version: string;
   mode: EvaluationEngineMode;
   /** Required by PLATFORM_LOCAL, rejected for EXTERNAL_CLI. */
   local?: LocalEvaluationConfig;
+  /** Required by PACKAGED, rejected for the other modes. */
+  package?: EnginePackageReference;
   input: {
     format: 'JSON';
     schemaVersion: string;

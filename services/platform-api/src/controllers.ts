@@ -11,6 +11,7 @@ import { GradingExecutor, GRADING_EXECUTOR } from './grading-executor';
 import { computeDirectorySnapshotHash } from './snapshot-hash';
 import { AutoGradingQueue } from './auto-grading-queue';
 import { LocalGitSnapshotter } from './git-snapshotter';
+import { EnginePackageStore } from './engine-package-store';
 
 @Controller('/api/v1')
 export class PlatformController {
@@ -20,6 +21,7 @@ export class PlatformController {
     @Inject(GRADING_EXECUTOR) private readonly localGrader: GradingExecutor,
     @Inject(AutoGradingQueue) private readonly autoQueue: AutoGradingQueue,
     @Inject(LocalGitSnapshotter) private readonly localGit: LocalGitSnapshotter,
+    @Inject(EnginePackageStore) private readonly enginePackages: EnginePackageStore,
   ) {}
 
   private localWorkspaceHash(workspacePath: string): string {
@@ -145,6 +147,34 @@ export class PlatformController {
   @Post('/hard-problems/:problemId/resolve')
   resolveHardProblem(@Param('problemId') problemId: string, @Body() body: { actorId?: string; submissionId?: string }, @Headers('x-employee-id') employeeId?: string) {
     return this.store.resolveHardProblem(problemId, this.actor(employeeId), body.submissionId);
+  }
+
+  /**
+   * Upload an evaluation engine package. The response carries the content hash
+   * an administrator then pins onto a challenge version; the package itself is
+   * immutable and shared by hash, so re-uploading identical bytes is a no-op.
+   */
+  @Post('/evaluation-engines')
+  @HttpCode(201)
+  async uploadEnginePackage(@Body() body: { packageBase64?: string; fileName?: string }, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireAdmin(employeeId);
+    if (!body.packageBase64?.trim()) throw new BadRequestException({ code: 'ENGINE_PACKAGE_EMPTY', message: '请上传引擎包' });
+    const normalized = body.packageBase64.replace(/\s+/g, '');
+    if (normalized.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) {
+      throw new BadRequestException({ code: 'ENGINE_PACKAGE_INVALID', message: 'packageBase64 不是合法 base64' });
+    }
+    const record = await this.enginePackages.save(Buffer.from(normalized, 'base64'), body.fileName ?? 'engine.zip');
+    this.store.recordEnginePackageUpload(record, actorId);
+    return {
+      packageHash: record.packageHash,
+      size: record.size,
+      fileName: record.uploadedFileName,
+      engine: { id: record.manifest.id, version: record.manifest.version, description: record.manifest.description },
+      runtime: record.manifest.runtime,
+      limits: record.manifest.limits ?? null,
+      assets: record.manifest.assets ?? null,
+      selfCheck: record.manifest.selfCheck ?? null,
+    };
   }
 
   @Get('/admin/overview')
@@ -503,7 +533,7 @@ export class PlatformController {
       if (currentRun.status === 'RUNNING') continue;
       const run = this.store.markRunRunning(submission.gradingRunId);
       try {
-        const result = await this.localGrader.execute({ event: this.store.getEvent(eventId), submission, run, engine: this.store.evaluationEngineForSubmission(submission) });
+        const result = await this.localGrader.execute({ event: this.store.getEvent(eventId), submission, run, ...this.store.gradingContextForSubmission(submission) });
         executions.push({ run: this.store.getRun(run.id), stored: this.store.completeRun(run.id, result) });
       } catch (error) {
         this.store.failRun(run.id, error instanceof Error ? error.message : String(error));
@@ -621,7 +651,7 @@ export class PlatformController {
     const run = this.store.markRunRunning(runId);
     if (run.status === 'GRADED' && submission.resultId) return { run, stored: this.store.getReport(submission.id) };
     try {
-      const result = await this.localGrader.execute({ event: this.store.getEvent(submission.eventId), submission, run, engine: this.store.evaluationEngineForSubmission(submission) });
+      const result = await this.localGrader.execute({ event: this.store.getEvent(submission.eventId), submission, run, ...this.store.gradingContextForSubmission(submission) });
       return { run: this.store.getRun(runId), stored: this.store.completeRun(runId, result) };
     } catch (error) {
       this.store.failRun(runId, error instanceof Error ? error.message : String(error));

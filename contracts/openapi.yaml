@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: AI 训战平台 API
-  version: 0.3.0
+  version: 0.4.0
   description: 一期评测提交、触发和结果导入接口
 servers:
   - url: http://localhost:3000
@@ -74,6 +74,48 @@ paths:
           schema: { type: string }
       responses:
         '204': { description: 公告已删除 }
+  /api/v1/evaluation-engines:
+    post:
+      operationId: uploadEvaluationEnginePackage
+      summary: 上传评测引擎包
+      description: >-
+        上传 zip 形式的评测引擎包（判题脚本 + 隐藏测试 + 提交契约）。平台按内容哈希
+        固化并解析 engine.json，返回的 packageHash 由管理员绑定到赛题版本的
+        evaluationEngine.package。相同字节重复上传是幂等的。仅管理员可调用。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [packageBase64]
+              properties:
+                packageBase64: { type: string, description: zip 文件的 base64 编码 }
+                fileName: { type: string, description: 原始文件名，必须以 .zip 结尾 }
+      responses:
+        '201':
+          description: 引擎包已入库
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [packageHash, size, engine, runtime]
+                properties:
+                  packageHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+                  size: { type: integer, minimum: 1 }
+                  fileName: { type: string }
+                  engine:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      version: { type: string }
+                      description: { type: string }
+                  runtime: { type: object, additionalProperties: true }
+                  limits: { type: object, nullable: true, additionalProperties: true }
+                  assets: { type: object, nullable: true, additionalProperties: true }
+                  selfCheck: { type: object, nullable: true, additionalProperties: true }
+        '400': { description: 引擎包格式、清单或声明路径不合法 }
+        '403': { description: 需要管理员权限 }
   /api/v1/admin/overview:
     get:
       operationId: getAdminOverview
@@ -1079,10 +1121,11 @@ components:
         version: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$' }
         mode:
           type: string
-          enum: [EXTERNAL_CLI, PLATFORM_LOCAL]
+          enum: [EXTERNAL_CLI, PLATFORM_LOCAL, PACKAGED]
           description: >-
             PLATFORM_LOCAL 由平台内置执行器运行，必须提供 local；
-            EXTERNAL_CLI 由管理员在平台外运行，禁止提供 local，
+            PACKAGED 由平台在受控子进程中运行出题人上传的引擎包，必须提供 package；
+            EXTERNAL_CLI 由管理员在平台外运行，禁止提供 local/package，
             且该赛题的训战只能使用 trigger=IMPORT。
         local:
           type: object
@@ -1094,6 +1137,16 @@ components:
             entry: { type: string }
             function: { type: string, pattern: '^[A-Za-z_][A-Za-z0-9_]*$' }
             language: { type: string }
+        package:
+          type: object
+          description: PACKAGED 引擎绑定的不可变引擎包，由上传接口返回的内容哈希指定。
+          required: [packageHash]
+          properties:
+            packageHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+            size: { type: integer, minimum: 1 }
+            fileName: { type: string }
+            uploadedAt: { type: string, format: date-time }
+            uploadedBy: { type: string }
         input:
           type: object
           required: [format, schemaVersion, contractPath]

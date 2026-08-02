@@ -40,6 +40,14 @@ export interface GradingExecutionRequest {
   submission: SubmissionRecord;
   run: GradingRun;
   engine: EvaluationEngineConfig;
+  /** Challenge context captured at submission time, for the engine's report. */
+  challenge: {
+    id: string;
+    title: string;
+    challengeVersion: string;
+    rubricVersion: string;
+    zone?: 'YELLOW' | 'BLUE';
+  };
 }
 
 export interface GradingExecutor {

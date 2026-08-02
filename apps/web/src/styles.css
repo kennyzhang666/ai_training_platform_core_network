@@ -1332,3 +1332,13 @@ h1, h2, h3, h4,
 .commit-timeline-row span,.commit-timeline-row small { color:var(--lc-muted); font-size:10px; }
 .commit-timeline-row code { overflow:hidden; color:var(--lc-ink); font-family:var(--ui-mono); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
 .commit-timeline-row small { grid-column:2; }
+
+.engine-package-summary {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--surface-muted, rgba(120, 140, 200, 0.12));
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

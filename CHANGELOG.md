@@ -1,5 +1,29 @@
 # 更新记录
 
+## 0.4.0 - 2026-08-02
+
+出题人可以自助上传评测引擎包，不必改平台代码，也不必把隐藏测试提交到平台仓库。
+
+### 打包评测引擎
+
+- 新增引擎模式 `PACKAGED`：一个 zip = 一道题完整的评测能力（engine.json + 判题脚本 + 隐藏测试 + 提交契约），上传后按内容哈希固化，不可修改。
+- 新增引擎包清单契约 `contracts/evaluation-engine-package.schema.json` 与沙箱调用契约 `contracts/engine-invocation.schema.json`。
+- 新增上传接口 `POST /api/v1/evaluation-engines`（仅管理员）。相同字节重复上传幂等；清单不合法、缺 engine.json、声明路径不存在、含符号链接或路径逃逸的包在上传时即被拒绝，不会拖到第一份提交才暴露。
+- 管理后台赛题编辑器新增引擎包上传控件，上传后自动回填引擎标识、版本与输入契约。
+- 引擎包哈希参与评测幂等键：换包等于换判据，同一份交付件不会复用旧规则算出的成绩。
+
+### 轻量沙箱
+
+- 新增 `sandbox/launch.py`：独立子进程执行，工作目录固定在一次性 scratch 目录，交付件只读，环境变量重建为最小集合（平台数据路径与凭据一概不继承），墙钟超时；POSIX 上另加地址空间、CPU 时间和文件大小 rlimit，`PYTHONHASHSEED=0` 保证复现。不依赖容器。
+- 引擎声明的 `limits` 与平台上限取较小值。
+- 引擎声明 `requirements` 时，运行主机按包哈希创建一次性虚拟环境安装依赖并复用；支持内部源与离线模式。
+
+### 分发与校验
+
+- 新增 `GradingDispatcher`，按 `evaluationEngine.mode` 分发到内置执行器或打包引擎执行器；新增生产适配器只需在此增加一个分支。
+- 引擎输出仍然只是契约：Schema 校验、服务端重算总分、覆盖员工身份三道关卡对打包引擎同样生效。
+- 新增示例引擎包 `challenges/parking-fee-v1/engine/` 与构建脚本 `scripts/build-engine-package.mjs`。
+
 ## 0.3.0 - 2026-08-02
 
 让「每道赛题配置一个评测引擎」在运行时真正成立。此前 `evaluationEngine` 只是元数据，实际执行由训战场次上的隐藏字段 `localGrading` 驱动，两者互不相干。
