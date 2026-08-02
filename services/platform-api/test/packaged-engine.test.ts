@@ -6,7 +6,8 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ArtifactStore } from '../src/artifact-store';
 import { EnginePackageStore } from '../src/engine-package-store';
-import { PackagedEngineExecutor } from '../src/packaged-engine-executor';
+import { EngineRunner } from '../src/packaged-engine-executor';
+import { ExecutorRegistry } from '../src/executor-registry';
 import { PlatformStore } from '../src/store';
 import { checkEvaluationScore } from '../src/score-validator';
 import { validateEvaluationResult } from '../src/contract-validator';
@@ -106,7 +107,8 @@ test('the packaged engine grades a real delivery inside the sandbox and the plat
 
       const context = store.gradingContextForSubmission(submission);
       assert.equal(context.engine.mode, 'PACKAGED');
-      const executor = new PackagedEngineExecutor(new ArtifactStore(), packages);
+      const artifacts = new ArtifactStore();
+      const executor = new EngineRunner(artifacts, packages, new ExecutorRegistry(packages));
       const result = await executor.execute({ event: store.getEvent(event.id), submission, run, ...context });
 
       // The engine's output is a contract, not a trusted score.

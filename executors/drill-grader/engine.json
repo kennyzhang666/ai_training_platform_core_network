@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.0",
+  "id": "drill-grader",
+  "version": "0.3.0",
+  "title": "内置通用判题器（隐藏测试 + 代码度量）",
+  "description": "平台自带的确定性判题器：按提交契约校验交付件，分四档执行隐藏测试得到 Verify，用 AST 度量得到 Code，并逐条产出扣分证据。适用于「有隐藏测试可跑」的赛题。",
+  "runtime": {
+    "type": "python",
+    "entrypoint": "judge.py"
+  },
+  "params": {
+    "type": "object",
+    "required": ["contractPath", "entry", "function"],
+    "properties": {
+      "contractPath": {
+        "type": "string",
+        "title": "提交契约路径",
+        "description": "仓库内相对路径，例如 challenges/parking-fee-v1/submission-contract.json"
+      },
+      "testsDir": {
+        "type": "string",
+        "title": "隐藏测试目录",
+        "description": "仓库内相对路径，目录内按 basic/boundary/clarification/change 四档存放 JSON 用例"
+      },
+      "entry": {
+        "type": "string",
+        "title": "入口文件",
+        "description": "交付件内的相对路径，例如 src/parking.py"
+      },
+      "function": {
+        "type": "string",
+        "title": "入口函数",
+        "description": "隐藏测试调用的函数名，例如 calculate_fee"
+      },
+      "language": {
+        "type": "string",
+        "title": "语言",
+        "default": "python"
+      },
+      "zone": {
+        "type": "string",
+        "title": "阈值 profile",
+        "description": "选择 grader/profiles 下的阈值配置",
+        "enum": ["yellow", "blue"],
+        "default": "yellow"
+      }
+    }
+  },
+  "limits": {
+    "wallClockSeconds": 180,
+    "memoryMB": 512,
+    "outputBytes": 4194304
+  }
+}

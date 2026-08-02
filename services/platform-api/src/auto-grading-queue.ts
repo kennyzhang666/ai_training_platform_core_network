@@ -2,9 +2,17 @@ import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { PlatformStore } from './store';
 import { GradingExecutor, GRADING_EXECUTOR } from './grading-executor';
 
-/** Local replacement for the future queue/worker (GitLab/K8s adapter). */
+/**
+ * Embedded evaluation worker, for single-host development.
+ *
+ * The production shape is pull-based: an evaluation environment leases tasks
+ * through `/evaluation-tasks:lease` and posts results back, so the API never
+ * executes engine code. Set `EMBEDDED_EVALUATION_WORKER=false` to turn this
+ * off and let only external workers drain the queue.
+ */
 @Injectable()
 export class AutoGradingQueue implements OnModuleInit {
+  private readonly embedded = process.env.EMBEDDED_EVALUATION_WORKER !== 'false';
   private readonly scheduled = new Set<string>();
   private readonly pending: string[] = [];
   private readonly maxConcurrency = Math.max(1, Math.min(8, Number(process.env.LOCAL_GRADING_CONCURRENCY ?? 2)));
@@ -16,6 +24,7 @@ export class AutoGradingQueue implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    if (!this.embedded) return;
     // Rehydrate only AUTO work after a local API restart. MANUAL and IMPORT
     // runs must remain administrator-controlled even when their state is
     // persisted as QUEUED.
@@ -28,14 +37,17 @@ export class AutoGradingQueue implements OnModuleInit {
   }
 
   enqueue(submissionId: string): void {
+    // With an external evaluation environment the run simply stays QUEUED
+    // until a worker leases it.
+    if (!this.embedded) return;
     if (this.scheduled.has(submissionId)) return;
     this.scheduled.add(submissionId);
     this.pending.push(submissionId);
     this.pump();
   }
 
-  getStats(): { queued: number; running: number; maxConcurrency: number; scheduled: number } {
-    return { queued: this.pending.length, running: this.active, maxConcurrency: this.maxConcurrency, scheduled: this.scheduled.size };
+  getStats(): { queued: number; running: number; maxConcurrency: number; scheduled: number; embedded: boolean } {
+    return { queued: this.pending.length, running: this.active, maxConcurrency: this.maxConcurrency, scheduled: this.scheduled.size, embedded: this.embedded };
   }
 
   private pump(): void {

@@ -4,13 +4,30 @@
 
 `mode` 决定平台如何分发，也决定该赛题的训战能选哪些评测方式：
 
-| mode | 执行者 | 允许的评测方式 | 必须提供 |
+| mode | 引擎来自 | 允许的评测方式 | 必须提供 |
 |---|---|---|---|
-| `PACKAGED` | 平台在受控子进程中运行出题人上传的引擎包 | 自动评估 / 管理员安排 / 线下结果录入 | `package` |
-| `PLATFORM_LOCAL` | 平台内置 drill-grader，按参数驱动 | 自动评估 / 管理员安排 / 线下结果录入 | `local` |
-| `EXTERNAL_CLI` | 管理员本地命令或 CodeAgent | 仅线下结果录入 | —（提供 `local`/`package` 会被拒绝） |
+| `PLATFORM_LOCAL` | 仓库 `executors/` 目录，后台下拉选择 | 自动评估 / 管理员安排 / 线下结果录入 | `executor`（执行器 id + 参数） |
+| `PACKAGED` | 出题人上传的引擎包 | 自动评估 / 管理员安排 / 线下结果录入 | `package`（内容哈希） |
+| `EXTERNAL_CLI` | 平台之外，管理员自行评测 | 仅线下结果录入 | —（提供 `executor`/`package` 会被拒绝） |
 
-出题人自助出题走 `PACKAGED`：判据由出题人自己写，不用改平台代码，也不用把隐藏测试提交到平台仓库。
+内置执行器和上传引擎包**共用同一份清单格式（engine.json）和同一份调用契约**，区别只在于前者随平台发布、可被多道赛题复用并接受 `params`，后者按内容哈希固化、自带判据。
+
+## 谁在执行
+
+平台**不执行**赛题或引擎代码。评测环境（独立评测服务器，或管理员本机）主动领取任务：
+
+```text
+评测环境                                平台
+   │  POST /evaluation-tasks:lease  ──────►│  取出排队中的任务，加租约
+   │  ◄──────────────────────────────────  │  下发不可变任务描述
+   │  物化引擎（内置=本地仓库 / 包=下载）      │
+   │  物化交付件，沙箱内执行引擎               │
+   │  POST /evaluation-tasks/{id}/complete ►│  Schema 校验 → 重算总分 → 覆盖身份 → 入库
+```
+
+worker 崩溃不需要平台感知：租约到期，任务自动回到队列，下一个 worker 拿到的是同一份不可变快照和同一个幂等键。
+
+本地单机开发可以让 API 内嵌一个 worker（默认开启）；生产部署设 `EMBEDDED_EVALUATION_WORKER=false`，只由独立评测环境消费队列。
 
 创建或修改训战时，如果评测方式与引擎能力不符，平台直接拒绝并返回 `ENGINE_TRIGGER_UNSUPPORTED`，不会等到执行评估时才失败。
 
@@ -122,6 +139,14 @@ python -I <entrypoint> --input <invocation.json> --output <result.json>
 
 `runtime.requirements` 声明后，运行主机会为该包哈希创建一次性虚拟环境并安装，之后按哈希复用。离线环境用 `ENGINE_PIP_INDEX_URL` 指向内部源，或 `ENGINE_PIP_OFFLINE=true` 配合预置 wheel。不声明依赖时直接用平台解释器，不产生任何安装动作。
 
+### 启动评测环境
+
+```bash
+node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee w00123 --worker eval-host-1
+```
+
+worker 轮询领取任务，按 `contracts/engine-invocation.schema.json` 组装输入，通过 `sandbox/launch.py` 执行引擎，再回传结果。加 `--once` 只跑一轮，便于排查。
+
 ### 出题流程
 
 ```bash
@@ -131,3 +156,20 @@ node scripts/build-engine-package.mjs parking-fee-v1
 产出 `tmp/parking-fee-v1-engine.zip`，在管理后台「赛题库 → 新建赛题 → 评测引擎 → 上传评测引擎包」上传即可。平台返回 `packageHash` 并自动填入引擎标识与版本；保存赛题版本时该哈希被固化，发布后不可修改。
 
 `challenges/parking-fee-v1/engine/` 是一个可直接参考的完整示例。
+
+
+## 内置执行器（PLATFORM_LOCAL）
+
+仓库 `executors/<id>/engine.json` 每个目录就是一个可选执行器。后台「赛题库 → 评测引擎 → 执行方式选『平台内置执行器』」会列出它们，并按清单里的 `params`（一份 JSON Schema）**动态渲染参数表单**——管理员不再手填路径。
+
+平台在保存赛题版本时就校验：执行器必须存在、必填参数不能缺、路径参数必须是仓库内相对路径且真实存在。写错在编辑时就被拒绝，不会拖到第一份提交。
+
+执行器目录的**内容哈希**参与评测幂等键，因此改动内置执行器等同于改判据，历史成绩需要重跑。
+
+当前随平台发布的执行器：
+
+| id | 说明 | 必填参数 |
+|---|---|---|
+| `drill-grader` | 内置通用判题器：提交契约校验 + 四档隐藏测试 + AST 代码度量 | `contractPath`、`entry`、`function` |
+
+新增一个内置执行器 = 新建 `executors/<id>/` 目录，放 `engine.json` 和入口脚本，无需改平台代码。

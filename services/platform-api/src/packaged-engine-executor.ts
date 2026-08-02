@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { EnginePackageManifest, EvaluationEngineConfig, SubmissionRecord } from './domain';
+import { EnginePackageManifest, ResolvedEngine, SubmissionRecord } from './domain';
 import { ArtifactStore } from './artifact-store';
 import { EnginePackageStore } from './engine-package-store';
+import { ExecutorRegistry } from './executor-registry';
 import { GradingExecutionRequest, GradingExecutor } from './grading-executor';
 import { computeDirectorySnapshotHash } from './snapshot-hash';
 
@@ -40,7 +41,10 @@ const ZIP_EXTRACT_SUBMISSION = [
 ].join('\n');
 
 /**
- * Runs an author-uploaded engine package against one delivery.
+ * Runs one delivery through the engine its challenge selected — a built-in
+ * executor from `executors/` or an uploaded package. Both kinds share the same
+ * manifest, the same invocation contract and this same runner, so a challenge
+ * cannot be graded differently depending on where its engine came from.
  *
  * The engine is trusted code (an author uploaded it, not a trainee), but it is
  * still someone else's program running on the evaluation host, so it gets a
@@ -49,7 +53,7 @@ const ZIP_EXTRACT_SUBMISSION = [
  * score is recomputed by the store exactly as for every other trigger.
  */
 @Injectable()
-export class PackagedEngineExecutor implements GradingExecutor {
+export class EngineRunner implements GradingExecutor {
   private readonly cwd = process.cwd();
   private readonly projectRoot = resolve(process.env.PROJECT_ROOT ?? (existsSync(join(this.cwd, 'grader', 'run_grader.py')) ? this.cwd : join(this.cwd, '..', '..')));
   private readonly launcher = resolve(process.env.ENGINE_SANDBOX_LAUNCHER ?? join(this.projectRoot, 'sandbox', 'launch.py'));
@@ -57,7 +61,35 @@ export class PackagedEngineExecutor implements GradingExecutor {
   constructor(
     @Inject(ArtifactStore) private readonly artifacts: ArtifactStore,
     @Inject(EnginePackageStore) private readonly packages: EnginePackageStore,
+    @Inject(ExecutorRegistry) private readonly executors: ExecutorRegistry,
   ) {}
+
+  private repositoryRoot(): string {
+    return this.projectRoot;
+  }
+
+  /**
+   * Absolute asset paths handed to the engine. A built-in executor receives
+   * the repository paths its parameters name, resolved here, so it never needs
+   * the repository root inside the sandbox.
+   */
+  private assetPaths(engine: ResolvedEngine): Record<string, string> {
+    const assets: Record<string, string> = {};
+    const fromManifest = (value?: string) => value ? resolve(engine.root, value) : undefined;
+    for (const [key, value] of Object.entries({
+      submissionContract: fromManifest(engine.manifest.assets?.submissionContract),
+      testsDir: fromManifest(engine.manifest.assets?.testsDir),
+      referenceDir: fromManifest(engine.manifest.assets?.referenceDir),
+    })) {
+      if (value) assets[key] = value;
+    }
+    if (engine.source === 'BUILT_IN') {
+      const params = engine.params as { contractPath?: string; testsDir?: string };
+      if (params.contractPath) assets.submissionContract = resolve(this.repositoryRoot(), params.contractPath);
+      if (params.testsDir) assets.testsDir = resolve(this.repositoryRoot(), params.testsDir);
+    }
+    return assets;
+  }
 
   private python(): string {
     const venv = join(this.projectRoot, '.venv', 'Scripts', 'python.exe');
@@ -103,14 +135,11 @@ export class PackagedEngineExecutor implements GradingExecutor {
   }
 
   async execute(input: GradingExecutionRequest): Promise<Record<string, unknown>> {
-    const engine: EvaluationEngineConfig = input.engine;
-    if (engine.mode !== 'PACKAGED' || !engine.package?.packageHash) {
-      throw new BadRequestException({ code: 'ENGINE_NOT_PACKAGED', message: '该赛题未绑定评测引擎包' });
-    }
-    const packageHash = engine.package.packageHash;
-    const manifest = this.packages.readManifest(packageHash);
-    const packageRoot = this.packages.packageRoot(packageHash);
-    const interpreter = (await this.packages.prepareEnvironment(packageHash, manifest)) ?? this.python();
+    const engine = this.executors.resolve(input.engine);
+    const manifest = engine.manifest;
+    const interpreter = engine.source === 'PACKAGE'
+      ? (await this.packages.prepareEnvironment(engine.packageHash, manifest)) ?? this.python()
+      : this.python();
     const limits = this.limits(manifest);
 
     mkdirSync(join(this.projectRoot, 'tmp'), { recursive: true });
@@ -128,20 +157,16 @@ export class PackagedEngineExecutor implements GradingExecutor {
       mkdirSync(scratch, { recursive: true });
       const outputPath = join(sandbox, 'result.json');
       const inputPath = join(sandbox, 'input.json');
-      const asset = (value?: string) => value ? this.packages.resolveInsidePackage(packageHash, value) : undefined;
       const invocation = {
         schemaVersion: '1.0',
         generatedAt: new Date().toISOString(),
         engine: {
           id: engine.id,
           version: engine.version,
-          packageHash,
-          packageRoot,
-          assets: {
-            ...(asset(manifest.assets?.submissionContract) ? { submissionContract: asset(manifest.assets?.submissionContract)! } : {}),
-            ...(asset(manifest.assets?.testsDir) ? { testsDir: asset(manifest.assets?.testsDir)! } : {}),
-            ...(asset(manifest.assets?.referenceDir) ? { referenceDir: asset(manifest.assets?.referenceDir)! } : {}),
-          },
+          source: engine.source,
+          packageHash: engine.packageHash,
+          packageRoot: engine.root,
+          assets: this.assetPaths(engine),
         },
         challenge: {
           id: input.challenge.id,
@@ -171,12 +196,13 @@ export class PackagedEngineExecutor implements GradingExecutor {
         outputPath,
         scratchDir: scratch,
         limits,
+        params: engine.params,
       };
       writeFileSync(inputPath, JSON.stringify(invocation, null, 2), 'utf8');
 
       const launcherArguments = [
         this.launcher,
-        '--entry', this.packages.resolveInsidePackage(packageHash, manifest.runtime.entrypoint),
+        '--entry', resolve(engine.root, manifest.runtime.entrypoint),
         '--input', inputPath,
         '--output', outputPath,
         '--cwd', scratch,

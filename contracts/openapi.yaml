@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: AI 训战平台 API
-  version: 0.4.0
+  version: 0.5.0
   description: 一期评测提交、触发和结果导入接口
 servers:
   - url: http://localhost:3000
@@ -115,6 +115,90 @@ paths:
                   assets: { type: object, nullable: true, additionalProperties: true }
                   selfCheck: { type: object, nullable: true, additionalProperties: true }
         '400': { description: 引擎包格式、清单或声明路径不合法 }
+        '403': { description: 需要管理员权限 }
+  /api/v1/evaluation-executors:
+    get:
+      operationId: listEvaluationExecutors
+      summary: 列出仓库内置执行器
+      description: 供赛题编辑器的下拉框使用。每项含 id、版本、标题、内容哈希和 params（JSON Schema，用于动态渲染参数表单）。
+      responses:
+        '200':
+          description: 内置执行器清单
+        '403': { description: 需要管理员权限 }
+  /api/v1/evaluation-tasks:lease:
+    post:
+      operationId: leaseEvaluationTasks
+      summary: 领取评测任务
+      description: >-
+        评测环境按此接口领取排队中的评测任务。平台只下发不可变的任务描述，
+        由评测环境自行执行引擎并回传结果；平台不在本请求内执行任何赛题或引擎代码。
+        租约到期未回传的任务会自动回到队列。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerId]
+              properties:
+                workerId: { type: string, description: 评测环境标识，用于审计与租约归属 }
+                limit: { type: integer, minimum: 1, maximum: 20, default: 1 }
+                executorIds:
+                  type: array
+                  items: { type: string }
+                  description: 只领取使用指定执行器的任务；留空表示不限
+      responses:
+        '200': { description: 已领取的任务列表 }
+        '403': { description: 需要管理员权限 }
+  /api/v1/evaluation-tasks/{runId}/heartbeat:
+    post:
+      operationId: heartbeatEvaluationTask
+      parameters: [{ name: runId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object, required: [leaseId], properties: { leaseId: { type: string } } } }
+      responses:
+        '200': { description: 租约已续期 }
+        '409': { description: 租约已失效 }
+  /api/v1/evaluation-tasks/{runId}/complete:
+    post:
+      operationId: completeEvaluationTask
+      description: 回传符合 evaluation-result.schema.json 的结果。平台仍会做 Schema 校验、重算总分并覆盖员工身份。
+      parameters: [{ name: runId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leaseId, result]
+              properties:
+                leaseId: { type: string }
+                result: { $ref: '#/components/schemas/EvaluationResult' }
+      responses:
+        '201': { description: 结果已入库 }
+        '400': { description: 结果 Schema 或分数校验未通过 }
+        '409': { description: 租约已失效或任务已完成 }
+  /api/v1/evaluation-tasks/{runId}/fail:
+    post:
+      operationId: failEvaluationTask
+      parameters: [{ name: runId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object, required: [leaseId], properties: { leaseId: { type: string }, reason: { type: string } } } }
+      responses:
+        '200': { description: 任务已标记失败 }
+        '409': { description: 租约已失效 }
+  /api/v1/evaluation-engines/{packageHash}/package:
+    get:
+      operationId: downloadEvaluationEnginePackage
+      description: 评测环境据此拉取引擎包字节，在本地物化引擎。
+      parameters: [{ name: packageHash, in: path, required: true, schema: { type: string, pattern: '^[a-f0-9]{64}$' } }]
+      responses:
+        '200': { description: 引擎包 zip }
+        '400': { description: 引擎包不存在 }
         '403': { description: 需要管理员权限 }
   /api/v1/admin/overview:
     get:
@@ -1137,6 +1221,14 @@ components:
             entry: { type: string }
             function: { type: string, pattern: '^[A-Za-z_][A-Za-z0-9_]*$' }
             language: { type: string }
+        executor:
+          type: object
+          description: PLATFORM_LOCAL 引擎选用的仓库内置执行器及其参数。
+          required: [id]
+          properties:
+            id: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$' }
+            version: { type: string }
+            params: { type: object, additionalProperties: true }
         package:
           type: object
           description: PACKAGED 引擎绑定的不可变引擎包，由上传接口返回的内容哈希指定。

@@ -116,6 +116,16 @@ export class EnginePackageStore {
     return { packageHash, size: bytes.length, manifest, uploadedFileName: fileName };
   }
 
+  /** Raw package bytes, so an evaluation worker can materialise the engine. */
+  async readPackageBytes(packageHash: string): Promise<Buffer> {
+    const archive = join(this.root, packageHash, 'package.zip');
+    if (!/^[a-f0-9]{64}$/.test(packageHash) || !existsSync(archive)) {
+      throw new BadRequestException({ code: 'ENGINE_PACKAGE_NOT_FOUND', message: `引擎包不存在: ${packageHash}` });
+    }
+    const { readFile } = await import('node:fs/promises');
+    return readFile(archive);
+  }
+
   readManifest(packageHash: string): EnginePackageManifest {
     const manifestPath = join(this.packageRoot(packageHash), 'engine.json');
     if (!existsSync(manifestPath)) {

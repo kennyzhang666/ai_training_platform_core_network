@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from '../src/app.module';
@@ -401,7 +403,7 @@ test('local grading rejects a workspace changed after submission', async () => {
       const executed = await fetch(`${baseUrl}/api/v1/grading-runs/${run.id}/execute`, { method: 'POST' });
       assert.equal(executed.status, 400);
       const body = await executed.json() as { message?: string };
-      assert.match(String(body.message), /snapshotHash/);
+      assert.match(String(body.message), /SNAPSHOT_CHANGED|snapshotHash|快照/);
       const runResponse = await fetch(`${baseUrl}/api/v1/grading-runs/${run.id}`);
       assert.equal((await runResponse.json() as { status: string }).status, 'FAILED');
     });
@@ -816,5 +818,88 @@ test('API rejects requests without an identity unless anonymous local mode is ex
   } finally {
     if (previous === undefined) delete process.env.ALLOW_ANONYMOUS_LOCAL;
     else process.env.ALLOW_ANONYMOUS_LOCAL = previous;
+  }
+});
+
+// The whole point of the pull model: the API hands out work, an evaluation
+// environment runs it. This exercises the real Nest container, which caught a
+// wiring bug that unit tests constructing services by hand could not.
+test('an evaluation environment leases work through the API for both engine sources', async () => {
+  const previousEmbedded = process.env.EMBEDDED_EVALUATION_WORKER;
+  const previousProjectRoot = process.env.PROJECT_ROOT;
+  const engineRoot = mkdtempSync(join(tmpdir(), 'api-engine-'));
+  process.env.EMBEDDED_EVALUATION_WORKER = 'false';
+  process.env.PROJECT_ROOT = join(__dirname, '..', '..', '..');
+  process.env.ENGINE_PACKAGE_ROOT = join(engineRoot, 'packages');
+  try {
+    await withApp(async (baseUrl) => {
+      const admin = { 'content-type': 'application/json', 'x-employee-id': 'w00123' };
+
+      const executors = await (await fetch(`${baseUrl}/api/v1/evaluation-executors`, { headers: admin })).json() as Array<{ id: string; params: { required: string[] } }>;
+      assert.ok(executors.some((item) => item.id === 'drill-grader'));
+
+      // A built-in executor task.
+      const submitted = await fetch(`${baseUrl}/api/v1/events/event-local/submissions:upload`, {
+        method: 'POST', headers: admin,
+        body: JSON.stringify({ subjectId: 'w00124', snapshot: { sourceType: 'UPLOAD', workspacePath: 'challenges/parking-fee-v1/reference', submittedAt: '2026-08-01T10:00:00Z' } }),
+      });
+      assert.equal(submitted.status, 201);
+      const submission = await submitted.json() as { id: string };
+      await fetch(`${baseUrl}/api/v1/submissions/${submission.id}/start-grading`, { method: 'POST', headers: admin, body: '{}' });
+
+      // Upload an engine package and pin a challenge to it.
+      const archive = join(engineRoot, 'engine.zip');
+      execFileSync('node', [join(__dirname, '..', '..', '..', 'scripts', 'build-engine-package.mjs'), 'parking-fee-v1', '--out', archive], { cwd: join(__dirname, '..', '..', '..'), windowsHide: true });
+      const uploaded = await fetch(`${baseUrl}/api/v1/evaluation-engines`, {
+        method: 'POST', headers: admin,
+        body: JSON.stringify({ packageBase64: readFileSync(archive).toString('base64'), fileName: 'engine.zip' }),
+      });
+      assert.equal(uploaded.status, 201);
+      const enginePackage = await uploaded.json() as { packageHash: string; engine: { id: string; version: string } };
+
+      const created = await fetch(`${baseUrl}/api/v1/challenges`, {
+        method: 'POST', headers: admin,
+        body: JSON.stringify({
+          id: 'api-packaged', ownerOrgPath: '/', origin: 'OFFICIAL', status: 'PUBLISHED', versions: [{
+            id: 'api-packaged@1', challengeId: 'api-packaged', version: 1, title: '打包引擎题', zone: 'YELLOW',
+            languagePolicy: { mode: 'fixed', languages: ['python'] }, deliveryPolicy: { allowedSources: ['UPLOAD'], upload: { formats: ['zip'] } },
+            rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'PUBLISHED',
+            evaluationEngine: {
+              id: enginePackage.engine.id, version: enginePackage.engine.version, mode: 'PACKAGED',
+              package: { packageHash: enginePackage.packageHash },
+              input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/engine-invocation.schema.json' },
+              output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
+            },
+          }],
+        }),
+      });
+      assert.equal(created.status, 201);
+      await fetch(`${baseUrl}/api/v1/events`, { method: 'POST', headers: admin, body: JSON.stringify({ id: 'event-api-packaged', challengeVersion: 'api-packaged@1', submissionSource: 'UPLOAD', trigger: 'MANUAL', reveal: 'IMMEDIATE' }) });
+      const packagedSubmission = await (await fetch(`${baseUrl}/api/v1/events/event-api-packaged/submissions:upload`, {
+        method: 'POST', headers: admin,
+        body: JSON.stringify({ subjectId: 'w00126', snapshot: { sourceType: 'UPLOAD', workspacePath: 'challenges/parking-fee-v1/starter', submittedAt: '2026-08-01T10:00:00Z' } }),
+      })).json() as { id: string };
+      await fetch(`${baseUrl}/api/v1/submissions/${packagedSubmission.id}/start-grading`, { method: 'POST', headers: admin, body: '{}' });
+
+      const leased = await fetch(`${baseUrl}/api/v1/evaluation-tasks:lease`, { method: 'POST', headers: admin, body: JSON.stringify({ workerId: 'eval-host-api', limit: 5 }) });
+      assert.equal(leased.status, 200);
+      const { tasks } = await leased.json() as { tasks: Array<{ runId: string; leaseId: string; engine: { source: string; id: string; entrypoint: string } }> };
+      const sources = tasks.map((task) => task.engine.source).sort();
+      assert.deepEqual(sources, ['BUILT_IN', 'PACKAGE']);
+      // The package download the worker needs must be reachable.
+      const download = await fetch(`${baseUrl}/api/v1/evaluation-engines/${enginePackage.packageHash}/package`, { headers: { 'x-employee-id': 'w00123' } });
+      assert.equal(download.status, 200);
+      assert.ok((await download.arrayBuffer()).byteLength > 0);
+
+      // A worker that gives up releases the task instead of stranding it.
+      const failed = await fetch(`${baseUrl}/api/v1/evaluation-tasks/${tasks[0].runId}/fail`, { method: 'POST', headers: admin, body: JSON.stringify({ leaseId: tasks[0].leaseId, reason: '评测环境磁盘不足' }) });
+      assert.equal(failed.status, 200);
+    });
+  } finally {
+    for (const [key, value] of [['EMBEDDED_EVALUATION_WORKER', previousEmbedded], ['PROJECT_ROOT', previousProjectRoot]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    delete process.env.ENGINE_PACKAGE_ROOT;
+    rmSync(engineRoot, { recursive: true, force: true });
   }
 });

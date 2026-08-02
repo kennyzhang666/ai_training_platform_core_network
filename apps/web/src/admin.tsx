@@ -21,10 +21,14 @@ type EnginePackageUpload = {
   assets?: { submissionContract?: string; testsDir?: string; referenceDir?: string } | null;
 };
 type EngineMode = 'EXTERNAL_CLI' | 'PLATFORM_LOCAL' | 'PACKAGED';
+type ExecutorParamSchema = { type: 'object'; required?: string[]; properties?: Record<string, { title?: string; description?: string; enum?: string[]; default?: string }> };
+type BuiltInExecutor = { id: string; version: string; title: string; description?: string; contentHash: string; params: ExecutorParamSchema | null };
+type PlatformExecutorReference = { id: string; version?: string; params?: Record<string, string> };
 type EvaluationEngineConfig = {
   id: string;
   version: string;
   mode: EngineMode;
+  executor?: PlatformExecutorReference;
   local?: LocalEvaluationConfig;
   package?: EnginePackageReference;
   input: { format: 'JSON'; schemaVersion: string; contractPath: string };
@@ -120,11 +124,8 @@ type ChallengeDraft = {
   evaluationEngineMode: EngineMode;
   enginePackage: EnginePackageReference | null;
   enginePackageSummary: string;
-  localContractPath: string;
-  localTestsDir: string;
-  localEntry: string;
-  localFunction: string;
-  localLanguage: string;
+  executorId: string;
+  executorParams: Record<string, string>;
   evaluationInputContract: string;
   evaluationOutputContract: string;
 };
@@ -322,7 +323,7 @@ function versionTitle(versionId: string, challenges: Challenge[]): string {
 }
 
 function blankChallenge(): ChallengeDraft {
-  return { id: '', title: '', category: 'TRAINING', description: '', objectives: '', requirements: '', constraints: '', deliverables: '', tags: '', estimatedMinutes: '45', zone: 'YELLOW', languages: 'python', allowUpload: true, allowGit: true, repository: '', branchTemplate: 'drill/{subjectId}', rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', evaluationEngineId: '', evaluationEngineVersion: '1.0.0', evaluationEngineMode: 'EXTERNAL_CLI', enginePackage: null, enginePackageSummary: '', localContractPath: '', localTestsDir: '', localEntry: '', localFunction: '', localLanguage: 'python', evaluationInputContract: 'contracts/evaluation-input.schema.json', evaluationOutputContract: 'contracts/evaluation-result.schema.json' };
+  return { id: '', title: '', category: 'TRAINING', description: '', objectives: '', requirements: '', constraints: '', deliverables: '', tags: '', estimatedMinutes: '45', zone: 'YELLOW', languages: 'python', allowUpload: true, allowGit: true, repository: '', branchTemplate: 'drill/{subjectId}', rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', evaluationEngineId: '', evaluationEngineVersion: '1.0.0', evaluationEngineMode: 'EXTERNAL_CLI', enginePackage: null, enginePackageSummary: '', executorId: '', executorParams: {}, evaluationInputContract: 'contracts/evaluation-input.schema.json', evaluationOutputContract: 'contracts/evaluation-result.schema.json' };
 }
 
 function blankEvent(versionId = '', challenges: Challenge[] = []): EventDraft {
@@ -364,13 +365,14 @@ function draftFromVersion(version?: ChallengeVersion): ChallengeDraft {
   const languages = (version?.languagePolicy.languages as string[] | undefined) ?? ['python'];
   const allowed = version?.deliveryPolicy.allowedSources ?? ['UPLOAD', 'GIT_REF'];
   const engine = version?.evaluationEngine;
-  return { id: version?.challengeId ?? '', title: version?.title ?? '', category: 'TRAINING', description: version?.description ?? '', objectives: (version?.objectives ?? []).join('\n'), requirements: (version?.requirements ?? []).join('\n'), constraints: (version?.constraints ?? []).join('\n'), deliverables: (version?.deliverables ?? []).join('\n'), tags: (version?.tags ?? []).join('\n'), estimatedMinutes: String(version?.estimatedMinutes ?? 45), zone: version?.zone ?? 'YELLOW', languages: languages.join('\n'), allowUpload: allowed.includes('UPLOAD'), allowGit: allowed.includes('GIT_REF'), repository: String(git.repository ?? ''), branchTemplate: String(git.branchTemplate ?? 'drill/{subjectId}'), rubricVersion: version?.rubricVersion ?? '1.0', submissionContract: version?.submissionContract ?? 'contracts/submission-contract.schema.json', evaluationEngineId: engine?.id ?? `${version?.challengeId ?? 'challenge'}-evaluator`, evaluationEngineVersion: engine?.version ?? '1.0.0', evaluationEngineMode: engine?.mode ?? 'EXTERNAL_CLI', enginePackage: engine?.package ?? null, enginePackageSummary: engine?.package ? `${engine.package.fileName ?? '引擎包'} · ${engine.package.packageHash.slice(0, 12)}…` : '', localContractPath: engine?.local?.contractPath ?? '', localTestsDir: engine?.local?.testsDir ?? '', localEntry: engine?.local?.entry ?? '', localFunction: engine?.local?.function ?? '', localLanguage: engine?.local?.language ?? 'python', evaluationInputContract: engine?.input.contractPath ?? 'contracts/evaluation-input.schema.json', evaluationOutputContract: engine?.output.contractPath ?? 'contracts/evaluation-result.schema.json' };
+  return { id: version?.challengeId ?? '', title: version?.title ?? '', category: 'TRAINING', description: version?.description ?? '', objectives: (version?.objectives ?? []).join('\n'), requirements: (version?.requirements ?? []).join('\n'), constraints: (version?.constraints ?? []).join('\n'), deliverables: (version?.deliverables ?? []).join('\n'), tags: (version?.tags ?? []).join('\n'), estimatedMinutes: String(version?.estimatedMinutes ?? 45), zone: version?.zone ?? 'YELLOW', languages: languages.join('\n'), allowUpload: allowed.includes('UPLOAD'), allowGit: allowed.includes('GIT_REF'), repository: String(git.repository ?? ''), branchTemplate: String(git.branchTemplate ?? 'drill/{subjectId}'), rubricVersion: version?.rubricVersion ?? '1.0', submissionContract: version?.submissionContract ?? 'contracts/submission-contract.schema.json', evaluationEngineId: engine?.id ?? `${version?.challengeId ?? 'challenge'}-evaluator`, evaluationEngineVersion: engine?.version ?? '1.0.0', evaluationEngineMode: engine?.mode ?? 'EXTERNAL_CLI', enginePackage: engine?.package ?? null, enginePackageSummary: engine?.package ? `${engine.package.fileName ?? '引擎包'} · ${engine.package.packageHash.slice(0, 12)}…` : '', executorId: engine?.executor?.id ?? '', executorParams: Object.fromEntries(Object.entries(engine?.executor?.params ?? {}).map(([key, value]) => [key, String(value ?? '')])), evaluationInputContract: engine?.input.contractPath ?? 'contracts/evaluation-input.schema.json', evaluationOutputContract: engine?.output.contractPath ?? 'contracts/evaluation-result.schema.json' };
 }
 
 export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   const [section, setSection] = useState<AdminSection>('events');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [builtInExecutors, setBuiltInExecutors] = useState<BuiltInExecutor[]>([]);
   const [events, setEvents] = useState<EventConfig[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -413,6 +415,9 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     ]);
     setOverview(loadedOverview);
     setChallenges(loadedChallenges);
+    // The executor catalogue ships with the platform; a failure here must not
+    // break the rest of the console.
+    void request<BuiltInExecutor[]>('/evaluation-executors').then(setBuiltInExecutors).catch(() => setBuiltInExecutors([]));
     setEvents(loadedEvents);
     setSubmissions(loadedSubmissions);
     setUsers(loadedUsers);
@@ -480,12 +485,9 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
         // rejects them on an EXTERNAL_CLI engine.
         ...(form.evaluationEngineMode === 'PACKAGED' && form.enginePackage ? { package: form.enginePackage } : {}),
         ...(form.evaluationEngineMode === 'PLATFORM_LOCAL' ? {
-          local: {
-            contractPath: form.localContractPath.trim(),
-            ...(form.localTestsDir.trim() ? { testsDir: form.localTestsDir.trim() } : {}),
-            entry: form.localEntry.trim(),
-            function: form.localFunction.trim(),
-            ...(form.localLanguage.trim() ? { language: form.localLanguage.trim() } : {}),
+          executor: {
+            id: form.executorId,
+            params: Object.fromEntries(Object.entries(form.executorParams).filter(([, value]) => String(value ?? '').trim()).map(([key, value]) => [key, String(value).trim()])),
           },
         } : {}),
         input: { format: 'JSON', schemaVersion: '1.0', contractPath: form.evaluationInputContract.trim() || 'contracts/evaluation-input.schema.json' },
@@ -501,7 +503,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     if (!challengeForm.allowUpload && !challengeForm.allowGit) { setMessage('至少选择一种提交方式'); return; }
     if (!lines(challengeForm.languages).length) { setMessage('至少填写一种支持的编程语言'); return; }
     if (challengeForm.allowGit && !/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+$/.test(challengeForm.repository.trim())) { setMessage('Git 仓库路径格式不正确'); return; }
-    if (!localEngineComplete(challengeForm)) { setMessage(challengeForm.evaluationEngineMode === 'PACKAGED' ? '请先上传评测引擎包' : '平台本地执行器需要填写提交契约路径、入口文件和入口函数'); return; }
+    if (!localEngineComplete(challengeForm)) { setMessage(challengeForm.evaluationEngineMode === 'PACKAGED' ? '请先上传评测引擎包' : '请选择内置执行器并填写其必填参数'); return; }
     const version = buildVersion(challengeForm, challengeForm.id.trim(), 1);
     await runAction(() => request('/challenges', { method: 'POST', body: JSON.stringify({ id: challengeForm.id.trim(), ownerOrgPath: '/', origin: challengeForm.category === 'HARD_PROBLEM' ? 'BOUNTY' : 'OFFICIAL', category: challengeForm.category, status: 'DRAFT', versions: [version], actorId: 'admin-local' }) }), '赛题草稿已创建');
     setChallengeForm(null);
@@ -510,7 +512,9 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   function localEngineComplete(form: ChallengeDraft): boolean {
     if (form.evaluationEngineMode === 'PACKAGED') return Boolean(form.enginePackage?.packageHash);
     if (form.evaluationEngineMode !== 'PLATFORM_LOCAL') return true;
-    return Boolean(form.localContractPath.trim() && form.localEntry.trim() && form.localFunction.trim());
+    const selected = builtInExecutors.find((item) => item.id === form.executorId);
+    if (!selected) return false;
+    return (selected.params?.required ?? []).every((key: string) => Boolean(String(form.executorParams[key] ?? '').trim()));
   }
 
   /** Upload an engine package and pin the returned content hash onto the draft. */
@@ -546,7 +550,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     if (!richTextPreview(versionForm.description)) { setMessage('请填写赛题详情'); return; }
     if (!lines(versionForm.languages).length) { setMessage('至少填写一种支持的编程语言'); return; }
     if (versionForm.allowGit && !/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+$/.test(versionForm.repository.trim())) { setMessage('Git 仓库路径格式不正确'); return; }
-    if (!localEngineComplete(versionForm)) { setMessage(versionForm.evaluationEngineMode === 'PACKAGED' ? '请先上传评测引擎包' : '平台本地执行器需要填写提交契约路径、入口文件和入口函数'); return; }
+    if (!localEngineComplete(versionForm)) { setMessage(versionForm.evaluationEngineMode === 'PACKAGED' ? '请先上传评测引擎包' : '请选择内置执行器并填写其必填参数'); return; }
     if (versionEditId) {
       const current = selectedChallenge.versions.find((item) => item.id === versionEditId);
       if (!current) return;
@@ -709,7 +713,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
         {message && <div className="admin-message">{message}</div>}
         {section === 'overview' && <OverviewSection overview={overview} challenges={challenges} events={events} submissions={submissions} onSection={setSection} />}
         {section === 'organization' && <OrganizationSection users={users} orgUnits={orgUnits} adminAccess={adminAccess} busy={busy} onSaved={() => void refresh()} onMessage={setMessage} />}
-        {section === 'challenges' && <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">赛题库</p><h2>赛题库</h2></div><button className="primary compact" onClick={() => { setChallengeView('active'); setChallengeForm(blankChallenge()); }}>＋ 新建赛题</button></div>{challengeForm && <ChallengeEditor form={challengeForm} setForm={setChallengeForm} onCancel={() => setChallengeForm(null)} onSave={() => void saveChallenge()} onUploadPackage={(file) => uploadEnginePackage(file, challengeForm, setChallengeForm)} busy={busy} title="创建赛题草稿" />}{versionForm && selectedChallenge && <ChallengeEditor form={versionForm} setForm={setVersionForm} onCancel={() => { setVersionForm(null); setVersionEditId(''); }} onSave={() => void saveVersion()} onUploadPackage={(file) => uploadEnginePackage(file, versionForm, setVersionForm)} busy={busy} title={versionEditId ? `编辑 ${selectedChallenge.id} 草稿` : `创建 ${selectedChallenge.id} 新版本`} />}{!challengeForm && !versionForm && <ChallengeList challenges={visibleChallenges} view={challengeView} activeCount={challenges.filter((challenge) => challenge.status !== 'ARCHIVED').length} trashCount={challenges.filter((challenge) => challenge.status === 'ARCHIVED').length} onViewChange={setChallengeView} selectedId={selectedChallengeId} onSelect={setSelectedChallengeId} onPublish={(id) => void runAction(() => request(`/challenges/${id}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已发布')} onTrash={(id) => void runAction(() => request(`/challenges/${id}/trash`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已移入垃圾箱')} onRestore={(id) => void runAction(() => request(`/challenges/${id}/restore`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已恢复')} />}{selectedChallenge && !challengeForm && !versionForm && <ChallengeDetail challenge={selectedChallenge} events={events} onNewVersion={() => { setVersionEditId(''); setVersionForm(draftFromVersion(selectedChallenge.versions[selectedChallenge.versions.length - 1])); }} onEditVersion={(version) => { setVersionEditId(version.id); setVersionForm(draftFromVersion(version)); }} onCategoryChange={(category) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ category, actorId: 'admin-local' }) }), '赛题类型已更新')} onSolutionVisibilityChange={(solutionVisibility) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ solutionVisibility, actorId: 'admin-local' }) }), '交付件展示策略已更新')} onPublish={(versionId) => void runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionId}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题版本已发布')} />}</section>}
+        {section === 'challenges' && <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">赛题库</p><h2>赛题库</h2></div><button className="primary compact" onClick={() => { setChallengeView('active'); setChallengeForm(blankChallenge()); }}>＋ 新建赛题</button></div>{challengeForm && <ChallengeEditor form={challengeForm} setForm={setChallengeForm} onCancel={() => setChallengeForm(null)} onSave={() => void saveChallenge()} onUploadPackage={(file) => uploadEnginePackage(file, challengeForm, setChallengeForm)} executors={builtInExecutors} busy={busy} title="创建赛题草稿" />}{versionForm && selectedChallenge && <ChallengeEditor form={versionForm} setForm={setVersionForm} onCancel={() => { setVersionForm(null); setVersionEditId(''); }} onSave={() => void saveVersion()} onUploadPackage={(file) => uploadEnginePackage(file, versionForm, setVersionForm)} executors={builtInExecutors} busy={busy} title={versionEditId ? `编辑 ${selectedChallenge.id} 草稿` : `创建 ${selectedChallenge.id} 新版本`} />}{!challengeForm && !versionForm && <ChallengeList challenges={visibleChallenges} view={challengeView} activeCount={challenges.filter((challenge) => challenge.status !== 'ARCHIVED').length} trashCount={challenges.filter((challenge) => challenge.status === 'ARCHIVED').length} onViewChange={setChallengeView} selectedId={selectedChallengeId} onSelect={setSelectedChallengeId} onPublish={(id) => void runAction(() => request(`/challenges/${id}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已发布')} onTrash={(id) => void runAction(() => request(`/challenges/${id}/trash`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已移入垃圾箱')} onRestore={(id) => void runAction(() => request(`/challenges/${id}/restore`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已恢复')} />}{selectedChallenge && !challengeForm && !versionForm && <ChallengeDetail challenge={selectedChallenge} events={events} onNewVersion={() => { setVersionEditId(''); setVersionForm(draftFromVersion(selectedChallenge.versions[selectedChallenge.versions.length - 1])); }} onEditVersion={(version) => { setVersionEditId(version.id); setVersionForm(draftFromVersion(version)); }} onCategoryChange={(category) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ category, actorId: 'admin-local' }) }), '赛题类型已更新')} onSolutionVisibilityChange={(solutionVisibility) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ solutionVisibility, actorId: 'admin-local' }) }), '交付件展示策略已更新')} onPublish={(versionId) => void runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionId}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题版本已发布')} />}</section>}
         {section === 'events' && <EventsSection events={events} challenges={challenges} overview={overview} users={users} orgUnits={orgUnits} eventForm={eventForm} setEventForm={setEventForm} eventEditId={eventEditId} onNew={() => { setEventEditId(''); setEventForm(blankEvent(publishedVersions[0]?.id ?? '', challenges)); }} onEdit={(event) => { setEventEditId(event.id); setEventForm(draftFromEvent(event)); }} onCreate={() => void saveEvent()} onAction={(event, action) => void eventAction(event, action)} busy={busy} />}
         {section === 'participants' && <ParticipantSection events={events} eventId={participantEventId} setEventId={setParticipantEventId} text={participantText} setText={setParticipantText} onLoad={(id) => void loadParticipants(id)} onSave={() => void saveParticipants()} busy={busy} />}
         {section === 'capabilities' && <CapabilityAdminSection data={adminCapabilities} users={capabilityUsers} orgUnits={orgUnits} orgPath={capabilityOrgPath} selectedIds={capabilitySubjectIds} onOrgPathChange={(path) => { setCapabilityOrgPath(path); setCapabilitySubjectIds([]); }} onToggle={toggleCapabilitySubject} onSelectAll={selectAllCapabilityUsers} onClear={() => setCapabilitySubjectIds([])} onViewAll={() => void loadAdminCapabilities('ALL')} onViewSelected={() => void loadAdminCapabilities('SELECTED')} busy={busy} />}
@@ -947,7 +951,31 @@ function RichTextEditor({ value, onChange }: { value: string; onChange: (value: 
   </div>;
 }
 
-function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, busy, title }: { form: ChallengeDraft; setForm: (form: ChallengeDraft) => void; onCancel: () => void; onSave: () => void; onUploadPackage: (file: File) => Promise<void>; busy: boolean; title: string }) {
+/** Renders the parameter form a built-in executor declares in its manifest. */
+function ExecutorPicker({ form, setForm, executors }: { form: ChallengeDraft; setForm: (form: ChallengeDraft) => void; executors: BuiltInExecutor[] }) {
+  const selected = executors.find((item) => item.id === form.executorId);
+  const properties = Object.entries(selected?.params?.properties ?? {});
+  const required = new Set(selected?.params?.required ?? []);
+  const choose = (executorId: string) => {
+    const next = executors.find((item) => item.id === executorId);
+    const defaults = Object.fromEntries(Object.entries(next?.params?.properties ?? {}).map(([key, property]) => [key, String(property.default ?? '')]));
+    setForm({ ...form, executorId, executorParams: { ...defaults, ...(executorId === form.executorId ? form.executorParams : {}) } });
+  };
+  return <>
+    <label className="span-2">内置执行器<select value={form.executorId} onChange={(event) => choose(event.target.value)}><option value="">请选择…</option>{executors.map((item) => <option key={item.id} value={item.id}>{item.title} · v{item.version}</option>)}</select>{selected?.description && <small className="field-hint">{selected.description}</small>}</label>
+    {properties.map(([key, property]) => (
+      <label key={key}>{property.title ?? key}{required.has(key) && <span className="field-hint">必填</span>}
+        {property.enum
+          ? <select value={form.executorParams[key] ?? ''} onChange={(event) => setForm({ ...form, executorParams: { ...form.executorParams, [key]: event.target.value } })}>{property.enum.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+          : <input value={form.executorParams[key] ?? ''} onChange={(event) => setForm({ ...form, executorParams: { ...form.executorParams, [key]: event.target.value } })} placeholder={property.description ?? ''} />}
+        {property.description && <small className="field-hint">{property.description}</small>}
+      </label>
+    ))}
+    {!executors.length && <small className="field-hint span-2">仓库中没有可用的内置执行器。</small>}
+  </>;
+}
+
+function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, executors, busy, title }: { form: ChallengeDraft; setForm: (form: ChallengeDraft) => void; onCancel: () => void; onSave: () => void; onUploadPackage: (file: File) => Promise<void>; executors: BuiltInExecutor[]; busy: boolean; title: string }) {
   const update = <K extends keyof ChallengeDraft>(key: K, value: ChallengeDraft[K]) => setForm({ ...form, [key]: value });
   const creatingChallenge = title === '创建赛题草稿';
   return <section className="panel admin-editor">
@@ -967,7 +995,7 @@ function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, bus
       <label>支持的编程语言<textarea value={form.languages} onChange={(event) => update('languages', event.target.value)} rows={3} /></label>
     </div>
      <div className="delivery-policy-editor"><div><strong>提交方式</strong><small>配置员工可用的提交方式。</small></div><label className="check-label"><input type="checkbox" checked={form.allowUpload} onChange={(event) => update('allowUpload', event.target.checked)} /> 上传 ZIP</label><label className="check-label"><input type="checkbox" checked={form.allowGit} onChange={(event) => update('allowGit', event.target.checked)} /> Git 仓库路径</label>{form.allowGit && <><label>Git 仓库路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label></>}<label>评分标准版本<input value={form.rubricVersion} onChange={(event) => update('rubricVersion', event.target.value)} /></label></div>
-     <div className="evaluation-engine-editor"><div><strong>评测引擎</strong><small>每个赛题版本独立配置评测引擎，管理员按输入契约执行并上传标准结果。</small></div><div className="form-grid"><label>引擎标识<input value={form.evaluationEngineId} onChange={(event) => update('evaluationEngineId', event.target.value)} placeholder="例如 parking-fee-evaluator" /></label><label>引擎版本<input value={form.evaluationEngineVersion} onChange={(event) => update('evaluationEngineVersion', event.target.value)} /></label><label>执行方式<select value={form.evaluationEngineMode} onChange={(event) => update('evaluationEngineMode', event.target.value as ChallengeDraft['evaluationEngineMode'])}><option value="EXTERNAL_CLI">管理员本地命令（线下录入）</option><option value="PLATFORM_LOCAL">平台内置执行器</option><option value="PACKAGED">上传评测引擎包</option></select></label><label>输入契约路径<input value={form.evaluationInputContract} onChange={(event) => update('evaluationInputContract', event.target.value)} /></label><label className="span-2">输出契约路径<input value={form.evaluationOutputContract} onChange={(event) => update('evaluationOutputContract', event.target.value)} /></label>{form.evaluationEngineMode === 'PACKAGED' && <label className="span-2">评测引擎包<span className="field-hint">zip：engine.json + 判题脚本 + 隐藏测试 + 提交契约</span><input type="file" accept=".zip" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUploadPackage(file); event.target.value = ''; }} />{form.enginePackageSummary ? <small className="engine-package-summary">已绑定：{form.enginePackageSummary}</small> : <small className="field-hint">上传后平台会校验 engine.json 并按内容哈希固化；引擎包变更等于判据变更，历史成绩需要重跑。</small>}</label>}{form.evaluationEngineMode === 'PLATFORM_LOCAL' && <><label>提交契约路径<span className="field-hint">仓库内相对路径</span><input value={form.localContractPath} onChange={(event) => update('localContractPath', event.target.value)} placeholder="challenges/xxx/submission-contract.json" /></label><label>隐藏测试目录<span className="field-hint">可留空</span><input value={form.localTestsDir} onChange={(event) => update('localTestsDir', event.target.value)} placeholder="challenges/xxx/hidden-tests" /></label><label>入口文件<input value={form.localEntry} onChange={(event) => update('localEntry', event.target.value)} placeholder="src/parking.py" /></label><label>入口函数<input value={form.localFunction} onChange={(event) => update('localFunction', event.target.value)} placeholder="calculate_fee" /></label><label>语言<input value={form.localLanguage} onChange={(event) => update('localLanguage', event.target.value)} /></label></>}</div><small className="field-hint">选择「平台本地执行器」后，训战可使用自动评估或管理员安排；选择「管理员本地命令」的赛题只能使用线下结果录入。</small></div>
+     <div className="evaluation-engine-editor"><div><strong>评测引擎</strong><small>每个赛题版本独立配置评测引擎，管理员按输入契约执行并上传标准结果。</small></div><div className="form-grid"><label>引擎标识<input value={form.evaluationEngineId} onChange={(event) => update('evaluationEngineId', event.target.value)} placeholder="例如 parking-fee-evaluator" /></label><label>引擎版本<input value={form.evaluationEngineVersion} onChange={(event) => update('evaluationEngineVersion', event.target.value)} /></label><label>执行方式<select value={form.evaluationEngineMode} onChange={(event) => update('evaluationEngineMode', event.target.value as ChallengeDraft['evaluationEngineMode'])}><option value="EXTERNAL_CLI">管理员线下评测（结果录入）</option><option value="PLATFORM_LOCAL">平台内置执行器</option><option value="PACKAGED">上传评测引擎包</option></select></label><label>输入契约路径<input value={form.evaluationInputContract} onChange={(event) => update('evaluationInputContract', event.target.value)} /></label><label className="span-2">输出契约路径<input value={form.evaluationOutputContract} onChange={(event) => update('evaluationOutputContract', event.target.value)} /></label>{form.evaluationEngineMode === 'PACKAGED' && <label className="span-2">评测引擎包<span className="field-hint">zip：engine.json + 判题脚本 + 隐藏测试 + 提交契约</span><input type="file" accept=".zip" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUploadPackage(file); event.target.value = ''; }} />{form.enginePackageSummary ? <small className="engine-package-summary">已绑定：{form.enginePackageSummary}</small> : <small className="field-hint">上传后平台会校验 engine.json 并按内容哈希固化；引擎包变更等于判据变更，历史成绩需要重跑。</small>}</label>}{form.evaluationEngineMode === 'PLATFORM_LOCAL' && <ExecutorPicker form={form} setForm={setForm} executors={executors} />}</div><small className="field-hint">选择「平台本地执行器」后，训战可使用自动评估或管理员安排；选择「管理员本地命令」的赛题只能使用线下结果录入。</small></div>
     <div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy} onClick={onSave}>{busy ? '保存中…' : '保存草稿'}</button></div>
   </section>;
 }

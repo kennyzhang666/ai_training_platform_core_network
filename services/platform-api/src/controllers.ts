@@ -12,6 +12,8 @@ import { computeDirectorySnapshotHash } from './snapshot-hash';
 import { AutoGradingQueue } from './auto-grading-queue';
 import { LocalGitSnapshotter } from './git-snapshotter';
 import { EnginePackageStore } from './engine-package-store';
+import { ExecutorRegistry } from './executor-registry';
+import { EvaluationTaskService } from './evaluation-task-service';
 
 @Controller('/api/v1')
 export class PlatformController {
@@ -22,6 +24,8 @@ export class PlatformController {
     @Inject(AutoGradingQueue) private readonly autoQueue: AutoGradingQueue,
     @Inject(LocalGitSnapshotter) private readonly localGit: LocalGitSnapshotter,
     @Inject(EnginePackageStore) private readonly enginePackages: EnginePackageStore,
+    @Inject(ExecutorRegistry) private readonly executors: ExecutorRegistry,
+    @Inject(EvaluationTaskService) private readonly tasks: EvaluationTaskService,
   ) {}
 
   private localWorkspaceHash(workspacePath: string): string {
@@ -67,6 +71,18 @@ export class PlatformController {
     const actorId = this.actor(employeeId);
     this.store.assertAdmin(actorId);
     return actorId;
+  }
+
+  /**
+   * A challenge may only select an executor that exists, with parameters its
+   * manifest declares. Checking here means a misconfigured challenge is
+   * rejected while the author is still editing it, not on the first delivery.
+   */
+  private assertExecutorSelection(version: { evaluationEngine?: { mode?: string; executor?: { id?: string; params?: Record<string, unknown> } } } | undefined): void {
+    const engine = version?.evaluationEngine;
+    if (engine?.mode !== 'PLATFORM_LOCAL') return;
+    if (!engine.executor?.id) throw new BadRequestException({ code: 'EXECUTOR_REQUIRED', message: '请选择一个内置执行器' });
+    this.executors.assertExecutorConfiguration(engine.executor.id, engine.executor.params ?? {});
   }
 
   private scheduleIfAutomatic(eventId: string, submissionId: string): void {
@@ -177,6 +193,59 @@ export class PlatformController {
     };
   }
 
+  /** Built-in executors shipped in the repository, for the challenge editor. */
+  @Get('/evaluation-executors')
+  evaluationExecutors(@Headers('x-employee-id') employeeId?: string) {
+    this.requireAdmin(employeeId);
+    return this.executors.list();
+  }
+
+  /**
+   * Lease queued evaluation tasks. The platform hands out immutable work
+   * descriptors; the evaluation environment runs the engine and posts results
+   * back, so no challenge or engine code executes while serving this request.
+   */
+  @Post('/evaluation-tasks:lease')
+  @HttpCode(200)
+  leaseEvaluationTasks(@Body() body: { workerId?: string; limit?: number; executorIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
+    this.requireAdmin(employeeId);
+    const tasks = this.tasks.lease(String(body.workerId ?? '').trim(), Number(body.limit ?? 1), Array.isArray(body.executorIds) ? body.executorIds : []);
+    return { leasedAt: new Date().toISOString(), tasks };
+  }
+
+  @Post('/evaluation-tasks/:runId/heartbeat')
+  @HttpCode(200)
+  heartbeatEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    this.requireAdmin(employeeId);
+    return this.tasks.heartbeat(runId, String(body.leaseId ?? ''));
+  }
+
+  @Post('/evaluation-tasks/:runId/complete')
+  @HttpCode(201)
+  completeEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string; result?: Record<string, unknown> }, @Headers('x-employee-id') employeeId?: string) {
+    this.requireAdmin(employeeId);
+    if (!body.result || typeof body.result !== 'object') throw new BadRequestException({ code: 'RESULT_REQUIRED', message: '缺少评测结果' });
+    return { accepted: true, stored: this.tasks.complete(runId, String(body.leaseId ?? ''), body.result) };
+  }
+
+  @Post('/evaluation-tasks/:runId/fail')
+  @HttpCode(200)
+  failEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string; reason?: string }, @Headers('x-employee-id') employeeId?: string) {
+    this.requireAdmin(employeeId);
+    return this.tasks.fail(runId, String(body.leaseId ?? ''), String(body.reason ?? ''));
+  }
+
+  /** Engine package bytes, so a worker can materialise the engine locally. */
+  @Get('/evaluation-engines/:packageHash/package')
+  async downloadEnginePackage(@Param('packageHash') packageHash: string, @Headers('x-employee-id') employeeId?: string, @Res({ passthrough: true }) response?: any) {
+    this.requireAdmin(employeeId);
+    const content = await this.enginePackages.readPackageBytes(packageHash);
+    response?.header('content-type', 'application/zip');
+    response?.header('content-length', String(content.length));
+    response?.header('content-disposition', `attachment; filename="${packageHash.slice(0, 16)}.zip"`);
+    return content;
+  }
+
   @Get('/admin/overview')
   adminOverview(@Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
@@ -254,6 +323,7 @@ export class PlatformController {
   createChallenge(@Body() body: Challenge & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...challenge } = body;
+    for (const version of challenge.versions ?? []) this.assertExecutorSelection(version);
     return this.store.createChallenge(challenge, actorId);
   }
 
@@ -288,6 +358,7 @@ export class PlatformController {
   createChallengeVersion(@Param('challengeId') challengeId: string, @Body() body: ChallengeVersion & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...version } = body;
+    this.assertExecutorSelection(version);
     return this.store.addChallengeVersion(challengeId, version, actorId);
   }
 
@@ -295,6 +366,7 @@ export class PlatformController {
   updateChallengeVersion(@Param('challengeId') challengeId: string, @Param('versionId') versionId: string, @Body() body: Partial<ChallengeVersion> & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...patch } = body;
+    if (patch.evaluationEngine) this.assertExecutorSelection(patch as { evaluationEngine?: { mode?: string; executor?: { id?: string; params?: Record<string, unknown> } } });
     return this.store.updateChallengeVersion(challengeId, versionId, patch, actorId);
   }
 

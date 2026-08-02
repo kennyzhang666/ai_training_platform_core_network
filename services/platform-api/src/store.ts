@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join, resolve } from 'node:path';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  LocalEvaluationConfig,
   EventConfig,
   GradingRun,
   StoredResult,
@@ -116,16 +117,19 @@ function validateEvaluationEngine(engine?: EvaluationEngineConfig): void {
   // runnable if it carries the parameters the built-in grader needs, and
   // EXTERNAL_CLI must not pretend to be runnable in-process.
   if (engine.mode === 'PLATFORM_LOCAL') {
-    const local = engine.local;
-    if (!local?.contractPath?.trim() || !local.entry?.trim() || !local.function?.trim()) {
-      throw new BadRequestException('PLATFORM_LOCAL engine requires local.contractPath, local.entry and local.function');
+    // Which built-in executor, plus its parameters. The registry checks that
+    // the executor exists and that the parameters satisfy its declared schema;
+    // here we only enforce the shape.
+    const executorId = engine.executor?.id;
+    if (!executorId?.trim()) {
+      throw new BadRequestException({ code: 'EXECUTOR_REQUIRED', message: 'PLATFORM_LOCAL 引擎必须选择一个内置执行器' });
     }
-    assertRepositoryPath(local.contractPath, 'evaluation engine local.contractPath');
-    assertRepositoryPath(local.entry, 'evaluation engine local.entry');
-    if (local.testsDir) assertRepositoryPath(local.testsDir, 'evaluation engine local.testsDir');
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(local.function)) throw new BadRequestException('evaluation engine local.function is invalid');
-  } else if (engine.local) {
-    throw new BadRequestException(`${engine.mode} engine must not declare a local executor configuration`);
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$/.test(executorId)) throw new BadRequestException('evaluation engine executor id is invalid');
+    for (const [key, value] of Object.entries(engine.executor?.params ?? {})) {
+      if (typeof value === 'string' && /Path$|Dir$/.test(key)) assertRepositoryPath(value, `executor param ${key}`);
+    }
+  } else if (engine.executor) {
+    throw new BadRequestException(`${engine.mode} engine must not declare a built-in executor`);
   }
   if (engine.mode === 'PACKAGED') {
     if (!/^[a-f0-9]{64}$/.test(engine.package?.packageHash ?? '')) {
@@ -136,13 +140,32 @@ function validateEvaluationEngine(engine?: EvaluationEngineConfig): void {
   }
 }
 
-const PARKING_FEE_LOCAL_ENGINE: EvaluationEngineConfig['local'] = {
-  contractPath: 'challenges/parking-fee-v1/submission-contract.json',
-  testsDir: 'challenges/parking-fee-v1/hidden-tests',
-  entry: 'src/parking.py',
-  function: 'calculate_fee',
-  language: 'python',
+const PARKING_FEE_EXECUTOR: EvaluationEngineConfig['executor'] = {
+  id: 'drill-grader',
+  params: {
+    contractPath: 'challenges/parking-fee-v1/submission-contract.json',
+    testsDir: 'challenges/parking-fee-v1/hidden-tests',
+    entry: 'src/parking.py',
+    function: 'calculate_fee',
+    language: 'python',
+    zone: 'yellow',
+  },
 };
+
+/** Move a pre-registry `local` block onto the built-in executor it described. */
+function executorFromLegacyLocal(local: LocalEvaluationConfig): EvaluationEngineConfig['executor'] {
+  return {
+    id: 'drill-grader',
+    params: {
+      contractPath: local.contractPath,
+      ...(local.testsDir ? { testsDir: local.testsDir } : {}),
+      entry: local.entry,
+      function: local.function,
+      language: local.language ?? 'python',
+      zone: 'yellow',
+    },
+  };
+}
 
 /** A trigger is only offered when the challenge engine can actually serve it. */
 function assertTriggerMatchesEngine(engine: EvaluationEngineConfig, trigger: TriggerType): void {
@@ -326,7 +349,7 @@ export class PlatformStore {
           id: 'parking-fee-evaluator',
           version: '1.0.0',
           mode: 'PLATFORM_LOCAL',
-          local: { ...PARKING_FEE_LOCAL_ENGINE! },
+          executor: { ...PARKING_FEE_EXECUTOR!, params: { ...PARKING_FEE_EXECUTOR!.params } },
           input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
           output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
         },
@@ -386,15 +409,27 @@ export class PlatformStore {
       }
       for (const version of challenge.versions) {
         if (version.evaluationEngine) continue;
-        const local = version.id === 'parking-fee-01@1' ? { ...PARKING_FEE_LOCAL_ENGINE! } : undefined;
+        const local = version.id === 'parking-fee-01@1' ? { ...PARKING_FEE_EXECUTOR!, params: { ...PARKING_FEE_EXECUTOR!.params } } : undefined;
         version.evaluationEngine = {
           id: `${challenge.id}-evaluator`,
           version: '1.0.0',
           mode: local ? 'PLATFORM_LOCAL' : 'EXTERNAL_CLI',
-          ...(local ? { local } : {}),
+          ...(local ? { executor: local } : {}),
           input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
           output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
         };
+        seeded = true;
+      }
+    }
+    // Executor configuration used to be free-text paths on the engine
+    // (`evaluationEngine.local`). Move it onto the built-in executor it always
+    // described, so the registry becomes the only way to configure one.
+    for (const challenge of this.challenges.values()) {
+      for (const version of challenge.versions) {
+        const legacy = version.evaluationEngine?.local;
+        if (!legacy || version.evaluationEngine?.executor) continue;
+        version.evaluationEngine = { ...version.evaluationEngine!, mode: 'PLATFORM_LOCAL', executor: executorFromLegacyLocal(legacy) };
+        delete version.evaluationEngine.local;
         seeded = true;
       }
     }
@@ -408,8 +443,8 @@ export class PlatformStore {
       if (!legacy) continue;
       for (const challenge of this.challenges.values()) {
         const version = challenge.versions.find((item) => item.id === event.challengeVersion);
-        if (!version?.evaluationEngine || version.evaluationEngine.local) continue;
-        version.evaluationEngine = { ...version.evaluationEngine, mode: 'PLATFORM_LOCAL', local: { ...legacy } };
+        if (!version?.evaluationEngine || version.evaluationEngine.executor) continue;
+        version.evaluationEngine = { ...version.evaluationEngine, mode: 'PLATFORM_LOCAL', executor: executorFromLegacyLocal(legacy) };
         seeded = true;
       }
       delete event.localGrading;
@@ -1625,6 +1660,9 @@ export class PlatformStore {
   private markRunFailed(run: GradingRun, submission: SubmissionRecord, reason?: string): void {
     run.status = 'FAILED';
     run.failureReason = reason?.slice(0, 2000);
+    run.leaseId = undefined;
+    run.leasedBy = undefined;
+    run.leaseExpiresAt = undefined;
     // Keep RECEIVED for compatibility with older persisted submissions and
     // clients. The run itself is the authoritative failed state; the failure
     // reason is exposed on the submission so the console can show retryable
@@ -2746,9 +2784,10 @@ export class PlatformStore {
         submissionSource: event.submissionSource,
         reveal: event.reveal,
       },
-      // `local` is in-process executor configuration; an external evaluator
-      // must not receive repository paths it has no business reading.
-      challenge: (({ local: _local, ...engine }) => ({
+      // Executor selection, parameters and package binding are in-platform
+      // execution configuration; an external evaluator receives the engine's
+      // identity and contracts, not the paths the platform would run.
+      challenge: (({ local: _local, executor: _executor, package: _package, ...engine }) => ({
         id: this.challengeForVersion(event.challengeVersion).id,
         title: this.getChallengeVersion(event.challengeVersion).title,
         version: this.getChallengeVersion(event.challengeVersion).version,
@@ -2899,6 +2938,50 @@ export class PlatformStore {
     return run;
   }
 
+  /** Every run, unfiltered. Platform-internal task scheduling only. */
+  systemRuns(): GradingRun[] {
+    return [...this.runs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  /** Hand a queued run to an evaluation worker. */
+  acquireLease(runId: string, workerId: string, leaseSeconds: number): { leaseId: string; leaseExpiresAt: string } {
+    const run = this.getRun(runId);
+    if (run.status !== 'QUEUED') throw new ConflictException(`grading run cannot be leased from state ${run.status}`);
+    run.status = 'RUNNING';
+    run.leaseId = `lease-${randomUUID()}`;
+    run.leasedBy = workerId;
+    run.leaseExpiresAt = new Date(Date.now() + leaseSeconds * 1000).toISOString();
+    this.getSubmission(run.submissionId).gradingStatus = 'RUNNING';
+    this.persist();
+    return { leaseId: run.leaseId, leaseExpiresAt: run.leaseExpiresAt };
+  }
+
+  extendLease(runId: string, leaseSeconds: number): string {
+    const run = this.getRun(runId);
+    run.leaseExpiresAt = new Date(Date.now() + leaseSeconds * 1000).toISOString();
+    this.persist();
+    return run.leaseExpiresAt;
+  }
+
+  /**
+   * Return a leased run to the queue. Used when a lease expires or when a
+   * worker declines the task; the delivery itself is untouched, so the next
+   * worker grades exactly the same immutable snapshot.
+   */
+  releaseLease(runId: string, reason?: string): GradingRun {
+    const run = this.getRun(runId);
+    if (run.status !== 'RUNNING') return run;
+    run.status = 'QUEUED';
+    run.leaseId = undefined;
+    run.leasedBy = undefined;
+    run.leaseExpiresAt = undefined;
+    if (reason) run.failureReason = reason;
+    const submission = this.getSubmission(run.submissionId);
+    submission.gradingStatus = 'QUEUED';
+    this.persist();
+    return run;
+  }
+
   getRun(runId: string): GradingRun {
     const run = this.runs.get(runId);
     if (!run) throw new NotFoundException(`grading run not found: ${runId}`);
@@ -3003,6 +3086,9 @@ export class PlatformStore {
     const previousRunStatus = run.status;
     run.status = 'GRADED';
     run.failureReason = undefined;
+    run.leaseId = undefined;
+    run.leasedBy = undefined;
+    run.leaseExpiresAt = undefined;
     submission.resultId = stored.resultId;
     submission.state = event.reveal === 'IMMEDIATE' ? 'REVEALED' : 'SEALED';
     submission.gradingStatus = 'COMPLETED';

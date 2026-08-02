@@ -121,6 +121,50 @@ export interface GradingRun {
   createdAt: string;
   attempt?: number;
   failureReason?: string;
+  /**
+   * Lease held by the evaluation worker currently running this task. The
+   * platform hands work out and takes results back; it does not track worker
+   * liveness, so an expired lease simply returns the run to the queue.
+   */
+  leaseId?: string;
+  leasedBy?: string;
+  leaseExpiresAt?: string;
+}
+
+/** One unit of work handed to an evaluation worker. */
+export interface EvaluationTask {
+  runId: string;
+  leaseId: string;
+  leaseExpiresAt: string;
+  attempt: number;
+  triggerType: TriggerType;
+  idempotencyKey: string;
+  engine: {
+    source: 'BUILT_IN' | 'PACKAGE';
+    id: string;
+    version: string;
+    packageHash: string;
+    entrypoint: string;
+    requirements?: string;
+    params: Record<string, unknown>;
+    limits: { wallClockSeconds: number; memoryMB: number; outputBytes: number };
+    assets: Record<string, string>;
+  };
+  challenge: { id: string; title: string; challengeVersion: string; rubricVersion: string; zone?: 'YELLOW' | 'BLUE' };
+  subject: { id: string; name?: string; orgPath?: string };
+  submission: {
+    id: string;
+    eventId: string;
+    sourceType: SubmissionSource;
+    snapshotHash: string;
+    artifactHash?: string;
+    artifactUrl?: string;
+    repository?: string;
+    branch?: string;
+    commitSha?: string;
+    workspacePath?: string;
+    submittedAt: string;
+  };
 }
 
 /**
@@ -145,7 +189,11 @@ export interface EnginePackageManifest {
   schemaVersion: '1.0';
   id: string;
   version: string;
+  /** Display name in the built-in executor picker. */
+  title?: string;
   description?: string;
+  /** JSON Schema for the per-challenge parameters this engine accepts. */
+  params?: { type: 'object'; required?: string[]; properties?: Record<string, Record<string, unknown>> };
   runtime: {
     type: 'python';
     entrypoint: string;
@@ -169,6 +217,18 @@ export interface EnginePackageManifest {
   metadata?: Record<string, unknown>;
 }
 
+/** An engine resolved for execution, whether built in or uploaded. */
+export interface ResolvedEngine {
+  source: 'BUILT_IN' | 'PACKAGE';
+  id: string;
+  version: string;
+  /** Content hash: package bytes for uploads, directory tree for built-ins. */
+  packageHash: string;
+  root: string;
+  manifest: EnginePackageManifest;
+  params: Record<string, unknown>;
+}
+
 export interface EnginePackageRecord {
   packageHash: string;
   size: number;
@@ -185,11 +245,25 @@ export interface EnginePackageReference {
   uploadedBy?: string;
 }
 
+/** A built-in executor from the repository `executors/` directory. */
+export interface PlatformExecutorReference {
+  id: string;
+  version?: string;
+  /** Values for the parameters the executor manifest declares. */
+  params?: Record<string, unknown>;
+}
+
 export interface EvaluationEngineConfig {
   id: string;
   version: string;
   mode: EvaluationEngineMode;
-  /** Required by PLATFORM_LOCAL, rejected for EXTERNAL_CLI. */
+  /** Required by PLATFORM_LOCAL: which built-in executor, with its parameters. */
+  executor?: PlatformExecutorReference;
+  /**
+   * @deprecated Superseded by `executor`. The built-in grader used to be
+   * configured through free-text paths instead of a chosen executor; kept only
+   * to migrate challenge versions persisted before the registry existed.
+   */
   local?: LocalEvaluationConfig;
   /** Required by PACKAGED, rejected for the other modes. */
   package?: EnginePackageReference;

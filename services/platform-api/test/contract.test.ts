@@ -59,7 +59,9 @@ test('the external evaluation input manifest satisfies evaluation-input.schema.j
   addFormats(ajv);
   const validate = ajv.compile(schema);
   assert.equal(validate(JSON.parse(JSON.stringify(batch))), true, JSON.stringify(validate.errors));
-  // `local` is in-process executor configuration and must stay off the manifest.
-  assert.equal((batch.challenge.evaluationEngine as { local?: unknown }).local, undefined);
-  assert.equal(store.evaluationEngineForSubmission(submission).local?.entry, 'src/parking.py');
+  // In-platform execution configuration must stay off the outbound manifest.
+  for (const key of ['local', 'executor', 'package'] as const) {
+    assert.equal((batch.challenge.evaluationEngine as Record<string, unknown>)[key], undefined);
+  }
+  assert.equal((store.evaluationEngineForSubmission(submission).executor?.params as { entry?: string })?.entry, 'src/parking.py');
 });

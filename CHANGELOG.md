@@ -1,5 +1,35 @@
 # 更新记录
 
+## 0.5.0 - 2026-08-02
+
+评测改为拉取式：平台发任务、收结果，不再执行赛题或引擎代码；内置执行器改为下拉选择；三种评测方式统一到同一组契约。
+
+### 评测环境主动领取任务
+
+- 新增拉取协议：`POST /evaluation-tasks:lease` 领取，`/complete`、`/fail`、`/heartbeat` 回传，`GET /evaluation-engines/{hash}/package` 下载引擎包。
+- 任务带租约。worker 崩溃不需要平台感知：租约到期任务自动回到队列，下一个 worker 拿到同一份不可变快照和同一个幂等键。
+- 新增独立评测环境 `scripts/evaluation-worker.mjs`：领取任务、物化引擎与交付件、经沙箱执行、回传结果。
+- API 内嵌的执行器降级为单机开发用途，`EMBEDDED_EVALUATION_WORKER=false` 可完全关闭。
+- 结果入库的三道关卡不变：Schema 校验、服务端重算总分、以登记值覆盖员工身份。worker 报错的总分、伪造的身份都进不来。
+
+### 内置执行器可下拉选择
+
+- 仓库 `executors/<id>/` 每个目录是一个可选执行器，随平台发布。新增 `executors/drill-grader/`，把原先靠命令行参数驱动的内置判题器包装成标准执行器。
+- 新增 `GET /api/v1/evaluation-executors`；管理后台的赛题编辑器改为下拉选择执行器，并按清单里的 `params`（JSON Schema）动态渲染参数表单，不再手填路径。
+- 保存赛题版本时即校验：执行器存在、必填参数齐全、路径参数是仓库内相对路径且真实存在。此前路径写错要到评测时才暴露，`testsDir` 写错更会静默把 Verify 维度整个跳过。
+- 执行器目录的内容哈希参与幂等键，改内置执行器等同于改判据。
+
+### 三种方式共用一组契约
+
+- 内置执行器和上传引擎包共用 `evaluation-engine-package.schema.json`（清单）与 `engine-invocation.schema.json`（调用输入），由同一个 `EngineRunner` 执行。内置执行器不再靠命令行参数被特殊对待。
+- 引擎清单新增 `title` 与 `params`；调用契约新增 `engine.source` 与 `params`。
+- 下发给平台外评测者的批量清单不再包含 `executor`/`package`/`local` 等平台内执行配置。
+- `evaluationEngine.local` 作废，加载历史数据时迁移为 `evaluationEngine.executor`。
+
+### 修复
+
+- 修复 `ExecutorRegistry` 缺少显式注入令牌导致依赖为空的问题。该缺陷只在通过 Nest 容器解析上传引擎包时触发，手工构造服务的单元测试无法覆盖，现已补充经真实容器的回归测试。
+
 ## 0.4.0 - 2026-08-02
 
 出题人可以自助上传评测引擎包，不必改平台代码，也不必把隐藏测试提交到平台仓库。

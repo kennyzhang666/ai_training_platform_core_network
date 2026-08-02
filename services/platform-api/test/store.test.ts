@@ -218,7 +218,7 @@ test('event listings enforce challenge organization and participant scope', () =
       rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'PUBLISHED',
       evaluationEngine: {
         id: 'org-private-evaluator', version: '1.0.0', mode: 'PLATFORM_LOCAL',
-        local: { contractPath: 'challenges/parking-fee-v1/submission-contract.json', testsDir: 'challenges/parking-fee-v1/hidden-tests', entry: 'src/parking.py', function: 'calculate_fee', language: 'python' },
+        executor: { id: 'drill-grader', params: { contractPath: 'challenges/parking-fee-v1/submission-contract.json', testsDir: 'challenges/parking-fee-v1/hidden-tests', entry: 'src/parking.py', function: 'calculate_fee' } },
         input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
         output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
       },
@@ -290,8 +290,11 @@ test('a session resolves its executor from the challenge engine, not from the se
   const submission = store.createSubmission(event.id, 'w00124', { ...uploadSnapshot, snapshotHash: '9999999999999999999999999999999999999999999999999999999999999999' });
   const engine = store.evaluationEngineForSubmission(submission);
   assert.equal(engine.mode, 'PLATFORM_LOCAL');
-  assert.equal(engine.local?.entry, 'src/parking.py');
-  assert.equal(engine.local?.testsDir, 'challenges/parking-fee-v1/hidden-tests');
+  // The challenge picks a built-in executor from the registry and supplies its
+  // parameters, instead of carrying free-text executor paths of its own.
+  assert.equal(engine.executor?.id, 'drill-grader');
+  assert.equal(engine.executor?.params?.entry, 'src/parking.py');
+  assert.equal(engine.executor?.params?.testsDir, 'challenges/parking-fee-v1/hidden-tests');
 });
 
 test('manual Git events can defer commit pinning until the deadline', () => {
@@ -521,11 +524,11 @@ test('engine mode and executor configuration are validated together', () => {
   };
   const create = (engine: Record<string, unknown>) => store.createChallenge({ id: 'engine-validation-01', ownerOrgPath: '/', origin: 'OFFICIAL', status: 'DRAFT', versions: [version(engine) as never] }, 'w00123');
 
-  assert.throws(() => create({ ...base, mode: 'PLATFORM_LOCAL' }), /PLATFORM_LOCAL engine requires/);
-  assert.throws(() => create({ ...base, mode: 'EXTERNAL_CLI', local: { contractPath: 'a.json', entry: 'b.py', function: 'c' } }), /must not declare a local executor/);
-  assert.throws(() => create({ ...base, mode: 'PLATFORM_LOCAL', local: { contractPath: '../escape.json', entry: 'b.py', function: 'c' } }), /repository-relative path/);
-  const created = create({ ...base, mode: 'PLATFORM_LOCAL', local: { contractPath: 'challenges/x/contract.json', entry: 'src/x.py', function: 'solve' } });
-  assert.equal(created.versions[0].evaluationEngine?.local?.function, 'solve');
+  assert.throws(() => create({ ...base, mode: 'PLATFORM_LOCAL' }), /必须选择一个内置执行器|EXECUTOR_REQUIRED/);
+  assert.throws(() => create({ ...base, mode: 'EXTERNAL_CLI', executor: { id: 'drill-grader' } }), /must not declare a built-in executor/);
+  assert.throws(() => create({ ...base, mode: 'PLATFORM_LOCAL', executor: { id: 'drill-grader', params: { contractPath: '../escape.json' } } }), /repository-relative path/);
+  const created = create({ ...base, mode: 'PLATFORM_LOCAL', executor: { id: 'drill-grader', params: { contractPath: 'challenges/x/contract.json', entry: 'src/x.py', function: 'solve' } } });
+  assert.equal((created.versions[0].evaluationEngine?.executor?.params as { function?: string })?.function, 'solve');
 });
 
 // The engine identity is the grader component of the idempotency key on every
@@ -533,13 +536,13 @@ test('engine mode and executor configuration are validated together', () => {
 // produce a different key instead of reusing a score computed by older rules.
 test('the engine version participates in the idempotency key for every trigger', () => {
   const store = new PlatformStore(':memory:');
-  const local = { contractPath: 'challenges/parking-fee-v1/submission-contract.json', testsDir: 'challenges/parking-fee-v1/hidden-tests', entry: 'src/parking.py', function: 'calculate_fee', language: 'python' };
+  const executor = { id: 'drill-grader', params: { contractPath: 'challenges/parking-fee-v1/submission-contract.json', testsDir: 'challenges/parking-fee-v1/hidden-tests', entry: 'src/parking.py', function: 'calculate_fee' } };
   const makeVersion = (versionNumber: number, engineVersion: string) => ({
     id: `engine-key-01@${versionNumber}`, challengeId: 'engine-key-01', version: versionNumber, title: '引擎版本题', zone: 'YELLOW' as const,
     languagePolicy: { mode: 'fixed', languages: ['python'] }, deliveryPolicy: { allowedSources: ['UPLOAD'], upload: { formats: ['zip'] } },
     rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'DRAFT' as const,
     evaluationEngine: {
-      id: 'engine-key-evaluator', version: engineVersion, mode: 'PLATFORM_LOCAL' as const, local,
+      id: 'engine-key-evaluator', version: engineVersion, mode: 'PLATFORM_LOCAL' as const, executor,
       input: { format: 'JSON' as const, schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
       output: { format: 'JSON' as const, schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
     },
