@@ -1,0 +1,19 @@
+{
+  "name": "ai-training-platform",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.8.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev:api": "pnpm --filter @ai-training/platform-api dev",
+    "dev:web": "pnpm --filter @ai-training/web dev",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "contract:test": "pnpm --filter @ai-training/platform-api contract:test",
+    "grader:test": "node scripts/run-grader-tests.mjs",
+    "acceptance:local": "pnpm --filter @ai-training/platform-api exec tsx --test test/concurrency.test.ts"
+  }
+}

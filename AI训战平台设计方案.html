@@ -1,0 +1,1881 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>新员工 AI 能力训战平台 · 设计方案</title>
+<style>
+:root{
+  color-scheme: light;
+  --surface:#fcfcfb; --page:#f9f9f7; --raise:#ffffff;
+  --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
+  --grid:#e1e0d9; --rule:#c3c2b7;
+  --blue:#2a78d6; --amber:#eda100; --aqua:#1baf7a; --orange:#eb6834; --violet:#4a3aa7;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --border:rgba(11,11,11,.10);
+  --shadow:0 1px 2px rgba(11,11,11,.04),0 8px 24px rgba(11,11,11,.06);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --surface:#1a1a19; --page:#0d0d0d; --raise:#232322;
+    --ink-1:#fff; --ink-2:#c3c2b7; --ink-3:#898781;
+    --grid:#2c2c2a; --rule:#383835;
+    --blue:#3987e5; --amber:#c98500; --aqua:#199e70; --orange:#d95926; --violet:#9085e9;
+    --border:rgba(255,255,255,.10);
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.28);
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--page);color:var(--ink-1);font-family:var(--sans);
+  font-size:15px;line-height:1.78;-webkit-font-smoothing:antialiased}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* ---------- 布局 ---------- */
+.shell{display:grid;grid-template-columns:236px minmax(0,1fr);max-width:1240px;margin:0 auto;gap:0}
+.side{position:sticky;top:0;height:100vh;overflow-y:auto;padding:30px 18px 40px;
+  border-right:1px solid var(--border)}
+.side .logo{font-weight:700;font-size:14px;letter-spacing:-.01em;line-height:1.45;margin-bottom:4px}
+.side .logo b{color:var(--blue)}
+.side .sub{font-size:11.5px;color:var(--ink-3);margin-bottom:20px;line-height:1.5}
+.side a{display:block;font-size:13px;color:var(--ink-2);padding:5px 10px;border-radius:7px;
+  margin:1px 0;line-height:1.5}
+.side a:hover{background:color-mix(in srgb,var(--blue) 8%,transparent);text-decoration:none;color:var(--ink-1)}
+.side a.on{background:color-mix(in srgb,var(--blue) 12%,transparent);color:var(--blue);font-weight:600}
+.side a .n{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-right:7px}
+.side a.sub2{padding-left:32px;font-size:12.5px}
+main{padding:44px 40px 110px;min-width:0}
+@media(max-width:900px){
+  .shell{grid-template-columns:1fr}
+  .side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--border);padding:18px 22px}
+  .side nav{display:flex;flex-wrap:wrap;gap:2px}
+  .side a{padding:4px 9px} .side a.sub2{display:none}
+  main{padding:28px 22px 80px}
+}
+
+/* ---------- 文字 ---------- */
+h1{font-size:33px;line-height:1.28;margin:0 0 10px;letter-spacing:-.024em}
+h2{font-size:23px;margin:64px 0 12px;letter-spacing:-.014em;padding-top:20px;
+  border-top:2px solid var(--ink-1);scroll-margin-top:20px}
+h2:first-of-type{margin-top:34px}
+h2 .n{font-family:var(--mono);font-size:14px;color:var(--ink-3);margin-right:12px;font-weight:700}
+h3{font-size:17px;margin:34px 0 8px;letter-spacing:-.008em;scroll-margin-top:20px}
+h4{font-size:14px;margin:20px 0 5px;color:var(--ink-2)}
+p{margin:9px 0}
+.lede{font-size:16.5px;color:var(--ink-2);line-height:1.72}
+.muted{color:var(--ink-3);font-size:13px}
+.eyebrow{font-size:11.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--ink-3);font-weight:700}
+ul,ol{margin:9px 0;padding-left:23px}
+li{margin:5px 0}
+code{font-family:var(--mono);font-size:12.5px;background:var(--grid);padding:1.5px 5px;border-radius:4px}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:16px 18px;
+  overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.68;margin:13px 0}
+pre code{background:none;padding:0;font-size:inherit}
+hr{border:0;border-top:1px solid var(--grid);margin:28px 0}
+
+/* ---------- 组件 ---------- */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:20px 22px;margin:16px 0}
+.card.tight{padding:14px 17px}
+.card>:first-child{margin-top:0} .card>:last-child{margin-bottom:0}
+.ac{border-left:3px solid var(--blue);border-radius:0 13px 13px 0}
+.ac.y{border-left-color:var(--amber)} .ac.g{border-left-color:var(--good)}
+.ac.r{border-left-color:var(--crit)} .ac.v{border-left-color:var(--violet)}
+.ac.o{border-left-color:var(--orange)}
+
+.chip{display:inline-block;font-size:11.5px;padding:3px 10px;border:1px solid var(--border);
+  border-radius:100px;background:var(--surface);color:var(--ink-2);font-weight:500;white-space:nowrap}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:5px;
+  letter-spacing:.03em;white-space:nowrap;vertical-align:1px}
+.tag.blue{background:color-mix(in srgb,var(--blue) 15%,transparent);color:var(--blue)}
+.tag.yellow{background:color-mix(in srgb,var(--amber) 22%,transparent);color:#8a6000}
+.tag.both{background:color-mix(in srgb,var(--aqua) 17%,transparent);color:var(--aqua)}
+.tag.auto{background:var(--grid);color:var(--ink-3)}
+.lv{display:block;font-size:11px;font-weight:700;padding:3px 6px;border-radius:5px;
+  letter-spacing:.03em;white-space:nowrap;text-align:center;min-width:0}
+.lv.A{background:color-mix(in srgb,var(--good) 17%,transparent);color:var(--good)}
+.lv.B{background:color-mix(in srgb,var(--blue) 17%,transparent);color:var(--blue)}
+.lv.C{background:color-mix(in srgb,var(--serious) 24%,transparent);color:#a4501f}
+.lv.D{background:color-mix(in srgb,var(--crit) 16%,transparent);color:var(--crit)}
+@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])) .lv.C{color:#f0a173}}
+.tag.human{background:color-mix(in srgb,var(--violet) 15%,transparent);color:var(--violet)}
+@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])) .tag.yellow{color:#f0c05a}}
+
+table{width:100%;border-collapse:collapse;margin:13px 0;font-size:13.5px}
+th{text-align:left;font-weight:600;color:var(--ink-2);border-bottom:1.5px solid var(--rule);
+  padding:8px 12px 8px 0;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
+td{border-bottom:1px solid var(--grid);padding:10px 12px 10px 0;vertical-align:top;overflow-wrap:anywhere}
+th:last-child,td:last-child{padding-right:0}
+.tnum{font-variant-numeric:tabular-nums;white-space:nowrap}
+table.compact td,table.compact th{padding:6px 10px 6px 0;font-size:12.5px}
+
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:860px){.g3,.g4{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:15px 17px}
+.stat .v{font-size:25px;font-weight:700;line-height:1.2;letter-spacing:-.02em}
+.stat .l{font-size:12px;color:var(--ink-3);margin-top:2px;line-height:1.45}
+
+details{border:1px solid var(--border);border-radius:11px;background:var(--surface);margin:12px 0;overflow:hidden}
+details>summary{cursor:pointer;padding:13px 18px;font-weight:600;font-size:14px;list-style:none;
+  display:flex;align-items:center;gap:9px;user-select:none}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸";color:var(--ink-3);font-size:12px;transition:transform .15s;flex:none}
+details[open]>summary::before{transform:rotate(90deg)}
+details>summary:hover{background:color-mix(in srgb,var(--blue) 5%,transparent)}
+details .body{padding:4px 18px 17px;border-top:1px solid var(--grid)}
+details .body>:first-child{margin-top:14px}
+summary .sp{margin-left:auto;font-weight:400;color:var(--ink-3);font-size:12.5px}
+
+/* 架构图 */
+.arch{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:22px;margin:18px 0;overflow-x:auto}
+.arch svg{display:block;min-width:660px;width:100%;height:auto}
+.arch text{font-family:var(--sans);fill:var(--ink-1)}
+.arch .lbl{font-size:12px;fill:var(--ink-2)}
+.arch .sm{font-size:10.5px;fill:var(--ink-3)}
+.arch .ttl{font-size:13px;font-weight:600}
+
+/* 梯度条 */
+.grad{display:grid;grid-template-columns:112px minmax(0,1fr) 132px;gap:9px 13px;
+  align-items:center;margin:14px 0}
+.grad .lab{font-size:13.5px;font-weight:600}
+.grad .track{height:22px;border-radius:7px;background:var(--grid);overflow:hidden;min-width:0}
+.grad .fill{height:100%;border-radius:7px;min-width:6px}
+.grad .gn{font-size:12px;font-weight:600;color:var(--ink-2)}
+@media(max-width:600px){
+  .grad{grid-template-columns:1fr auto;gap:5px 10px}
+  .grad .lab{grid-column:1} .grad .gn{grid-column:2;text-align:right}
+  .grad .track{grid-column:1 / -1;margin-bottom:8px}
+}
+
+/* 界面示意 */
+.mock{border:1px solid var(--rule);border-radius:11px;overflow:hidden;margin:14px 0;background:var(--raise);font-size:12.5px}
+.mock .bar{background:color-mix(in srgb,var(--ink-3) 10%,transparent);padding:7px 13px;
+  font-size:11.5px;color:var(--ink-3);border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center}
+.mock .bar b{color:var(--ink-2);font-weight:600}
+.mock .body{padding:15px 17px}
+.mock .row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--grid)}
+.mock .row:last-child{border-bottom:0}
+.mock .row .nm{flex:1;font-weight:500}
+.mock .bar2{height:7px;border-radius:4px;background:var(--grid);width:120px;overflow:hidden;flex:none}
+.mock .bar2 i{display:block;height:100%;border-radius:4px}
+
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13.5px;margin:10px 0}
+.kv dt{color:var(--ink-3);white-space:nowrap}
+.kv dd{margin:0}
+
+.note{font-size:13px;color:var(--ink-3);margin-top:9px;line-height:1.65}
+.foot{margin-top:70px;padding-top:20px;border-top:1px solid var(--grid);font-size:12.5px;color:var(--ink-3)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 11px;border-radius:100px;
+  background:color-mix(in srgb,var(--good) 12%,transparent);color:var(--good);font-weight:600}
+
+@media(max-width:640px){
+  main table{display:block;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  main table th,main table td{white-space:normal}
+}
+@media print{
+  body{background:#fff;font-size:10.5pt}
+  .side{display:none} .shell{grid-template-columns:1fr;max-width:none}
+  main{padding:0}
+  h2{page-break-after:avoid} .card,table,pre,details,.arch{page-break-inside:avoid}
+  details{border:0} details .body{display:block!important;padding-left:0}
+  details>summary::before{content:""}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+<aside class="side">
+  <div class="logo">新员工 <b>AI 能力训战平台</b></div>
+  <div class="sub">华为 ICT BG · 云核心网产品线<br>分组核心网控制开发部</div>
+  <nav>
+    <a href="#s1"><span class="n">01</span>方案概览</a>
+    <a href="#s2"><span class="n">02</span>三维正交模型</a>
+        <a href="#s24" class="sub2">2.4 组织层级与作用域</a>
+    <a href="#s3"><span class="n">03</span>架构与数据流</a>
+        <a href="#s31" class="sub2">3.1 蓝区批量评分</a>
+    <a href="#s4"><span class="n">04</span>评测体系</a>
+    <a href="#s41" class="sub2">4.1 统一 Schema</a>
+    <a href="#s42" class="sub2">4.2 四维度 100 分</a>
+    <a href="#s43" class="sub2">4.3 分区差异梯度</a>
+    <a href="#s44" class="sub2">4.4 结构化抽取阅卷</a>
+    <a href="#s45" class="sub2">4.5 多语言公平性</a>
+    <a href="#s46" class="sub2">4.6 模型基准库</a>
+    <a href="#s47" class="sub2">4.7 CI 评测流水线</a>
+    <a href="#s48" class="sub2">4.8 无标准答案的挑战题</a>
+    <a href="#s49" class="sub2">4.9 提交契约与校验</a>
+    <a href="#s5"><span class="n">05</span>平台功能</a>
+    <a href="#s51" class="sub2">5.1 单场评测报告</a>
+    <a href="#s52" class="sub2">5.2 个人能力画像</a>
+    <a href="#s53" class="sub2">5.3 赛季积分制</a>
+    <a href="#s54" class="sub2">5.4 管理端</a>
+    <a href="#s6"><span class="n">06</span>出题方法论</a>
+    <a href="#s66" class="sub2">6.6 众包出题</a>
+    <a href="#s7"><span class="n">07</span>样题设计</a>
+    <a href="#s8"><span class="n">08</span>分期实施</a>
+    <a href="#s9"><span class="n">09</span>风险与对策</a>
+  </nav>
+</aside>
+
+<main>
+<div class="eyebrow">设计方案 · v1.0</div>
+<h1>新员工 AI 能力训战平台</h1>
+<p class="lede">一个横跨蓝黄双区的训战项目管理、发布与评测系统。核心命题不是「教新人用 AI」，
+而是<strong>把「用得好不好」变成可测量、可复现、可改进的数字</strong>——
+16 个得分点各有明确判据，每一分的扣减都能指到具体行号；蓝黄两区各自出题、各自评比，
+共用同一套维度骨架与结果结构。</p>
+
+<div class="grid g4" style="margin:26px 0">
+  <div class="stat"><div class="v">100</div><div class="l">总分 · 4 维度 16 得分点</div></div>
+  <div class="stat"><div class="v">14 / 16</div><div class="l">脚本或结构化抽取自动定档</div></div>
+  <div class="stat"><div class="v">1 套</div><div class="l">部署（黄区），蓝区零部署</div></div>
+  <div class="stat"><div class="v">3 × 2 × 3</div><div class="l">赛制 × 分区 × 项目类型</div></div>
+</div>
+
+<!-- ══════════════════ 01 ══════════════════ -->
+<h2 id="s1"><span class="n">01</span>方案概览</h2>
+
+<h3>要解决的三个问题</h3>
+<div class="grid g3">
+  <div class="card tight ac">
+    <h4 style="margin-top:0">怎么练</h4>
+    <p style="font-size:13.5px;margin-bottom:0">新人不缺 AI 工具，缺的是<strong>在约束下把 AI 用出确定结果</strong>的方法。
+    训战用真题 + 隐藏验收 + 中途变更来逼出这套方法。</p>
+  </div>
+  <div class="card tight ac y">
+    <h4 style="margin-top:0">怎么测</h4>
+    <p style="font-size:13.5px;margin-bottom:0">「AI 用得好」过去只能靠主观印象。本方案把它拆成
+    <strong>16 个有明确判据的得分点</strong>，其中 14 个由脚本或结构化抽取自动定档。</p>
+  </div>
+  <div class="card tight ac g">
+    <h4 style="margin-top:0">怎么比</h4>
+    <p style="font-size:13.5px;margin-bottom:0">蓝黄各自出题、各自评比，<strong>单场只在同区同题内排名</strong>，
+    天然公平。赛季榜用场次百分位折算积分，两区场次尺度一致。</p>
+  </div>
+</div>
+
+<h3>一句话方案</h3>
+<div class="card ac v">
+<p style="margin-top:0"><strong>黄区部署唯一一套系统</strong>，承载题库、领题、评测、成绩与能力画像；
+学员在内部 GitLab 各自分支上作业，<strong>push 即触发 GitLab CI 自动评测</strong>。
+<strong>蓝区零部署</strong>：GitHub 建题库仓，学员提交后由 Claude / Codex 按同一套评测标准出结果 JSON，上传黄区统一展示。</p>
+<p style="margin-bottom:0">两区共用<strong>同一套维度骨架与结果 Schema</strong>，差异只落在一份阈值配置里——
+判据方向甚至可以相反（强模型下迭代 12 轮是没说清，弱模型下迭代 12 轮是拆得好），但输出结构完全一致，
+所以一套展示层能吃两边数据——<strong>这是「只有一个总赛季榜」的前提</strong>：
+两区的分若不是同一尺度的东西，赛季榜根本加不起来。</p>
+</div>
+
+<h3>与常规「刷题平台」的三点不同</h3>
+<table>
+  <thead><tr><th style="width:150px">维度</th><th>常规做法</th><th>本方案</th></tr></thead>
+  <tbody>
+    <tr><td><strong>评什么</strong></td><td>测试通过率</td>
+      <td>测试只占 40 分。另外 60 分测的是<strong>过程</strong>：规格写没写清、代码抗不抗变更、跟 AI 怎么协作的</td></tr>
+    <tr><td><strong>怎么评主观项</strong></td><td>人工打分，或让大模型自由评分</td>
+      <td>拆成<strong>一串是否抽取 + 必须引用原文</strong>，引用由程序校验真伪，分数由算术汇总。
+        弱模型也能可靠执行，且同一份提交重跑必然同分</td></tr>
+    <tr><td><strong>怎么用分数</strong></td><td>排名、发奖</td>
+      <td>排名之外，每次提交产出<strong>完整评测报告</strong>（四维度图表 + 逐条判据 + 扣分证据链），
+        个人侧沉淀<strong>能力画像与赛季趋势</strong>；出题侧顺带产出<strong>模型基准库</strong>服务选型</td></tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════ 02 ══════════════════ -->
+<h2 id="s2"><span class="n">02</span>三维正交模型</h2>
+<p>平台里一切东西的组合都由三个<strong>互不耦合</strong>的维度决定。这一点必须在数据模型层面守住，
+否则「蓝区的团队赛季项目」这种组合会退化成一堆 if-else。</p>
+
+<div class="grid g3">
+  <div class="card">
+    <h4 style="margin-top:0"><span class="tag blue">分区</span></h4>
+    <p style="font-size:13.5px">蓝区 / 黄区</p>
+    <p class="note" style="margin:0">决定：用哪份<strong>阈值 profile</strong>、哪个评测执行体（CI 还是 Claude）、
+    可用工具链与模型。<strong>不决定</strong>维度骨架与 Schema。</p>
+  </div>
+  <div class="card">
+    <h4 style="margin-top:0"><span class="tag both">项目类型</span></h4>
+    <p style="font-size:13.5px">个人 / 团队</p>
+    <p class="note" style="margin:0">决定：成绩归属主体、排行榜口径、分支命名规则。
+    个人项目归到人，团队项目归到组并在组内展示各成员的 commit 贡献。</p>
+  </div>
+  <div class="card">
+    <h4 style="margin-top:0"><span class="tag auto">赛制</span></h4>
+    <p style="font-size:13.5px">集中场次 / 开放窗口 / 赛季</p>
+    <p class="note" style="margin:0">决定：评测<strong>何时触发</strong>、结果<strong>何时可见</strong>。
+    赛季是容器，装若干前两种项目并做汇总。</p>
+  </div>
+</div>
+
+<h3>赛制的技术差异只有一个开关</h3>
+<table>
+  <thead><tr><th style="width:120px">赛制</th><th>评测触发</th><th>结果可见</th><th>典型用法</th></tr></thead>
+  <tbody>
+    <tr><td><strong>集中场次</strong></td><td>push 即跑</td>
+      <td><strong>封存</strong>，到点由管理员一键揭晓</td><td>团队集中训战，半天一场，当场出榜复盘</td></tr>
+    <tr><td><strong>开放窗口</strong></td><td>push 即跑</td>
+      <td><strong>即时</strong>，几分钟内可见完整报告</td><td>个人刷题，题目开放一到两周，自行安排</td></tr>
+    <tr><td><strong>赛季</strong></td><td>下属各项目各自跑</td>
+      <td>项目按自身规则，赛季榜季末结算</td><td>季度累计，产出能力曲线与部门报表</td></tr>
+  </tbody>
+</table>
+<h3>评测触发与结果揭晓是两个独立开关</h3>
+<p>「何时评」和「何时看」必须拆开，否则集中限时赛会出问题——
+<strong>如果 push 就出分，学员会边做边刷分，把隐藏测试当成可探测的靶子，训战当场就废了。</strong></p>
+<table>
+  <thead><tr><th style="width:110px">开关</th><th style="width:230px">取值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>trigger</code><br><span class="muted">何时评</span></td>
+      <td><code>auto</code> push 即评<br><code>manual</code> 人工一键批量评<br><code>import</code> 上传外部结果</td>
+      <td>集中限时赛必须用 <code>manual</code>；蓝区项目一律 <code>import</code>；
+        赛季刷榜用 <code>auto</code></td></tr>
+    <tr><td><code>reveal</code><br><span class="muted">何时看</span></td>
+      <td><code>immediate</code> 评完即见<br><code>on_release</code> 封存待揭晓</td>
+      <td>与 trigger 独立。即使自动评了，也可以封存不给看</td></tr>
+  </tbody>
+</table>
+<table class="compact">
+  <thead><tr><th>场景</th><th style="width:110px">trigger</th><th style="width:120px">reveal</th><th>效果</th></tr></thead>
+  <tbody>
+    <tr><td>团队集中限时赛</td><td><code>manual</code></td><td><code>on_release</code></td>
+      <td>到点管理员一键批量评 + 同时揭晓，杜绝边做边刷分</td></tr>
+    <tr><td>单人赛季刷榜</td><td><code>auto</code></td><td><code>immediate</code></td>
+      <td>push 后几分钟看到完整报告，这才是刷榜该有的反馈</td></tr>
+    <tr><td><strong>蓝区全部项目</strong></td><td><code>import</code></td><td><code>on_release</code></td>
+      <td><strong>蓝区只做集中限时赛，组合是固定的</strong>——到点收卷、批量一次评、上传 JSON、统一揭晓。
+        不做开放窗口，也不做长期刷榜</td></tr>
+    <tr><td>集中赛 + 人工评审</td><td><code>manual</code> + <code>import</code></td><td><code>on_release</code></td>
+      <td>先批量跑客观分，再上传出题人的主观评审，按 criteria key 合并</td></tr>
+  </tbody>
+</table>
+<p class="note">同一条 CI 流水线跑所有组合，不要为赛制写第二条流水线。</p>
+
+<h3>三维之外还有一个属性：项目来源</h3>
+<p>它不是配置维度（不产生组合），但决定一件关键的事——<strong>要不要计入赛季总分</strong>：</p>
+<table class="compact">
+  <thead><tr><th style="width:150px">origin</th><th style="width:120px">计入赛季</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>official</code><br><span class="muted">部门安排</span></td>
+      <td><strong>计入</strong></td>
+      <td>管理员正式编排的场次：团队集中限时赛、个人赛季刷榜题。
+        这是赛季总分的<strong>唯一来源</strong></td></tr>
+    <tr><td><code>crowdsourced</code><br><span class="muted">老员工发布</span></td>
+      <td>不计入</td>
+      <td>悬赏题、探索题，以及老员工自发出的标准题。只进挑战榜，
+        除非被管理员<strong>采纳为官方题</strong>并编排进正式场次</td></tr>
+  </tbody>
+</table>
+<p class="note">判据是<strong>谁安排的</strong>，不是题型。老员工出的带测试标准题，
+只要没被编排进正式场次，同样不进赛季总分。</p>
+
+<h3>组合示例</h3>
+<table class="compact">
+  <thead><tr><th>项目</th><th>分区</th><th>类型</th><th>赛制</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>规格驱动开发·停车计费</td><td><span class="tag yellow">黄</span></td><td>团队</td><td>集中场次</td><td>半天，2 人一组，当场出榜</td></tr>
+    <tr><td>日志脱敏</td><td><span class="tag yellow">黄</span></td><td>个人</td><td>赛季刷榜</td><td>边界密集的基本功题，适合长期开放</td></tr>
+    <tr><td>遗留模块加特性</td><td><span class="tag blue">蓝</span></td><td>团队</td><td>集中场次</td>
+      <td>强模型下练上下文喂养。<strong>蓝区只有这一种赛制</strong></td></tr>
+    <tr><td>批量改造 15 文件</td><td><span class="tag yellow">黄</span></td><td>个人</td><td>开放窗口</td><td>弱模型下练任务分解</td></tr>
+    <tr><td>2026 Q4 赛季</td><td>—</td><td>—</td><td>赛季</td><td>容器，含以上全部项目</td></tr>
+  </tbody>
+</table>
+
+
+<h3 id="s24">2.4 组织层级与作用域</h3>
+<p>平台后续会有多个部门使用，所以组织结构不能写死。设计成<strong>可配置层级的组织树 + 向下继承的作用域</strong>：
+一道 4 级部门发布的题，5 级、6 级的人全都能参加。</p>
+
+<h4>层级标签可配置</h4>
+<p>层级数量与每级的叫法都是配置项，换个组织换套标签即可，不改代码：</p>
+<pre><code>orgLevels:
+  - { level: 1, label: "BG" }
+  - { level: 2, label: "产品线" }
+  - { level: 3, label: "部门" }
+  - { level: 4, label: "分部" }
+  - { level: 5, label: "科室" }
+  - { level: 6, label: "组" }</code></pre>
+
+<h4>作用域用物化路径实现</h4>
+<p>每个组织节点带一条<strong>物化路径</strong>，员工和题目都挂在某个节点上。
+可见性判定退化成一次字符串前缀匹配，索引友好、查询极快：</p>
+<pre><code>组织节点   /1/12/125/1251/           分组核心网控制开发部（4 级）
+员工归属   /1/12/125/1251/1251A/     该部下面某个 5 级科室的人
+题目归属   /1/12/125/1251/           发布在 4 级部门
+
+可参加  ⟺  employee.orgPath.startsWith(challenge.orgPath)</code></pre>
+
+<div class="grid g2">
+  <div class="card tight ac">
+    <h4 style="margin-top:0">向下继承</h4>
+    <p style="font-size:13.5px;margin-bottom:0">题目发布在哪一级，<strong>该级及其全部后代都自动纳入</strong>。
+    4 级部门出的题，下面所有 5 级、6 级不用重复配置，也不会漏人。
+    发布在 2 级产品线的题，整条产品线都能打。</p>
+  </div>
+  <div class="card tight ac o">
+    <h4 style="margin-top:0">不向上、不横向</h4>
+    <p style="font-size:13.5px;margin-bottom:0">上级看不到下级的私有题，兄弟部门之间互不可见。
+    要跨部门共享，把题目<strong>上提到共同祖先节点</strong>发布即可——
+    这也是「公共题库」的实现方式：挂在最顶层节点上。</p>
+  </div>
+</div>
+
+<h4>榜单口径：默认全域，支持下钻</h4>
+<p>一道 4 级部门的题被 5 级、6 级的人一起做，榜单怎么排？
+<strong>默认所有参与者同榜</strong>（同题同分区，本来就公平），同时提供组织维度的筛选：</p>
+<table class="compact">
+  <thead><tr><th style="width:130px">榜单视角</th><th>范围</th><th>典型用法</th></tr></thead>
+  <tbody>
+    <tr><td><strong>全域榜</strong></td><td>该题所有参与者</td><td>默认视角，看自己在整个可参与范围内的位置</td></tr>
+    <tr><td><strong>本级榜</strong></td><td>与我同一节点的人</td><td>看自己在本组/本科室内的位置，压力更可控</td></tr>
+    <tr><td><strong>下钻榜</strong></td><td>指定任一子节点</td><td>管理者查看某个下级单位的整体表现</td></tr>
+  </tbody>
+</table>
+<p class="note">赛季榜同理，可在<strong>我的组 / 我的部 / 全域</strong>之间切换。
+个人的赛季积分只算一次，变的只是排名参照系。</p>
+
+<h4>权限也按层级收敛</h4>
+<table class="compact">
+  <thead><tr><th style="width:130px">角色</th><th>可操作范围</th></tr></thead>
+  <tbody>
+    <tr><td><strong>管理员</strong></td><td>只能管理自己所在节点及以下：建项目、编排分组、终审题目、看报表</td></tr>
+    <tr><td><strong>出题人</strong></td><td>只能把题发布到自己所在节点或其下级，不能向上发布</td></tr>
+    <tr><td><strong>导师</strong></td><td>复核范围限于本节点及以下的提交</td></tr>
+    <tr><td><strong>学员</strong></td><td>看得到祖先链上所有节点发布的题，看不到兄弟节点的私有题</td></tr>
+  </tbody>
+</table>
+
+<h4>多部门推广时的题库与判据</h4>
+<table class="compact">
+  <thead><tr><th style="width:130px">对象</th><th>策略</th></tr></thead>
+  <tbody>
+    <tr><td>维度骨架</td><td><strong>全局统一，不可覆盖。</strong>否则跨部门报表和赛季榜失去意义</td></tr>
+    <tr><td>阈值 profile</td><td><strong>继承 + 覆盖。</strong>顶层给默认值，部门可覆盖个别得分点的阈值
+      （比如技术栈不同导致代码度量基准不同）</td></tr>
+    <tr><td>题库</td><td>公共题库（挂顶层节点）+ 部门私有题库（挂本节点），学员看到的是两者并集</td></tr>
+    <tr><td>模型基准库</td><td>全局共享。一道题在哪个部门跑的模型基准，其他部门也能参考</td></tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════ 03 ══════════════════ -->
+<h2 id="s3"><span class="n">03</span>架构与数据流</h2>
+
+<p>核心约束是网络策略：<strong>黄区可 clone GitHub，不可 push</strong>；蓝→黄小数据摆渡分钟级。
+数据因此只能单向流动，全量视图只能在黄区。这不是设计取舍，是策略推导出的必然结果。</p>
+
+<div class="arch">
+<svg viewBox="0 0 900 400" role="img" aria-label="双区架构与数据流">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#898781"/></marker>
+  </defs>
+  <!-- 蓝区 -->
+  <rect x="12" y="30" width="330" height="330" rx="14" fill="none" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="5 4" opacity=".65"/>
+  <text x="28" y="55" class="ttl" fill="#2a78d6">蓝区 · 可访问外网 · 零部署</text>
+  <rect x="32" y="70" width="290" height="52" rx="9" fill="#fcfcfb" stroke="#e1e0d9"/>
+  <text x="46" y="92" class="lbl">GitHub 题库仓</text>
+  <text x="46" y="110" class="sm">starter / 题面 / 各人分支 · 隐藏测试不入库</text>
+  <rect x="32" y="140" width="290" height="52" rx="9" fill="#fcfcfb" stroke="#e1e0d9"/>
+  <text x="46" y="162" class="lbl">学员作业（DeepSeek / Claude / Codex）</text>
+  <text x="46" y="180" class="sm">clone → 作业 → push 到自己分支</text>
+  <rect x="32" y="210" width="290" height="66" rx="9" fill="#fcfcfb" stroke="#2a78d6" stroke-width="1.5"/>
+  <text x="46" y="232" class="lbl">Claude / Codex 按统一标准评测</text>
+  <text x="46" y="250" class="sm">真跑隐藏测试 + 结构化抽取（同黄区方法）</text>
+  <text x="46" y="266" class="sm">产出统一 Schema 的结果 JSON</text>
+  <path d="M177,122 L177,138" stroke="#898781" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M177,192 L177,208" stroke="#898781" stroke-width="1.4" marker-end="url(#ah)"/>
+  <!-- 摆渡 -->
+  <path d="M322,243 L400,243 L400,150 L470,150" stroke="#898781" stroke-width="1.6" fill="none" marker-end="url(#ah)"/>
+  <text x="330" y="235" class="sm">上传结果 JSON</text>
+  <text x="330" y="252" class="sm">（几 KB，无代码）</text>
+  <!-- 黄区 -->
+  <rect x="470" y="12" width="418" height="376" rx="14" fill="none" stroke="#eda100" stroke-width="1.5" stroke-dasharray="5 4" opacity=".75"/>
+  <text x="488" y="36" class="ttl" fill="#a97400">黄区 · 内网 · 唯一部署（K8s）</text>
+  <rect x="488" y="50" width="382" height="48" rx="9" fill="#fcfcfb" stroke="#e1e0d9"/>
+  <text x="502" y="70" class="lbl">内部 GitLab 题库仓</text>
+  <text x="502" y="88" class="sm">孤立分支发题 · 隐藏测试只在 main · 可 clone GitHub 同步题面</text>
+  <rect x="488" y="112" width="382" height="48" rx="9" fill="#fcfcfb" stroke="#e1e0d9"/>
+  <text x="502" y="132" class="lbl">学员作业（内部 minimax / glm · CLI Agent / IDE 插件）</text>
+  <text x="502" y="150" class="sm">push 到自己分支 → 触发 CI</text>
+  <rect x="488" y="174" width="382" height="72" rx="9" fill="#fcfcfb" stroke="#eda100" stroke-width="1.5"/>
+  <text x="502" y="194" class="lbl">GitLab CI 评测流水线</text>
+  <text x="502" y="212" class="sm">沙箱跑测试 → tree-sitter 度量 → 弱模型结构化抽取</text>
+  <text x="502" y="228" class="sm">→ 引用校验 → 套 profile 定档 → 生成 findings</text>
+  <rect x="488" y="260" width="382" height="66" rx="9" fill="#fcfcfb" stroke="#e1e0d9"/>
+  <text x="502" y="280" class="lbl">训战平台（学员端 + 管理端）</text>
+  <text x="502" y="298" class="sm">统一展示两区成绩 · 评测报告 · 能力画像 · 赛季榜与报表</text>
+  <text x="502" y="314" class="sm">SSO 接入公司统一认证</text>
+  <rect x="488" y="340" width="382" height="34" rx="9" fill="#fcfcfb" stroke="#e1e0d9"/>
+  <text x="502" y="361" class="sm">人工复核台：只看被标 yes 的抽取项与引用</text>
+  <path d="M679,98 L679,110" stroke="#898781" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M679,160 L679,172" stroke="#898781" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M679,246 L679,258" stroke="#898781" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M679,326 L679,338" stroke="#898781" stroke-width="1.4" marker-end="url(#ah)"/>
+</svg>
+</div>
+
+<h3>关键设计取舍</h3>
+<table>
+  <thead><tr><th style="width:170px">取舍</th><th>选择</th><th>理由</th></tr></thead>
+  <tbody>
+    <tr><td>蓝区要不要部署</td><td><strong>不部署</strong></td>
+      <td>学员是同一批人、本来就能上黄区看成绩。蓝区只需要一个 GitHub 仓 + 一份评测指令，省掉一整套部署与运维</td></tr>
+    <tr><td>评测跑在哪</td><td><strong>GitLab CI</strong></td>
+      <td>push 即触发，开放窗口的「随时刷榜」才成立。手动评分撑不住持续提交</td></tr>
+    <tr><td>沙箱怎么做</td><td><strong>K8s Job + 无网络 + 只读挂载 + 超时</strong></td>
+      <td>学员代码必须隔离执行。容器天然解决隔离与并发</td></tr>
+    <tr><td>蓝区结果怎么进来</td><td><strong>上传 JSON</strong>，非摆渡代码</td>
+      <td>几 KB、无代码内容，审批阻力最小；代码留在蓝区，合规最干净</td></tr>
+    <tr><td>题面怎么同步</td><td><strong>黄区 clone GitHub</strong></td>
+      <td>题面与 starter 无密级，蓝区维护一份，黄区拉取即可，避免两处维护</td></tr>
+  </tbody>
+</table>
+
+
+<h3 id="s31">3.1 蓝区：集中收卷、批量一次评</h3>
+<p><strong>蓝区只做集中限时赛，没有刷榜。</strong>这让整个蓝区流程退化成一次性批处理——
+不需要 CI、不需要即时反馈、不需要并发调度：</p>
+<table class="compact">
+  <thead><tr><th style="width:52px">步骤</th><th style="width:130px">时机</th><th>动作</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>赛前</td><td>GitHub 建题库仓，为每人/每组开分支，下发地址</td></tr>
+    <tr><td>2</td><td>赛中</td><td>学员用 DeepSeek / Claude / Codex 作业并 push</td></tr>
+    <tr><td>3</td><td>到点</td><td><strong>收卷</strong>：锁定分支（设 protected 或记录截止 commit）</td></tr>
+    <tr><td>4</td><td>评测</td><td>用 Claude / Codex 跑<strong>批量评测指令</strong>，一次评完全场</td></tr>
+    <tr><td>5</td><td>校验</td><td>Schema 校验 + 分值加总核对，不通过则重评</td></tr>
+    <tr><td>6</td><td>上传</td><td>结果 JSON 传入黄区平台，统一揭晓</td></tr>
+  </tbody>
+</table>
+
+<div class="card ac g">
+<h4 style="margin-top:0">批量评分反而比逐份评更稳</h4>
+<p style="margin-top:0">这是一次性集中评分带来的额外好处：<strong>评测模型同时看得到全场所有提交</strong>，
+可以先通读一遍建立本场的相对基准，再逐份定档。相比逐份独立评分，
+横向参照能显著压住「同一份材料评两次差好几分」的抖动。</p>
+<p style="margin-bottom:0">建议再加一道保险：<strong>同一批评两遍</strong>，
+把两遍档位不一致的得分点挑出来人工确认。全场十几份提交，不一致项通常只有个位数，
+成本很低但把一致性钉死了。</p>
+</div>
+<p class="note">客观底座仍然必须真跑——隐藏测试要让评测模型实际执行代码拿到通过情况，不能靠读代码推断。
+主观项仍然走 <a href="#s44">4.4</a> 的结构化抽取，与黄区同法。</p>
+
+<!-- ══════════════════ 04 ══════════════════ -->
+<h2 id="s4"><span class="n">04</span>评测体系</h2>
+<p class="lede">这是整个方案最核心的部分。设计目标只有一句：<strong>同样的提交，谁来跑、跑几次，都是同一个分数；
+每一分的扣减都能指到具体位置。</strong></p>
+
+<h3 id="s41">4.1 统一 Schema：两区的唯一契约</h3>
+<p class="note">这是<strong>输出契约</strong>。与之配套的还有<strong>输入契约</strong>——
+学员交上来的东西长什么样必须是约定死的，否则评测引擎根本找不到要评的文件，见 <a href="#s49">4.9</a>。</p>
+<p>蓝区由 Claude 产出、黄区由 CI 产出，两者唯一必须一致的东西就是这个结构。
+只要 Schema 一致，展示层、排行榜、差值计算、赛季汇总全都不用关心数据从哪来。</p>
+
+<pre><code>{
+  "schemaVersion": "1.0",
+  "rubricVersion": "1.0",              // 判据版本，冻结后不改；改判据必须升版本并重跑
+  "project":  { "id": "sdd-01", "zone": "blue|yellow",
+                "type": "individual|team", "mode": "live|window|season",
+                "trigger": "auto|manual|import", "reveal": "immediate|on_release",
+                "origin": "official|crowdsourced",    // 只有 official 计入赛季总分
+                "orgPath": "/1/12/125/1251/",         // 发布节点，该节点及所有后代可参加
+                "season": "2026Q4", "languagePolicy": "fixed:java | free" },
+  "subject":  { "kind": "person|team", "id": "w00123", "name": "张三",
+                "orgPath": "/1/12/125/1251/1251A/",   // 员工组织路径，用于榜单下钻
+                "members": [ { "id": "w00123", "role": "navigator" } ] },
+  "submission": { "repo": "...", "branch": "...", "commit": "a1e5acf",
+                  "language": "go", "submittedAt": "..." },
+  "gradedAt": "...", "gradedBy": "ci|claude|codex|human",
+
+  "dimensions": {                       // 四个维度的汇总分
+    "verify": { "score": 34.4, "max": 40 },
+    "spec":   { "score": 22,   "max": 25 },
+    "code":   { "score": 18,   "max": 20 },
+    "collab": { "score": 13,   "max": 15 }
+  },
+  "total": 87.4,
+
+  "criteria": [                         // 16 个得分点，逐条留痕
+    { "key": "S1", "dim": "spec", "name": "歧义澄清完整度", "max": 10,
+      "level": "A", "score": 10,
+      "rule": "澄清 ≥5 条且标注来源",              // 命中的判据原文
+      "evidence": "歧义清单 6 条，问 PM 确认 6 条", // 实际数据
+      "source": "auto" }                          // auto | model | human
+  ],
+
+  "verifyDetail": { "tiers": { "basic": { "passed": 8, "total": 8, "cases": [...] } } },
+  "metrics":      { "magicNumbers": [...], "maxComplexity": 9, "..." : "..." },
+  "extractions":  [ { "id": "X1", "q": "是否要求 AI 复述理解", "a": "yes",
+                      "quote": "先不要写代码，请复述你理解的规则",
+                      "quoteVerified": true } ],   // 引用是否在原文中精确匹配
+  "findings":     [ { "id": "F1", "dim": "code", "criteria": "C1", "severity": "major",
+                      "title": "费率 5 内联在函数体", "file": "billing.go", "line": 42,
+                      "snippet": "...", "detail": "...", "fix": "..." } ],
+  "anchor":       { "isAnchor": true, "anchorId": "anchor-2026Q4" }
+}</code></pre>
+
+<div class="card ac tight">
+<p style="margin:0"><strong>三个字段值得单独说明。</strong>
+<code>source</code> 标注每条判据是脚本判的、模型判的还是人判的——透明度直接决定学员对分数的接受度。
+<code>rubricVersion</code> 让判据可追溯：判据一旦发布就冻结，要改必须升版本，避免「上周 80 分这周变 75」。
+<code>quoteVerified</code> 是防幻觉的关键，见 4.4。</p>
+</div>
+
+<h3 id="s42">4.2 四维度 100 分 · 16 个得分点</h3>
+
+<table>
+  <thead><tr><th style="width:130px">维度</th><th style="width:60px">分值</th><th>得分点</th><th style="width:110px">判定方式</th></tr></thead>
+  <tbody>
+    <tr><td><strong>交付验证</strong><br><span class="muted">Verify</span></td><td class="tnum">40</td>
+      <td>V1 基础档 8 · V2 边界档 12 · V3 澄清档 12 · V4 变更档 8</td>
+      <td><span class="tag auto">全自动</span></td></tr>
+    <tr><td><strong>规格质量</strong><br><span class="muted">Spec</span></td><td class="tnum">25</td>
+      <td>S1 歧义澄清完整度 10 · S2 验收用例质量 8 · S3 边界与异常覆盖 4 · S4 变更锚点识别 3</td>
+      <td><span class="tag auto">结构扫描</span></td></tr>
+    <tr><td><strong>代码质量</strong><br><span class="muted">Code</span></td><td class="tnum">20</td>
+      <td>C1 业务常量抽取 6 · C2 异常与边界处理 5 · C3 精度与类型安全 4 · C4 抗变更能力 5</td>
+      <td><span class="tag auto">AST 度量</span></td></tr>
+    <tr><td><strong>协作过程</strong><br><span class="muted">Collab</span></td><td class="tnum">15</td>
+      <td>P1 规格先行 4 · P2 迭代节奏 4 · P3 提示词结构 4 · P4 变更响应 3</td>
+      <td><span class="tag auto">git + 抽取</span> <span class="tag human">人工复核</span></td></tr>
+  </tbody>
+</table>
+
+<p>每个得分点分四档：<strong>优秀 A / 合格 B / 待改进 C / 未做到 D</strong>，判据写死、可复现、可申诉。
+16 个得分点里 <strong>14 个自动定档</strong>，只有 P3 的抽取结果需要人工抽查复核，P4 在变更包缺失时需人工确认。</p>
+
+<details>
+<summary>展开：一个得分点的完整判据长什么样<span class="sp">C1 业务常量抽取 · 6 分</span></summary>
+<div class="body">
+<p><strong>为什么测它：</strong>费率、阈值、封顶这类会变的数值写死在函数体里，下次改需求就得改逻辑。
+这一项直接预测「第二次需求变更的成本」。</p>
+<table class="compact">
+  <thead><tr><th style="width:78px">档位</th><th style="width:56px">分值</th><th>判据（自动判定）</th></tr></thead>
+  <tbody>
+    <tr><td><strong>A 优秀</strong></td><td class="tnum">6</td><td>零内联业务魔法数字，且模块级常量数 ≥ 该语言参考实现的 80%</td></tr>
+    <tr><td><strong>B 合格</strong></td><td class="tnum">4</td><td>魔法数字 ≤ 2 处，常量数 ≥ 参考实现的 50%</td></tr>
+    <tr><td><strong>C 待改进</strong></td><td class="tnum">2</td><td>魔法数字 ≤ 5 处</td></tr>
+    <tr><td><strong>D 未做到</strong></td><td class="tnum">0</td><td>魔法数字 &gt; 5 处，或完全没有常量抽取</td></tr>
+  </tbody>
+</table>
+<p class="note"><strong>「业务魔法数字」的精确定义：</strong>出现在函数体内的数值字面量，排除
+①模块级常量定义中的字面量；②作用在具名常量上的单位换算因子（<code>FREE_MINUTES * 60</code> 里的 60 不算）；
+③通用中性值（0、1、-1、2）。该定义在三种语言上用同一套 tree-sitter 查询实现。</p>
+<p class="note"><strong>产出证据：</strong>每一处魔法数字生成一条 finding，含文件、行号、代码片段、为什么错、怎么改。
+学员对分数有异议时，逐条对即可。</p>
+</div>
+</details>
+
+<h3 id="s43">4.3 分区差异：同骨架、不同阈值</h3>
+
+<p>「分区不同评测也不同」的正确实现方式，<strong>不是换维度，是换阈值</strong>。
+一旦换维度骨架，就要维护两套报告模板、两套能力画像，
+而且<strong>赛季榜没法合并</strong>——个人画像也无法跨场次累积。</p>
+
+<p>差异呈现出一个清晰的梯度——<strong>越靠近客观产出，两区越一致；越靠近人的行为，差异越大</strong>：</p>
+
+<div class="grad">
+  <span class="lab">交付验证</span>
+  <div class="track"><div class="fill" style="width:4%;background:var(--good)"></div></div><span class="gn">完全一致</span>
+  <span class="lab">代码质量</span>
+  <div class="track"><div class="fill" style="width:16%;background:var(--aqua)"></div></div><span class="gn">几乎一致</span>
+  <span class="lab">规格质量</span>
+  <div class="track"><div class="fill" style="width:46%;background:var(--blue)"></div></div><span class="gn">阈值不同</span>
+  <span class="lab">协作过程</span>
+  <div class="track"><div class="fill" style="width:92%;background:var(--orange)"></div></div><span class="gn">判据方向可以相反</span>
+</div>
+<p class="note">条形长度表示两区判据的差异程度。测代码好坏与用什么模型无关，测人怎么跟模型协作则完全取决于模型强弱。</p>
+
+<h4>差异最大的两个得分点</h4>
+<table>
+  <thead><tr><th style="width:110px">得分点</th><th style="width:44%"><span class="tag blue">蓝区</span> 强模型</th>
+    <th><span class="tag yellow">黄区</span> 弱模型</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>P2 迭代节奏</strong><br><span class="muted">4 分</span></td>
+      <td>A：3–6 轮<br>B：7–10 轮<br>C：11–15 轮 或 2 轮<br>D：&gt;15 轮 或 1 轮
+        <p class="note" style="margin-top:7px">轮次多说明第一次没说清。强模型本该一次给足约束就能到位，
+        反复「不对，再改改」是提示词失败的信号。</p></td>
+      <td>A：8–18 轮<br>B：5–7 或 19–25 轮<br>C：3–4 轮<br>D：≤2 轮
+        <p class="note" style="margin-top:7px">轮次<strong>少</strong>反而说明没拆解。弱模型接不住大任务，
+        小步快跑、每步验证才是正确姿势，一把梭必然跑偏。</p></td>
+    </tr>
+    <tr>
+      <td><strong>P3 提示词结构</strong><br><span class="muted">4 分</span></td>
+      <td>抽取项测的是<strong>「会不会问、会不会验」</strong>：<br>
+        · 有没有要求 AI 复述理解 / 列出假设<br>
+        · 有没有给出接口签名与硬约束<br>
+        · 有没有把验收用例贴给 AI<br>
+        · 有没有要求 AI 写反例</td>
+      <td>抽取项测的是<strong>「会不会拆、会不会补」</strong>：<br>
+        · 有没有把任务拆成可独立验证的小步<br>
+        · 每步有没有补足必要上下文（而非依赖记忆）<br>
+        · 有没有在步与步之间设检查点<br>
+        · 出错后是回退重拆，还是硬怼同一个提示词</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="card ac o tight">
+<p style="margin:0"><strong>这张表本身就是训战教材。</strong>它明确告诉新人：
+在弱模型环境里把强模型的用法照搬过来，是要扣分的——反之亦然。
+<strong>「会用 AI」不是一种能力，是两种。</strong></p>
+</div>
+
+<details>
+<summary>展开：阈值 profile 的配置形态<span class="sp">一份 YAML 管住全部分区差异</span></summary>
+<div class="body">
+<pre><code>rubricVersion: "1.0"
+dimensions: [verify, spec, code, collab]   # 骨架，两区共用，不可变
+
+profiles:
+  blue:
+    P2_iteration:                          # 迭代节奏
+      A: {min: 3,  max: 6}
+      B: {min: 7,  max: 10}
+      C: {min: 11, max: 15}
+      D: default
+      rationale: "强模型下轮次多 = 提示词没说清"
+    P3_extractions: [X1_restate, X2_signature, X3_cases, X4_counterexample]
+    S2_cases: {A: 5, B: 3, C: 1}           # 验收用例条数门槛
+
+  yellow:
+    P2_iteration:
+      A: {min: 8,  max: 18}
+      B: {min: 5,  max: 25}
+      C: {min: 3,  max: 4}
+      D: default
+      rationale: "弱模型下轮次少 = 没拆解"
+    P3_extractions: [Y1_decompose, Y2_context, Y3_checkpoint, Y4_recover]
+    S2_cases: {A: 8, B: 5, C: 2}           # 弱模型需要更多锚点，门槛更高</code></pre>
+<p class="note">加一个分区、调一次阈值，都只动这份配置，不动引擎代码。
+<code>rationale</code> 字段会直接展示给学员——让他知道为什么这么判，比单纯给个分数有用得多。</p>
+</div>
+</details>
+
+<h3 id="s44">4.4 结构化抽取阅卷法</h3>
+
+<p>这是整个评测体系里技术含量最高的一环，解决的问题是：<strong>如何让弱模型可靠地评价主观项。</strong></p>
+
+<div class="grid g2">
+  <div class="card tight ac r">
+    <h4 style="margin-top:0">❌ 直接打分（不可用）</h4>
+    <pre style="margin:8px 0 0;font-size:11.5px"><code>阅读这段对话记录，
+给提示词质量打 0–10 分。</code></pre>
+    <p class="note" style="margin-bottom:0">同一份材料跑两次能差 3 分。弱模型没有稳定的综合判断力，
+    强模型也会因温度和上下文漂移。这种分数进不了任何正式口径。</p>
+  </div>
+  <div class="card tight ac g">
+    <h4 style="margin-top:0">✓ 拆成客观抽取（可用）</h4>
+    <pre style="margin:8px 0 0;font-size:11.5px"><code>X1 学员有没有要求 AI 复述理解？
+    yes / no / unclear
+    答 yes 必须逐字引用原文</code></pre>
+    <p class="note" style="margin-bottom:0">二元判断 + 强制引用。弱模型能可靠执行，
+    <strong>分数由算术汇总而非模型给出</strong>，重跑必然同分。</p>
+  </div>
+</div>
+
+<h4>防幻觉的关键：引用可程序校验</h4>
+<div class="card ac v">
+<p style="margin-top:0">要求模型答 yes 时必须<strong>逐字引用</strong>原文，然后由程序把这段引用拿回原始对话记录里做<strong>精确匹配</strong>：</p>
+<ul style="margin-bottom:8px">
+  <li><strong>匹配上</strong> → <code>quoteVerified: true</code>，该抽取项生效</li>
+  <li><strong>匹配不上</strong> → 判定为模型幻觉，该项自动按 <code>no</code> 处理，并进入人工复核队列</li>
+</ul>
+<p style="margin-bottom:0">这一条把「相信模型」变成了「验证模型」。弱模型编造出来的证据会被自动拦下，
+而且拦截率本身就是一个可观测的模型质量指标——顺带回答了「内部模型到底行不行」。</p>
+</div>
+
+<details>
+<summary>展开：黄区抽取 skill 的完整指令<span class="sp">由 Claude 产出，装进黄区给内部模型跑</span></summary>
+<div class="body">
+<pre><code>你是训战评测的抽取助手。你的任务不是打分，是从对话记录里找证据。
+
+【硬性规则】
+1. 每题只能答 yes / no / unclear，不要给分数，不要评价，不要建议
+2. 答 yes 必须附一段逐字引用（≤50 字），引用必须一字不差地出现在原文中
+3. 找不到明确证据一律答 no。禁止推测、禁止脑补、禁止"可能"
+4. 严格按 JSON 输出，不要任何额外文字
+
+【抽取项 · 黄区】
+Y1 学员有没有把任务拆成多个可以独立验证的小步骤？
+Y2 学员在每个新步骤里，有没有重新补充必要的上下文（而不是假设模型还记得）？
+Y3 学员有没有在步骤之间做验证（跑测试 / 让模型自查 / 人工确认）再继续？
+Y4 出现错误时，学员是回退并重新拆解，还是用同一个提示词反复重试？
+   → 回退重拆答 yes，反复重试答 no，无错误答 unclear
+
+【输出格式】
+{"Y1":{"a":"yes","quote":"我们先只做第一步：解析入参并校验"},
+ "Y2":{"a":"no","quote":""},
+ "Y3":{"a":"yes","quote":"跑一下测试再继续"},
+ "Y4":{"a":"unclear","quote":""}}</code></pre>
+<p class="note"><strong>为什么这套指令弱模型能跑：</strong>没有开放式判断，没有打分，没有多步推理。
+每一题都是「在一段文本里找有没有某个东西」——这是弱模型最擅长的抽取任务，
+而不是它最不擅长的综合评价任务。</p>
+<p class="note"><strong>汇总规则（确定性）：</strong>P3 得分 = 命中项数映射档位。
+4 项全 yes → A（4 分）；3 项 → B（3 分）；2 项 → C（1.5 分）；≤1 项 → D（0 分）。
+<code>unclear</code> 按 no 计。</p>
+</div>
+</details>
+
+<h4>蓝区用同一套方法</h4>
+<p>蓝区由 Claude / Codex 评测，能力远超需求，但<strong>仍然必须用结构化抽取</strong>——
+不是因为 Claude 做不了综合判断，而是因为<strong>只有两边用同一种评法，分数才可比</strong>。
+让 Claude 自由打分，同一份提交评两次可能差好几分。
+<strong>赛季榜把两区的场次积分加在一起</strong>，蓝区一抖，整个赛季榜的公信力就跟着抖。</p>
+
+<div class="card ac tight">
+<p style="margin:0"><strong>一个值得写进教材的副产品：</strong>为了迁就弱模型而被迫发明的严谨方法，
+用在强模型上同样让结果更稳。<strong>约束不是能力的对立面，约束是可靠性的来源。</strong>
+这句话正是整个训战想让新人带走的东西。</p>
+</div>
+
+<h4>打分规则的唯一载体是一个 skill</h4>
+<div class="card ac v">
+<p style="margin-top:0">蓝区的执行体不固定——可能是 Claude、Codex，也可能是
+<strong>opencode + DeepSeek</strong>。不同模型的综合判断力差异很大，如果打分规则只存在于
+「给评测模型的一段提示词」里，分数会随执行体漂移。</p>
+<p style="margin-bottom:0">所以把整套打分规则封装成一个 <strong>skill</strong>：
+判据、抽取项、脚本、输出 Schema 全在里面。任何执行体都跑同一个 skill，
+模型只负责第 5 步的抽取，<strong>分数由脚本按写死的判据算</strong>——
+这就是为什么换 Claude、换 Codex、换 DeepSeek，同一份提交的分数完全一致。</p>
+</div>
+<table class="compact">
+  <thead><tr><th style="width:200px">skill 内容</th><th>作用</th></tr></thead>
+  <tbody>
+    <tr><td><code>SKILL.md</code></td><td>七步评测流程，明确哪几步是脚本、哪一步用模型</td></tr>
+    <tr><td><code>references/rubric.md</code></td><td>16 个得分点的完整判据与双区阈值</td></tr>
+    <tr><td><code>references/extraction.md</code></td><td>蓝黄两套抽取项原文与输出格式</td></tr>
+    <tr><td><code>references/schema.md</code></td><td>输出 Schema 与字段含义</td></tr>
+    <tr><td><code>scripts/measure.py</code></td><td>代码度量，支持 Python / Java / Go</td></tr>
+    <tr><td><code>scripts/specscan.py</code></td><td>SPEC.md 七节结构扫描</td></tr>
+    <tr><td><code>scripts/verify_quotes.py</code></td><td>引用精确匹配，拦截幻觉证据</td></tr>
+    <tr><td><code>scripts/aggregate.py</code></td><td>逐点定档、汇总出分、Schema 自校验</td></tr>
+  </tbody>
+</table>
+<p class="note">黄区 CI 直接调用同一套脚本，与蓝区共用 <code>rubric.md</code> 判据。
+<strong>一份规则、两处执行、结果同构</strong>——这是赛季榜能把两区场次加在一起的技术前提。</p>
+
+<h4>人工复核：从「打分」降级为「确认」</h4>
+<p>复核台只呈现被标为 <code>yes</code> 且 <code>quoteVerified: true</code> 的抽取项，导师做的事只有一件：
+看这段引用是否真的支持这个结论。不支持就点掉，分数自动重算。
+工作量从「读完整对话记录并打分」降到「看几条引用」——按 30 人一批估算，从数小时降到 20 分钟以内。</p>
+
+<h3 id="s45">4.5 多语言公平性</h3>
+<p>题目有两种语言策略：<strong>限定单一语言</strong>（所有人用同一种，便于横向比代码）与
+<strong>语言不限</strong>（Go / Java / Python 任选，贴近真实）。后者引入一个必须处理的问题：
+<strong>选什么语言不能影响分数。</strong></p>
+
+<table>
+  <thead><tr><th style="width:170px">指标</th><th style="width:110px">跨语言</th><th>处理方式</th></tr></thead>
+  <tbody>
+    <tr><td>验收测试通过率</td><td><span class="pill">可比</span></td>
+      <td>同一批用例，每种语言各实现一套断言，<strong>题号与档位严格一一对应</strong></td></tr>
+    <tr><td>圈复杂度 / 嵌套深度</td><td><span class="pill">可比</span></td><td>分支节点计数，三种语言语义一致</td></tr>
+    <tr><td>业务魔法数字</td><td><span class="pill">可比</span></td><td>字面量计数，与语言无关</td></tr>
+    <tr><td>显式抛错</td><td>需语义映射</td>
+      <td>Go 不用异常。映射为：Python <code>raise</code> / Java <code>throw</code> /
+        Go <code>return err</code> + <code>errors.New</code></td></tr>
+    <tr><td>静默兜底</td><td>需语义映射</td>
+      <td>Python <code>.get(k, default)</code> / Java <code>getOrDefault</code> /
+        Go 忽略 error（<code>_ = f()</code>）</td></tr>
+    <tr><td>常量抽取数量</td><td>需归一化</td>
+      <td>不比绝对值。按<strong>该语言参考实现的常量数</strong>做基准，取比值</td></tr>
+    <tr><td>代码行数 / 注释占比</td><td>不可比</td>
+      <td>Java 天生冗长。<strong>只展示，不计分</strong></td></tr>
+  </tbody>
+</table>
+
+<div class="card ac r tight">
+<p style="margin:0"><strong>硬规则：进入评分的指标必须跨语言可比或已归一化，不可比的只展示不计分。</strong>
+出题时必须为每种允许的语言各准备一套隐藏测试与一份参考实现——这是语言不限带来的真实成本，
+在出题工作量里要算进去（见 6.4）。</p>
+</div>
+<p class="note">附带收益：语言不限的题目会产生一份「不同语言下 AI 辅助效果」的横向数据。
+如果发现内部模型在 Go 上明显弱于 Python，这对部门技术选型与模型采购都是直接有用的输入。</p>
+
+<h3 id="s46">4.6 模型基准库</h3>
+<p>学员比赛蓝归蓝、黄归黄，两区不同题、不跨区比分数。
+但「内部模型到底比外部差多少」这个问题仍然需要答案——把它<strong>挪到出题环节</strong>去解决，
+完全不碰学员比赛。</p>
+
+<div class="card ac g">
+<h4 style="margin-top:0">做法：出题体检时双模型裸跑</h4>
+<p>新题上架前本来就要用强模型裸跑一遍，验证澄清点埋得够不够深（见 6.6 自动体检）。
+<strong>只要同时再用内部弱模型裸跑一遍</strong>，这道题就自带一组「同题、同隐藏测试、不同模型」的对比数据。</p>
+<ul style="margin-bottom:0">
+  <li><strong>零额外成本</strong>——数据是出题时顺带产生的</li>
+  <li><strong>不涉及任何学员</strong>——纯模型对模型，不违反两区不比的原则</li>
+  <li><strong>题库越大数据越厚</strong>，而且全部来自你们自己的真实任务，比任何公开 benchmark 都有说服力</li>
+</ul>
+</div>
+
+<h4>两个直接用途</h4>
+<table>
+  <thead><tr><th style="width:150px">用途</th><th>怎么用</th></tr></thead>
+  <tbody>
+    <tr><td><strong>模型选型</strong></td>
+      <td>按维度、按语言、按题型统计强弱模型的分差。
+        「内部模型在 Go 上比外部低 32 分、在 Python 上只低 14 分」——
+        这种结论对模型采购与内部模型优化方向是直接输入</td></tr>
+    <tr><td><strong>题目投放决策</strong></td>
+      <td>如果一道题强模型能拿 70、弱模型只有 25，说明<strong>它不适合放黄区</strong>，
+        得拆细或降低粒度。体检数据直接指导这道题该投到哪个区</td></tr>
+  </tbody>
+</table>
+
+<div class="mock">
+  <div class="bar"><b>模型基准库</b> · 按维度对比 · 样本 24 道题</div>
+  <div class="body">
+    <svg viewBox="0 0 560 190" style="width:100%;height:auto;display:block">
+      <g font-size="11.5" fill="#52514e">
+        <text x="0" y="26">交付验证</text><text x="0" y="66">规格质量</text>
+        <text x="0" y="106">代码质量</text><text x="0" y="146">协作过程</text>
+      </g>
+      <g>
+        <rect x="76" y="14" width="300" height="15" rx="4" fill="#2a78d6"/>
+        <rect x="76" y="32" width="168" height="15" rx="4" fill="#eda100"/>
+        <rect x="76" y="54" width="268" height="15" rx="4" fill="#2a78d6"/>
+        <rect x="76" y="72" width="212" height="15" rx="4" fill="#eda100"/>
+        <rect x="76" y="94" width="256" height="15" rx="4" fill="#2a78d6"/>
+        <rect x="76" y="112" width="224" height="15" rx="4" fill="#eda100"/>
+        <rect x="76" y="134" width="240" height="15" rx="4" fill="#2a78d6"/>
+        <rect x="76" y="152" width="196" height="15" rx="4" fill="#eda100"/>
+      </g>
+      <g font-size="10.5" fill="#898781" font-weight="700">
+        <text x="384" y="26">外部 82</text><text x="252" y="44">内部 46</text>
+        <text x="352" y="66">外部 73</text><text x="296" y="84">内部 58</text>
+        <text x="340" y="106">外部 70</text><text x="308" y="124">内部 61</text>
+        <text x="324" y="146">外部 66</text><text x="280" y="164">内部 54</text>
+      </g>
+    </svg>
+    <div style="font-size:11.5px;color:var(--ink-3);margin-top:8px">
+      <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--blue);margin-right:5px"></span>外部模型裸跑均分
+      <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--amber);margin:0 5px 0 16px"></span>内部模型裸跑均分
+    </div>
+  </div>
+</div>
+<p class="note">示意数据。真实数据积累到一定量后，这张图就是内部模型能力短板的直接证据——
+上例中差距最大的是交付验证（36 分），说明内部模型在「把需求准确翻译成正确实现」这一环最弱。</p>
+
+<h3 id="s47">4.7 CI 评测流水线</h3>
+<pre><code>stages: [validate, prepare, verify, measure, extract, score, publish]
+
+validate  提交契约校验（见 4.9）· 不合规立即产出诊断报告
+prepare   拉取提交 · 识别语言 · 准备沙箱镜像
+verify    K8s Job 跑隐藏测试（无网络 · 只读挂载 · 60s 超时 · 内存上限）
+measure   tree-sitter 解析 → 跨语言度量 → 生成 findings
+extract   调内部模型网关做结构化抽取 → 引用精确匹配校验 → 标记 quoteVerified
+score     套分区 profile 逐点定档 → 汇总四维度 → 产出统一 Schema JSON
+publish   写回平台 API；按赛制决定 reveal: immediate | on_release</code></pre>
+
+<div class="grid g3">
+  <div class="card tight"><h4 style="margin-top:0">安全</h4>
+    <p class="note" style="margin:0">学员代码在 K8s Job 中执行：禁网、只读根、非 root、CPU/内存配额、硬超时。
+    评测容器与平台服务网络隔离。</p></div>
+  <div class="card tight"><h4 style="margin-top:0">并发</h4>
+    <p class="note" style="margin:0">集中场次会出现几十人同时 push。用 CI 并发上限 + 队列，
+    保证最慢一份也在几分钟内出结果；不足则临时扩 runner。</p></div>
+  <div class="card tight"><h4 style="margin-top:0">幂等</h4>
+    <p class="note" style="margin:0">同一 commit 重跑必须同分。抽取环节把模型温度设为 0，
+    并缓存 <code>(commit, rubricVersion)</code> 的结果。</p></div>
+</div>
+
+
+<h3 id="s48">4.8 无标准答案的挑战题</h3>
+<p>老员工发布的业务难题有两种：<strong>悬赏型</strong>（自己也没解决，发出来求解）与
+<strong>探索型</strong>（「用 AI 到底能不能做成这件事」）。两种都没有隐藏测试可跑。
+但这不意味着评测体系失效——</p>
+
+<div class="card ac g">
+<h4 style="margin-top:0">关键发现：四个维度里只有一个需要替换</h4>
+<p style="margin-bottom:0">Spec 25 / Code 20 / Collab 15 这 <strong>60 分</strong>测的是
+「规格写没写清」「代码抗不抗变更」「跟 AI 怎么协作的」——<strong>这三件事都不需要标准答案</strong>，
+结构扫描、AST 度量、commit 行为分析照跑不误。真正失效的只有 Verify 40 分。</p>
+</div>
+
+<p>因此把 <strong>Verify 做成可替换插槽</strong>，三种实现共用同一个 Schema：</p>
+<table>
+  <thead><tr><th style="width:120px">题型</th><th style="width:44%">Verify 40 分的实现</th><th>判定方</th></tr></thead>
+  <tbody>
+    <tr><td><code>test</code><br>标准题</td><td>隐藏验收测试四档加权</td><td><span class="tag auto">脚本</span></td></tr>
+    <tr><td><code>bounty</code><br>悬赏题</td><td>出题人验收：解决程度四档</td><td><span class="tag human">出题人</span></td></tr>
+    <tr><td><code>explore</code><br>探索题</td><td>结论可信度：证据充分性四档</td><td><span class="tag human">出题人 + 复核</span></td></tr>
+  </tbody>
+</table>
+
+<div class="grid g2">
+  <div class="card tight">
+    <h4 style="margin-top:0"><code>bounty</code> 悬赏题四档</h4>
+    <table class="compact" style="margin:6px 0 0">
+      <tbody>
+        <tr><td style="width:64px"><strong>A 40</strong></td><td>完全解决，出题人确认可直接采用</td></tr>
+        <tr><td><strong>B 28</strong></td><td>主要问题解决，遗留次要问题</td></tr>
+        <tr><td><strong>C 16</strong></td><td>未解决，但提供了有效思路或缩小了问题范围</td></tr>
+        <tr><td><strong>D 0</strong></td><td>无实质进展</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card tight">
+    <h4 style="margin-top:0"><code>explore</code> 探索题四档</h4>
+    <table class="compact" style="margin:6px 0 0">
+      <tbody>
+        <tr><td style="width:64px"><strong>A 40</strong></td><td>给出可复现的验证（脚本/数据/步骤），结论有证据支撑</td></tr>
+        <tr><td><strong>B 28</strong></td><td>有实验数据但不完整，结论方向可信</td></tr>
+        <tr><td><strong>C 16</strong></td><td>仅定性判断，无可复现验证</td></tr>
+        <tr><td><strong>D 0</strong></td><td>无依据的主观结论</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<p class="note">Schema 完全不变：只是 <code>verifyDetail</code> 的内部结构不同、<code>criteria</code> 换一组 key、
+<code>source</code> 标为 <code>human</code>。展示层、能力画像、赛季汇总一行代码都不用改。</p>
+
+<h4>榜单怎么算：自动评的进画像，人评的进荣誉</h4>
+<p>悬赏题的 40 分由人判，出题人有宽有严，直接混进赛季总分会污染可比性。建议分开：</p>
+<table>
+  <thead><tr><th style="width:150px">榜单</th><th style="width:150px">计入什么</th><th>排序依据</th></tr></thead>
+  <tbody>
+    <tr><td><strong>赛季总分榜</strong></td><td><strong>只算部门安排的官方项目</strong></td>
+      <td>场次百分位积分累加。众包发布的题无论什么类型都不计入</td></tr>
+    <tr><td><strong>挑战榜</strong></td><td>全部众包题（悬赏 / 探索 / 老员工标准题）</td>
+      <td><strong>按被采纳数排，不按分数排。</strong>解决一个真实难题的荣誉，本来就比分数有意义</td></tr>
+    <tr><td><strong>个人能力画像</strong></td><td>全部题目的 Spec / Code / Collab</td>
+      <td>这 60 分是自动评的、跨题型可比，<strong>不因 Verify 换了实现就丢掉</strong></td></tr>
+  </tbody>
+</table>
+
+<h4>真实业务代码的权限边界</h4>
+<p>黄区允许挑战题直接使用真实业务代码与场景，但题目元数据必须声明 <code>requiredRepos</code>，
+管理员在终审时一并授权。参与者的访问范围<strong>仅限声明的仓库</strong>，不做扩大授权。
+敏感信息（客户名、IP、密钥、工号）由发布前的自动扫描拦截，见 6.6。</p>
+
+
+<h3 id="s49">4.9 提交契约与格式校验</h3>
+<p>自动评测能成立的前提是<strong>交上来的东西长什么样是约定死的</strong>。
+目录结构、必交文件、入口签名各交各的，评测引擎连要评的文件都找不到。
+所以每道题都必须声明一份<strong>提交契约</strong>，平台在评测前先校验。</p>
+
+<h4>契约写在题目元信息里</h4>
+<pre><code>submission:
+  required:
+    - path: SPEC.md
+      type: markdown
+      minSections: 7          # 七节模板必须都在
+      notTemplate: true       # 不能原样交回模板（比对模板哈希）
+    - path: transcript.md
+      type: markdown
+      minChars: 200
+    - path: "{entry}"         # 按语言展开，见下
+      type: source
+      mustExport: calculate_fee
+      signature: "(entry_time, exit_time, is_member=False)"
+  optional:
+    - path: tests/            # 自己写的测试，影响 S2 得分
+    - path: NOTES.md          # 复盘与遗留问题
+  forbidden:
+    - "**/.env"
+    - "**/*credential*"
+    - "hidden_*"              # 不许提交隐藏测试，防作弊
+  languageEntry:              # 语言不限时，每种语言各自的入口约定
+    python: src/parking.py
+    java:   src/main/java/Parking.java
+    go:     src/parking.go</code></pre>
+
+<h4>校验分三级，诊断而不是惩罚</h4>
+<table>
+  <thead><tr><th style="width:96px">级别</th><th style="width:34%">典型情况</th><th>处理</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag" style="background:color-mix(in srgb,var(--crit) 15%,transparent);color:var(--crit)">阻断</span></td>
+      <td>入口文件缺失 · 语法错误无法解析 · 提交了 forbidden 文件</td>
+      <td>无法执行评测。Verify 记 0，其余维度尽力评。
+        <strong>报告首屏直接给出诊断</strong>，让学员知道不是判低了而是根本没跑起来</td></tr>
+    <tr><td><span class="tag" style="background:color-mix(in srgb,var(--serious) 24%,transparent);color:#a4501f">警告</span></td>
+      <td>SPEC.md 原样交回模板 · transcript 过短 · 签名与约定不符</td>
+      <td>照常评测。对应维度自然拿低分，<strong>不额外惩罚</strong>——
+        规则没写清本来就该 Spec 维度扣分，重复扣两次不合理</td></tr>
+    <tr><td><span class="tag auto">提示</span></td>
+      <td>未提交可选项（tests/、NOTES.md）</td>
+      <td>仅提示，不影响分数</td></tr>
+  </tbody>
+</table>
+<p class="note"><strong>设计原则：校验的作用是给出明确诊断，不是叠加惩罚。</strong>
+学员最怕的是「我明明写了为什么 0 分」——校验报告要能一句话回答这个问题。</p>
+
+<h4>本地预检：push 之前自己先跑</h4>
+<p>starter 骨架里内置一个预检命令，学员随时可以自查，不用把提交次数浪费在格式问题上：</p>
+<pre><code>$ ./drill check
+
+  ✓ SPEC.md            七节齐全 · 已填写（非模板）
+  ✓ transcript.md      1,240 字
+  ✗ src/parking.go     未找到导出函数 CalculateFee
+                       契约要求：func CalculateFee(entry, exit string, isMember bool) (float64, error)
+  ⚠ tests/             未提交自测，S2「验收用例质量」会拿不到分
+  ✓ forbidden          未发现违规文件
+
+  1 项阻断 · 1 项警告 —— 修完再 push</code></pre>
+<p class="note">这个命令的实现就是 CI validate 阶段的同一份代码，本地跑和 CI 跑结果必然一致。</p>
+
+<h4>契约由出题人定，平台做体检</h4>
+<p>出题时必须填写 <code>submission</code> 段，自动体检会检查：
+参考实现能否通过自己的契约校验（不能通过说明契约写错了）、
+语言不限时每种语言的入口约定是否都声明了、forbidden 是否覆盖了隐藏测试的路径模式。</p>
+
+<!-- ══════════════════ 05 ══════════════════ -->
+<h2 id="s5"><span class="n">05</span>平台功能</h2>
+<p class="lede">平台的产品重心在两块：<strong>每次提交的完整评测报告</strong>，和<strong>个人跨场次的能力画像</strong>。
+分数只是入口，让人看懂「差在哪、下次怎么改」才是目的。</p>
+
+<h3 id="s51">5.1 单场评测报告</h3>
+<p>每个人、每个组的每一次提交都产出一份完整报告。四个板块，逐层下钻：
+<strong>总览 → 逐条判据 → 客观指标 → 扣分证据链</strong>。</p>
+
+<div class="mock">
+  <div class="bar"><b>评测报告</b> · 第三组 · 会员积分规则引擎 · <span class="tag yellow">黄区</span> 团队集中限时赛</div>
+  <div class="body">
+    <div style="display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start">
+      <!-- 雷达图 -->
+      <div style="flex:0 0 auto">
+        <svg viewBox="0 0 300 270" style="width:280px;height:auto;display:block">
+          <g fill="none" stroke="#e1e0d9" stroke-width="1">
+            <polygon points="150,106.25 173.75,130 150,153.75 126.25,130"/>
+            <polygon points="150,82.5 197.5,130 150,177.5 102.5,130"/>
+            <polygon points="150,58.75 221.25,130 150,201.25 78.75,130"/>
+            <polygon points="150,35 245,130 150,225 55,130"/>
+          </g>
+          <g stroke="#e1e0d9" stroke-width="1">
+            <line x1="150" y1="130" x2="150" y2="35"/><line x1="150" y1="130" x2="245" y2="130"/>
+            <line x1="150" y1="130" x2="150" y2="225"/><line x1="150" y1="130" x2="55" y2="130"/>
+          </g>
+          <polygon points="150,65.4 202.3,130 150,188.9 94.9,130"
+            fill="#898781" fill-opacity=".14" stroke="#898781" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <polygon points="150,48.3 233.6,130 150,215.5 67.4,130"
+            fill="#2a78d6" fill-opacity=".16" stroke="#2a78d6" stroke-width="2"/>
+          <g fill="#2a78d6">
+            <circle cx="150" cy="48.3" r="3.6"/><circle cx="233.6" cy="130" r="3.6"/>
+            <circle cx="150" cy="215.5" r="3.6"/><circle cx="67.4" cy="130" r="3.6"/>
+          </g>
+          <g font-size="11" fill="#52514e" font-family="system-ui">
+            <text x="150" y="26" text-anchor="middle">交付验证 34.4</text>
+            <text x="252" y="134" font-size="10.5">规格 22</text>
+            <text x="150" y="243" text-anchor="middle">代码质量 18</text>
+            <text x="48" y="134" text-anchor="end" font-size="10.5">协作 13</text>
+          </g>
+          <g font-size="10.5" fill="#898781" font-family="system-ui">
+            <text x="150" y="262" text-anchor="middle">
+              <tspan fill="#2a78d6">━</tspan> 本组　<tspan fill="#898781">┅</tspan> 本场平均</text>
+          </g>
+        </svg>
+      </div>
+      <!-- 得分点分档 -->
+      <div style="flex:1;min-width:230px">
+        <div style="font-size:12px;color:var(--ink-3);margin-bottom:9px">16 个得分点的档位分布</div>
+        <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin-bottom:12px">
+          <div class="lv A" style="min-width:0;text-align:center">V1</div>
+          <div class="lv A" style="min-width:0;text-align:center">V2</div>
+          <div class="lv B" style="min-width:0;text-align:center">V3</div>
+          <div class="lv A" style="min-width:0;text-align:center">V4</div>
+          <div class="lv A" style="min-width:0;text-align:center">S1</div>
+          <div class="lv B" style="min-width:0;text-align:center">S2</div>
+          <div class="lv A" style="min-width:0;text-align:center">S3</div>
+          <div class="lv A" style="min-width:0;text-align:center">S4</div>
+          <div class="lv A" style="min-width:0;text-align:center">C1</div>
+          <div class="lv A" style="min-width:0;text-align:center">C2</div>
+          <div class="lv B" style="min-width:0;text-align:center">C3</div>
+          <div class="lv A" style="min-width:0;text-align:center">C4</div>
+          <div class="lv A" style="min-width:0;text-align:center">P1</div>
+          <div class="lv A" style="min-width:0;text-align:center">P2</div>
+          <div class="lv B" style="min-width:0;text-align:center">P3</div>
+          <div class="lv A" style="min-width:0;text-align:center">P4</div>
+        </div>
+        <div style="font-size:11.5px;color:var(--ink-3);margin-bottom:14px">
+          A 优秀 12 · B 合格 4 · C 待改进 0 · D 未做到 0
+        </div>
+        <div style="font-size:12px;color:var(--ink-3);margin-bottom:7px">验收测试四档</div>
+        <div class="row"><span class="nm" style="font-size:12px">基础档</span>
+          <span class="bar2"><i style="width:100%;background:var(--good)"></i></span>
+          <span class="tnum muted" style="font-size:11.5px">8/8</span></div>
+        <div class="row"><span class="nm" style="font-size:12px">边界档</span>
+          <span class="bar2"><i style="width:100%;background:var(--good)"></i></span>
+          <span class="tnum muted" style="font-size:11.5px">6/6</span></div>
+        <div class="row"><span class="nm" style="font-size:12px">澄清档</span>
+          <span class="bar2"><i style="width:67%;background:var(--blue)"></i></span>
+          <span class="tnum muted" style="font-size:11.5px">4/6</span></div>
+        <div class="row"><span class="nm" style="font-size:12px">变更档</span>
+          <span class="bar2"><i style="width:80%;background:var(--blue)"></i></span>
+          <span class="tnum muted" style="font-size:11.5px">4/5</span></div>
+      </div>
+    </div>
+    <div style="margin-top:15px;padding-top:12px;border-top:1px solid var(--grid);font-size:12px;color:var(--ink-3)">
+      <strong style="color:var(--crit)">主要失分</strong>　C2「免费时长是否扣除」未澄清 → 澄清档挂 2 题 ·
+      C3 金额走 float 未用 Decimal · P3 抽取仅命中 3/4 项
+    </div>
+  </div>
+</div>
+
+<table>
+  <thead><tr><th style="width:130px">板块</th><th>内容</th><th style="width:150px">图表形式</th></tr></thead>
+  <tbody>
+    <tr><td><strong>总览</strong></td>
+      <td>总分、名次、四维度得分与本场平均对比、16 个得分点的档位分布、主要失分摘要</td>
+      <td>四维雷达（本人 vs 本场平均）· 档位分布色块</td></tr>
+    <tr><td><strong>逐条判据</strong></td>
+      <td>16 个得分点各自：命中哪一档、判据原文、实际证据数据、四档阶梯（看清差一档差在哪）、
+        判定来源（脚本 / 模型 / 人工）</td>
+      <td>四档阶梯高亮 · 得分条</td></tr>
+    <tr><td><strong>客观指标</strong></td>
+      <td>验收测试逐题通过情况；代码度量（魔法数字、圈复杂度、异常处理、精度）；
+        commit 时间线（含需求变更投放点标记）</td>
+      <td>四档通过条 · 逐题网格 · commit 时间线</td></tr>
+    <tr><td><strong>扣分证据链</strong></td>
+      <td>每条扣分指向文件、行号、代码片段、为什么错、怎么改；
+        抽取项附原文引用与校验状态</td>
+      <td>带行号的代码片段卡</td></tr>
+  </tbody>
+</table>
+
+<h4>团队报告的额外内容</h4>
+<p>团队项目在以上基础上追加<strong>成员贡献视图</strong>：各成员的 commit 数与触及文件、
+角色轮换记录（领航员 / 驾驶员）、以及组内讨论在 commit message 里的留痕。
+这一块<strong>只做展示不计分</strong>——团队分不拆到个人，避免激励刷 commit。</p>
+
+<h3 id="s52">5.2 个人能力画像</h3>
+<p>画像<strong>按场次组织</strong>：每一场是一条记录，带分区标签（<span class="tag blue">蓝区</span> /
+<span class="tag yellow">黄区</span>）、题型、赛制、得分与本场名次。
+不做跨区的分数运算，学员自己看得到规律。</p>
+
+<div class="mock">
+  <div class="bar"><b>能力画像</b> · 张三（w00123）· 2026 Q4 赛季</div>
+  <div class="body">
+    <div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:6px">
+      <div class="stat" style="flex:1;min-width:110px"><div class="v tnum">312</div><div class="l">赛季总积分 · 部门第 7</div></div>
+      <div class="stat" style="flex:1;min-width:110px"><div class="v tnum">62.4</div><div class="l">场均积分</div></div>
+      <div class="stat" style="flex:1;min-width:110px"><div class="v tnum">6</div><div class="l">参赛场次 · 黄 4 蓝 2</div></div>
+      <div class="stat" style="flex:1;min-width:110px"><div class="v tnum">P68</div><div class="l">部门百分位</div></div>
+    </div>
+
+    <div style="font-size:12px;color:var(--ink-3);margin:16px 0 6px">场次积分趋势</div>
+    <svg viewBox="0 0 540 220" style="width:100%;height:auto;display:block">
+      <g stroke="#e1e0d9" stroke-width="1">
+        <line x1="50" y1="40" x2="510" y2="40"/><line x1="50" y1="80" x2="510" y2="80"/>
+        <line x1="50" y1="120" x2="510" y2="120"/><line x1="50" y1="160" x2="510" y2="160"/>
+        <line x1="50" y1="200" x2="510" y2="200"/>
+      </g>
+      <g font-size="10" fill="#898781" text-anchor="end">
+        <text x="42" y="44">100</text><text x="42" y="124">50</text><text x="42" y="204">0</text>
+      </g>
+      <polyline points="70,132.8 158,112 246,118.4 334,91.2 422,81.6 490,67.2"
+        fill="none" stroke="#2a78d6" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+      <g>
+        <circle cx="70"  cy="132.8" r="5.5" fill="#eda100" stroke="#fcfcfb" stroke-width="2"/>
+        <circle cx="158" cy="112"   r="5.5" fill="#eda100" stroke="#fcfcfb" stroke-width="2"/>
+        <circle cx="246" cy="118.4" r="5.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+        <circle cx="334" cy="91.2"  r="5.5" fill="#eda100" stroke="#fcfcfb" stroke-width="2"/>
+        <circle cx="422" cy="81.6"  r="5.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+        <circle cx="490" cy="67.2"  r="5.5" fill="#eda100" stroke="#fcfcfb" stroke-width="2"/>
+      </g>
+      <g font-size="10" fill="#898781" text-anchor="middle">
+        <text x="70"  y="216">第1场</text><text x="158" y="216">第2场</text><text x="246" y="216">第3场</text>
+        <text x="334" y="216">第4场</text><text x="422" y="216">第5场</text><text x="490" y="216">第6场</text>
+      </g>
+      <g font-size="10.5" fill="#52514e" text-anchor="middle" font-weight="700">
+        <text x="70" y="126">42</text><text x="158" y="105">55</text><text x="246" y="111">51</text>
+        <text x="334" y="84">68</text><text x="422" y="74">74</text><text x="490" y="60">83</text>
+      </g>
+    </svg>
+    <div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">
+      <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--amber);margin-right:5px"></span>黄区场次
+      <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--blue);margin:0 5px 0 16px"></span>蓝区场次
+      　场次积分 = 本场百分位排名，两区尺度一致
+    </div>
+
+    <div style="font-size:12px;color:var(--ink-3);margin:20px 0 4px">参赛记录</div>
+    <div class="row"><span class="tag yellow">黄</span><span class="nm">会员积分规则引擎</span>
+      <span class="muted" style="font-size:11.5px">团队 · 集中赛</span>
+      <span class="tnum" style="font-weight:700;width:38px;text-align:right">83</span>
+      <span class="muted" style="font-size:11.5px;width:48px;text-align:right">1/5 名</span></div>
+    <div class="row"><span class="tag blue">蓝</span><span class="nm">遗留限流器加策略</span>
+      <span class="muted" style="font-size:11.5px">团队 · 集中赛</span>
+      <span class="tnum" style="font-weight:700;width:38px;text-align:right">74</span>
+      <span class="muted" style="font-size:11.5px;width:48px;text-align:right">2/6 名</span></div>
+    <div class="row"><span class="tag yellow">黄</span><span class="nm">日志脱敏</span>
+      <span class="muted" style="font-size:11.5px">个人 · 赛季刷榜</span>
+      <span class="tnum" style="font-weight:700;width:38px;text-align:right">68</span>
+      <span class="muted" style="font-size:11.5px;width:48px;text-align:right">P68</span></div>
+
+    <div style="font-size:12px;color:var(--ink-3);margin:20px 0 8px">得分点历史平均档位 · 找薄弱项</div>
+    <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px">
+      <div class="lv A" style="min-width:0;text-align:center">V1</div>
+      <div class="lv B" style="min-width:0;text-align:center">V2</div>
+      <div class="lv C" style="min-width:0;text-align:center">V3</div>
+      <div class="lv B" style="min-width:0;text-align:center">V4</div>
+      <div class="lv A" style="min-width:0;text-align:center">S1</div>
+      <div class="lv C" style="min-width:0;text-align:center">S2</div>
+      <div class="lv B" style="min-width:0;text-align:center">S3</div>
+      <div class="lv D" style="min-width:0;text-align:center">S4</div>
+      <div class="lv A" style="min-width:0;text-align:center">C1</div>
+      <div class="lv A" style="min-width:0;text-align:center">C2</div>
+      <div class="lv B" style="min-width:0;text-align:center">C3</div>
+      <div class="lv B" style="min-width:0;text-align:center">C4</div>
+      <div class="lv A" style="min-width:0;text-align:center">P1</div>
+      <div class="lv B" style="min-width:0;text-align:center">P2</div>
+      <div class="lv C" style="min-width:0;text-align:center">P3</div>
+      <div class="lv A" style="min-width:0;text-align:center">P4</div>
+    </div>
+    <div style="margin-top:11px;font-size:12px;color:var(--ink-3)">
+      <strong style="color:var(--crit)">最弱 S4 变更锚点识别</strong>（6 场里 4 场未做到）→
+      推荐练习：<span style="color:var(--blue)">停车场计费</span>、<span style="color:var(--blue)">订单折扣叠加</span>
+    </div>
+  </div>
+</div>
+
+<table>
+  <thead><tr><th style="width:150px">画像模块</th><th>内容</th><th style="width:140px">图表形式</th></tr></thead>
+  <tbody>
+    <tr><td><strong>赛季概况</strong></td><td>总积分、部门名次与百分位、场均积分、参赛场次（分区计数）</td><td>指标卡</td></tr>
+    <tr><td><strong>积分趋势</strong></td><td>各场次积分随时间变化，点的颜色标注分区</td><td>折线图 + 分区着色点</td></tr>
+    <tr><td><strong>参赛记录</strong></td><td>逐场：题目、分区标签、类型、赛制、得分、本场名次，点进去是完整报告</td><td>时间线列表</td></tr>
+    <tr><td><strong>能力雷达</strong></td><td>赛季内四维度均值 vs 部门中位数</td><td>四维雷达</td></tr>
+    <tr><td><strong>薄弱项定位</strong></td><td>16 个得分点的历史平均档位，自动识别最弱项并推荐对应练习题</td><td>档位色块矩阵</td></tr>
+  </tbody>
+</table>
+
+<h3 id="s53">5.3 赛季积分制</h3>
+<div class="card ac o">
+<p style="margin-top:0"><strong>赛季榜只有一个，不分蓝黄。</strong>但如果直接累加各场原始分，会出问题——
+强模型下同样的努力更容易拿高分，<strong>这会激励人挑蓝区场次打</strong>。</p>
+<p style="margin-bottom:0">解法是赛季积分用<strong>场次百分位</strong>而非原始分：</p>
+<pre style="margin:11px 0"><code>场次积分 = round(100 × (1 − (本场名次 − 1) / 本场参赛数))
+          第 1 名 100 分 · 中位数 50 分 · 末位 100/n 分
+
+赛季总积分 = Σ 各场次积分        ← 榜单默认排序，奖励参与
+场均积分   = 总积分 / 场次数      ← 并列展示，反映稳定水平</code></pre>
+<p style="margin-bottom:0">比的是<strong>你在本场（同区、同题、同模型）里的位置</strong>，
+天然公平。个人赛的「本场名次」按同一道题的所有提交者排。</p>
+<p style="margin:11px 0 0"><strong>计入范围：只有 <code>origin: official</code> 的项目。</strong>
+老员工众包发布的挑战题不进赛季总分——它们的分由出题人主观判定，宽严不一，
+混进来会污染赛季榜的可比性。众包题走挑战榜，并且它的
+Spec / Code / Collab 三个维度<strong>照常计入个人能力画像</strong>（这三项是自动评的、跨题型可比）。</p>
+<p class="note" style="margin-bottom:0"><strong>这条设计的价值不只在蓝黄之间。</strong>
+蓝区只有零星几场集中赛，「挑蓝区打」的空间本来就小。但即使全是黄区场次，
+不同题目的难度也不一样——一道埋了六个澄清点的硬题，均分可能比基础题低二十分。
+用原始分累加等于惩罚了参加硬题的人。<strong>场次百分位把题目难度差也一并消掉了。</strong></p>
+</div>
+
+<h3 id="s54">5.4 管理端</h3>
+<table>
+  <thead><tr><th style="width:150px">模块</th><th>能力</th></tr></thead>
+  <tbody>
+    <tr><td><strong>项目管理</strong></td>
+      <td>建项目 → 选题、分区、类型、赛制、<code>trigger</code>/<code>reveal</code>、时间窗、语言策略 → 一键发布</td></tr>
+    <tr><td><strong>组织管理</strong></td>
+      <td>维护组织树与层级标签、员工归属；<strong>层级数量与叫法可配置</strong>，换部门换套标签不改代码</td></tr>
+    <tr><td><strong>分组与开局</strong></td>
+      <td>导入名单（SSO 取工号与组织路径）、个人/团队编排、<strong>批量创建孤立分支</strong>、分支地址下发</td></tr>
+    <tr><td><strong>评测控制</strong></td>
+      <td>集中赛的<strong>一键批量评测</strong>与揭晓；CI 实时状态、失败重跑、超时告警；大屏进度</td></tr>
+    <tr><td><strong>人工复核台</strong></td>
+      <td>只列被标 yes 的抽取项与引用，一键确认/驳回，分数自动重算；引用校验失败项优先排队</td></tr>
+    <tr><td><strong>出题工作台</strong><br><span class="muted">出题人角色</span></td>
+      <td>老员工创建挑战：选题型、填验收标准、声明仓库权限、设悬赏与评审 SLA；提交后自动体检</td></tr>
+    <tr><td><strong>出题终审台</strong></td>
+      <td>体检通过后人工终审：脱敏检查、区分度检查、权限授权范围确认</td></tr>
+    <tr><td><strong>挑战评审台</strong><br><span class="muted">出题人角色</span></td>
+      <td>对提交的解法做四档验收并写评语，可标记「采纳」；超 SLA 自动提醒</td></tr>
+    <tr><td><strong>题库管理</strong></td>
+      <td>题目版本、按语言的隐藏测试与参考实现、判据 profile 版本、
+        <strong>模型基准数据</strong>、使用次数与疲劳度</td></tr>
+    <tr><td><strong>赛季与报表</strong></td>
+      <td>赛季编排与积分结算；部门级报表：能力基线、维度分布、模型基准对比、按批次与语言对比</td></tr>
+    <tr><td><strong>结果导入</strong></td>
+      <td>上传蓝区 Claude/Codex 产出的结果 JSON，Schema 校验后并入；也用于导入集中赛的人工评审部分</td></tr>
+  </tbody>
+</table>
+
+<h3>SSO 与账号</h3>
+<p>不自建账号体系。认证走公司统一 SSO 取工号与部门，平台侧只维护<strong>角色映射</strong>
+（学员 / 出题人 / 导师 / 管理员）与批次归属。接口按 OIDC 与 SAML 两种形态各留一个适配层。</p>
+
+
+<!-- ══════════════════ 06 ══════════════════ -->
+<h2 id="s6"><span class="n">06</span>出题方法论</h2>
+<p>题目质量决定训战质量。这一节是可复用的出题方法，让部门任何一位资深工程师都能出出合格的题。</p>
+
+<h3>6.1 什么样的题适合训战</h3>
+<div class="grid g2">
+  <div class="card tight ac g">
+    <h4 style="margin-top:0">✓ 好题的五个特征</h4>
+    <ul style="margin-bottom:0;font-size:13.5px">
+      <li><strong>无业务门槛</strong>：新人一听就懂，不需要背景知识</li>
+      <li><strong>边界密集</strong>：正常路径简单，边界条件多且刁</li>
+      <li><strong>口头描述必然遗漏</strong>：天然含有说不清的歧义</li>
+      <li><strong>可自动验收</strong>：对错由测试判定，不靠人评</li>
+      <li><strong>变更可自然引入</strong>：加一个维度就能打穿硬编码实现</li>
+    </ul>
+  </div>
+  <div class="card tight ac r">
+    <h4 style="margin-top:0">✗ 不适合的题</h4>
+    <ul style="margin-bottom:0;font-size:13.5px">
+      <li>需要大量领域知识才能理解需求</li>
+      <li>正确答案不唯一、只能人工判断优劣</li>
+      <li>依赖外部服务、数据库、网络</li>
+      <li>规模太大，限时内做不完主流程</li>
+      <li>能在网上搜到现成实现</li>
+    </ul>
+  </div>
+</div>
+
+<h3>6.2 三档测试设计法</h3>
+<p>隐藏验收测试必须<strong>分档设计</strong>，这样一跑就能定位问题出在哪一层，而不只是给个总分。</p>
+<table>
+  <thead><tr><th style="width:100px">档位</th><th style="width:70px">建议题量</th><th style="width:60px">权重</th><th>设计要领</th></tr></thead>
+  <tbody>
+    <tr><td><strong>基础档</strong></td><td class="tnum">8</td><td class="tnum">×1.0</td>
+      <td>需求原文明说的规则。<strong>要让大多数人满分</strong>——它的作用是制造「看起来没问题」的错觉</td></tr>
+    <tr><td><strong>边界档</strong></td><td class="tnum">6</td><td class="tnum">×2.0</td>
+      <td>需求没说但有工程直觉就该想到：零值、空值、阈值前后、极大值、非法输入</td></tr>
+    <tr><td><strong>澄清档</strong></td><td class="tnum">6</td><td class="tnum">×2.0</td>
+      <td><strong>核心</strong>。答案<strong>无法从需求原文推导</strong>，只能靠提问获得。这一档是分水岭</td></tr>
+    <tr><td><strong>变更档</strong></td><td class="tnum">5</td><td class="tnum">×1.6</td>
+      <td>变更后的正确性 + <strong>向后兼容回归</strong>（原有调用方式不能坏）</td></tr>
+  </tbody>
+</table>
+<p class="note">基础档满分而边界/澄清档大面积失分，是最有教学价值的结果形态：
+代码看起来完全正常、跑一下也没问题，但三分之一的真实场景是错的。</p>
+
+<h3>6.3 澄清点设计法</h3>
+<p>澄清点是训战的灵魂。设计原则：<strong>这条规则必须有两种同样合理的理解，且需求原文无法判定选哪个。</strong>
+四个可靠的套路：</p>
+<table>
+  <thead><tr><th style="width:120px">套路</th><th>模板</th><th>例子</th></tr></thead>
+  <tbody>
+    <tr><td><strong>含不含等号</strong></td><td>「X 以内」到底含不含 X 本身</td><td>「15 分钟以内免费」——正好 15 分钟免不免？</td></tr>
+    <tr><td><strong>操作顺序</strong></td><td>两个操作都要做，先做哪个</td><td>封顶和打折，先封顶还是先打折？结果差 12 元</td></tr>
+    <tr><td><strong>词义边界</strong></td><td>一个日常词有多种技术含义</td><td>「一天最多 60」——自然日还是滚动 24 小时？</td></tr>
+    <tr><td><strong>作用范围</strong></td><td>某个约束作用于整体还是每个单元</td><td>封顶是全局封一次，还是每个周期各封一次？</td></tr>
+  </tbody>
+</table>
+
+<div class="card ac tight">
+<p style="margin:0"><strong>验证方法：</strong>出完题后，把口头需求原样丢给一个强模型，让它直接实现，
+然后跑你设计的隐藏测试。<strong>如果它拿到 90 分以上，说明澄清点埋得不够；理想结果是 60–75 分</strong>——
+基础档全绿，边界与澄清档各挂一半。</p>
+</div>
+
+<h3>6.4 出题清单</h3>
+<p>一道完整的题需要以下产出。<strong>语言不限的题目，带 ⚑ 的项要按每种语言各做一份</strong>：</p>
+<table>
+  <thead><tr><th style="width:180px">产出物</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>challenge.yaml</code></td><td>元信息：分区、赛制、时长、语言策略、档位权重、变更投放时刻、
+      <strong>提交契约</strong>（见 4.9）</td></tr>
+    <tr><td><code>README.md</code></td><td>学员看到的题面：交付物、硬性要求、提交纪律</td></tr>
+    <tr><td>口头需求稿</td><td>讲师照念的 80–120 字。<strong>不给文字稿</strong>，否则学员直接粘给 AI</td></tr>
+    <tr><td>澄清答案卡</td><td>6 条左右，打印裁开，学员问对了才给</td></tr>
+    <tr><td>变更包</td><td>准备两个难度版本，讲师按现场进度选</td></tr>
+    <tr><td>⚑ <code>starter/</code></td><td>起始骨架：接口签名 + spec 模板 + AGENTS.md</td></tr>
+    <tr><td>⚑ <code>tests/</code></td><td>25 道分档隐藏测试，<strong>题号与档位跨语言严格对应</strong></td></tr>
+    <tr><td>⚑ <code>reference/</code></td><td>参考实现。同时提供 C1/C4 归一化所需的常量数基准</td></tr>
+  </tbody>
+</table>
+
+<h3>6.5 题库运营</h3>
+<div class="card ac tight" style="border-left-color:var(--good)">
+<p style="margin:0"><strong>两个区的题目消耗速度差很多。</strong>
+<span class="tag blue">蓝区</span>只有集中限时赛——所有人同时开始、当场结束，
+<strong>答案没有流传的时间窗</strong>，同一道题换一批人可以反复用。
+<span class="tag yellow">黄区</span>的赛季刷榜长期开放，才是题库消耗的主要来源。
+下面的措施主要针对黄区。</p>
+</div>
+
+<div class="card ac y">
+<p style="margin-top:0"><strong>开放窗口刷题会消耗题库。</strong>学员之间会传答案，一道题放三个月就废了。这是运营问题，不是技术问题：</p>
+<ul style="margin-bottom:0">
+  <li><strong>疲劳度追踪</strong>：平台记录每道题的使用次数与分数分布。<strong>当平均分显著上升而离散度下降</strong>，
+    通常意味着答案在流传，该退役了</li>
+  <li><strong>同批次分卷</strong>：同一批人发同类型的不同题，降低串题收益</li>
+  <li><strong>持续产出</strong>：建议每季度新增 3–5 道，由资深工程师轮值出题，出题本身也算训战贡献</li>
+</ul>
+</div>
+
+
+<h3 id="s66">6.6 众包出题：老员工发布挑战</h3>
+<div class="card ac v">
+<p style="margin-top:0"><strong>这条机制的价值远大于「多一个题目来源」。</strong></p>
+<ul style="margin-bottom:0">
+  <li><strong>题库可持续。</strong>开放刷题三个月就把题刷废了，靠管理员出题追不上消耗，众包才是唯一可持续的产出方式</li>
+  <li><strong>把老员工卷进来。</strong>真正需要转变 AI 协作习惯的其实是有经验的人——他们最容易「我自己写更快」。
+    让他们出题、看新人怎么用 AI 解自己的题，比给他们上课有效得多</li>
+  <li><strong>可能真的解决问题。</strong>如果题目来自在研难题，新人解出来的东西是能用的。
+    那就不只是「训」，是真的「战」</li>
+</ul>
+</div>
+
+<h4>出题流程</h4>
+<table class="compact">
+  <thead><tr><th style="width:52px">步骤</th><th style="width:130px">谁</th><th>做什么</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>出题人（老员工）</td><td>工作台创建挑战，选题型：标准 / 悬赏 / 探索</td></tr>
+    <tr><td>2</td><td>出题人</td><td>填写必填项。<strong>悬赏与探索题必须写明「什么算解决」</strong></td></tr>
+    <tr><td>3</td><td>平台</td><td>自动体检，不通过直接退回并列明原因</td></tr>
+    <tr><td>4</td><td>管理员</td><td>人工终审：脱敏检查、区分度检查、仓库授权范围确认</td></tr>
+    <tr><td>5</td><td>平台</td><td>上架，绑定悬赏与评审 SLA</td></tr>
+  </tbody>
+</table>
+
+<h4>自动体检项</h4>
+<div class="grid g2">
+  <div class="card tight">
+    <h4 style="margin-top:0"><code>test</code> 标准题</h4>
+    <ul style="margin-bottom:0;font-size:13px">
+      <li>四档测试齐全，各档题量在合理区间</li>
+      <li><strong>参考实现跑隐藏测试必须满分</strong>——不满分说明测试本身有 bug</li>
+      <li><strong>裸提示强模型基准分落在 60–75 区间</strong>：&gt;75 说明澄清点埋得不够，
+        &lt;60 说明题太难或测试有问题</li>
+      <li>多语言题：题号与档位跨语言严格一一对应</li>
+      <li>澄清点 ≥ 4 个</li>
+    </ul>
+  </div>
+  <div class="card tight">
+    <h4 style="margin-top:0"><code>bounty</code> / <code>explore</code> 挑战题</h4>
+    <ul style="margin-bottom:0;font-size:13px">
+      <li><strong>必填「什么算解决」的验收标准</strong>——没有它出题人自己也评不了</li>
+      <li>使用真实代码时必须声明 <code>requiredRepos</code></li>
+      <li><strong>敏感信息扫描</strong>：客户名、IP、密钥、工号、内部域名</li>
+      <li>出题人承诺评审 SLA（建议 5 个工作日）</li>
+      <li>悬赏额度与有效期</li>
+    </ul>
+  </div>
+</div>
+<p class="note">「裸提示强模型基准分落在 60–75」这一条是最有效的自动体检项——
+它用一次模型跑分就替代了大量人工判断，直接量化了这道题「埋得够不够深」。
+体检报告一并展示给出题人，让他知道该往哪个方向补澄清点。</p>
+
+<h4>好题可以被采纳为官方题</h4>
+<div class="card ac tight">
+<p style="margin:0">众包题默认 <code>origin: crowdsourced</code>，不进赛季总分。
+但如果一道题<strong>体检数据漂亮、实战区分度好</strong>（分数分布离散、澄清档确实拉开差距），
+管理员可以把它<strong>采纳为官方题</strong>，编排进下一场正式比赛——此时它就计入赛季总分了。</p>
+<p class="note" style="margin:8px 0 0">这条路径同时是给出题人的最高激励：
+自己出的题被全部门正式比一场，比任何积分都有分量。也让「出好题」有了明确的目标——
+不是出得多，是出得准。</p>
+</div>
+
+<h4>激励与 SLA</h4>
+<table class="compact">
+  <thead><tr><th style="width:110px">角色</th><th>得到什么</th></tr></thead>
+  <tbody>
+    <tr><td><strong>解题人</strong></td><td>被采纳的荣誉标记 + 挑战榜排名；Spec/Code/Collab 60 分照常计入能力画像</td></tr>
+    <tr><td><strong>出题人</strong></td><td>出题计入贡献；<strong>题目被采纳为官方题</strong>是最高荣誉；
+      <strong>被解决的难题计入「AI 训战产生的实际收益」</strong>——这是向上汇报最硬的素材，
+      比任何培训满意度都有说服力</td></tr>
+    <tr><td><strong>SLA</strong></td><td>出题人超期未评审 → 自动提醒；连续超期 → 暂停其发布权，
+      避免题目挂在那里没人评、伤害参与热情</td></tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════ 07 ══════════════════ -->
+<h2 id="s7"><span class="n">07</span>样题设计</h2>
+<p>以下 4 道样题覆盖通用 AI 协作能力的四个不同切面。
+每道题都给出需求、澄清点、分档要点与变更包，可直接进入出题流程。</p>
+
+<details open>
+<summary>样题 · 日志脱敏<span class="sp"><span class="tag yellow">黄区</span> 个人赛季刷榜 · 40 分钟</span></summary>
+<div class="body">
+<dl class="kv">
+  <dt>考察</dt><dd>基本功综合：边界意识、澄清习惯、幂等设计</dd>
+  <dt>为什么选它</dt><dd>纯字符串处理，三种语言实现成本相当；边界极密；与业务零耦合，
+    适合长期挂在赛季刷榜池里</dd>
+</dl>
+<h4>口头需求（讲师照念）</h4>
+<p style="font-size:14.5px;background:var(--raise);padding:12px 15px;border-radius:9px;border:1px solid var(--border)">
+「给日志做个脱敏函数。一行日志里可能有手机号、身份证号、邮箱和银行卡号，把这些都打码。
+手机号保留前 3 后 4，中间打星号；身份证保留前 6 后 4；邮箱只保留首字母和域名；银行卡保留后 4 位。
+输入一行日志，输出脱敏后的日志。今天要。」</p>
+
+<h4>埋设的澄清点</h4>
+<table class="compact">
+  <thead><tr><th style="width:44px">编号</th><th>问题</th><th style="width:38%">标准答案</th></tr></thead>
+  <tbody>
+    <tr><td>C1</td><td>已经脱敏过的内容（含 * 的）还要不要再脱一次？</td><td>不脱，幂等：脱两次结果必须一致</td></tr>
+    <tr><td>C2</td><td>一行里同一类型出现多次，全脱还是只脱第一个？</td><td>全脱</td></tr>
+    <tr><td>C3</td><td>手机号如果带 +86 前缀或中间有短横线，算不算？</td><td>算。前缀与分隔符不计入「前 3 后 4」</td></tr>
+    <tr><td>C4</td><td>日志里的时间戳、订单号是长数字串，会不会被误判成银行卡？</td><td>银行卡必须 16–19 位且通过 Luhn 校验</td></tr>
+    <tr><td>C5</td><td>身份证末位是 X 怎么处理？大小写敏感吗？</td><td>X 视为有效末位，大小写均识别</td></tr>
+    <tr><td>C6</td><td>输入是 null / 空串怎么办？</td><td>null 抛参数异常，空串原样返回</td></tr>
+  </tbody>
+</table>
+
+<h4>分档要点</h4>
+<dl class="kv">
+  <dt>基础档 8</dt><dd>四种类型各自的标准格式脱敏、混合出现、无敏感信息时原样返回</dd>
+  <dt>边界档 6</dt><dd>空串、超长行、类型相邻无分隔、Unicode 字符干扰、位数不足的疑似号码</dd>
+  <dt>澄清档 6</dt><dd>C1–C6 各一题。<strong>C1 幂等性与 C4 Luhn 校验是主要分水岭</strong></dd>
+  <dt>变更档 5</dt><dd>新增车牌号脱敏 + 要求每种类型可独立开关 + 原有调用方式不能坏</dd>
+</dl>
+<p class="note">这道题的澄清档设计得比较狠：C4 的 Luhn 校验如果不问，几乎不可能想到——
+而不做 Luhn 校验就会把日志里的订单号、时间戳全部误脱敏，这在真实系统里是会引发线上问题的。</p>
+</div>
+</details>
+
+<details>
+<summary>样题 A · 规格驱动：会员积分规则引擎<span class="sp"><span class="tag both">两区皆可</span> 团队 2 人 · 集中场次 120 分钟</span></summary>
+<div class="body">
+<dl class="kv">
+  <dt>考察</dt><dd>需求澄清、边界写死、变更锚点识别。<strong>最适合作为第一期</strong></dd>
+  <dt>能力切面</dt><dd>「会不会问」——需求里没说的地方，你是去问，还是让 AI 替你猜</dd>
+</dl>
+<h4>口头需求</h4>
+<p style="font-size:14.5px;background:var(--raise);padding:12px 15px;border-radius:9px;border:1px solid var(--border)">
+「做个会员积分。消费 1 块钱得 1 分，普通会员 1 倍，银卡 1.5 倍，金卡 2 倍。
+积分满 1000 升一级。积分一年过期。退货要把对应的积分扣回来。
+给我个函数，输入消费记录列表，输出当前积分和等级。」</p>
+
+<h4>埋设的澄清点</h4>
+<table class="compact">
+  <thead><tr><th style="width:44px">编号</th><th>问题</th><th style="width:40%">标准答案</th></tr></thead>
+  <tbody>
+    <tr><td>C1</td><td>升级后，倍率是从下一笔开始生效，还是当笔就生效？</td><td>下一笔生效</td></tr>
+    <tr><td>C2</td><td>「积分满 1000 升一级」——是累计总积分还是当前余额？</td><td>累计获得总积分，不因过期或退货回退等级</td></tr>
+    <tr><td>C3</td><td>一年过期是按笔各自计时，还是按自然年统一清零？</td><td>按笔，各自获得日起满 365 天过期</td></tr>
+    <tr><td>C4</td><td>退货扣积分，按当时的倍率还是现在的倍率？</td><td>按<strong>当时那笔</strong>的倍率原路扣回</td></tr>
+    <tr><td>C5</td><td>退货时那笔积分已经过期了怎么办？</td><td>不再扣减，已过期视为已消失</td></tr>
+    <tr><td>C6</td><td>扣完变成负数怎么办？</td><td>下限为 0，不允许负积分</td></tr>
+  </tbody>
+</table>
+
+<h4>变更包（第 60 分钟投放）</h4>
+<div class="grid g2">
+  <div class="card tight"><h4 style="margin-top:0">变更包 A · 默认</h4>
+    <p style="font-size:13.5px;margin-bottom:0">新增「积分抵扣现金」：100 积分抵 1 元，抵扣的积分按<strong>先进先出</strong>消耗；
+    被抵扣的积分不参与等级累计。函数加一个 <code>redeem</code> 参数，原有调用不能坏。</p></div>
+  <div class="card tight"><h4 style="margin-top:0">变更包 B · 进度快时用</h4>
+    <p style="font-size:13.5px;margin-bottom:0">新增「双倍积分日」：指定日期区间内倍率再翻倍，且该区间的积分有效期缩短为 90 天。
+    难度显著更高，需要重构积分批次模型。</p></div>
+</div>
+<p class="note"><strong>为什么这题好：</strong>C4「按当时倍率还是现在倍率」几乎没有人会主动想到，
+但它直接决定要不要为每笔积分保留获得时的快照——<strong>这是数据模型层面的决策，事后再改就是重构</strong>。
+变更包 A 的 FIFO 消耗会打穿所有把积分当成单个数字而非批次列表的实现。</p>
+</div>
+</details>
+
+<details>
+<summary>样题 B · 上下文喂养：给遗留限流器加策略<span class="sp"><span class="tag blue">蓝区优先</span> 团队 2–3 人 · 集中场次 150 分钟</span></summary>
+<div class="body">
+<dl class="kv">
+  <dt>考察</dt><dd>如何让 AI 理解它没见过的代码、改动范围控制、回归安全</dd>
+  <dt>能力切面</dt><dd>「会不会给上下文」——真实工作里 90% 的时间是改代码，不是写新代码</dd>
+</dl>
+<h4>题目形态</h4>
+<p>提供一个 <strong>450–600 行、无文档、命名混乱、测试覆盖约 50%</strong> 的限流器模块，
+内含三种已实现策略（固定窗口、滑动窗口、令牌桶），其中滑动窗口有一处已知但未修复的精度问题。
+要求<strong>新增「漏桶」策略</strong>，并且不能破坏任何现有行为。</p>
+
+<h4>刻意埋设的障碍</h4>
+<ul>
+  <li>策略注册逻辑分散在三处，只改一处会导致新策略静默不生效</li>
+  <li>有一个看似废弃、实则被反射调用的方法，删了会挂</li>
+  <li>配置项命名与实际语义不符（<code>maxBurst</code> 实际控制的是窗口长度）</li>
+  <li>现有测试里有 2 个是长期 skip 的，取消 skip 会暴露既有缺陷</li>
+</ul>
+
+<h4>本题追加两个专属得分点</h4>
+<table class="compact">
+  <thead><tr><th style="width:150px">得分点</th><th>判据</th></tr></thead>
+  <tbody>
+    <tr><td><strong>改动范围控制</strong><br><span class="muted">替换 C4，5 分</span></td>
+      <td>A：diff ≤ 参考实现 1.5 倍且未触及无关文件；B：≤ 2.5 倍；C：≤ 4 倍；D：大范围重写</td></tr>
+    <tr><td><strong>回归安全</strong><br><span class="muted">并入 V4 变更档</span></td>
+      <td>原有全部测试保持绿；额外加分项：是否发现并报告了滑动窗口的既有精度问题</td></tr>
+  </tbody>
+</table>
+<p class="note"><strong>为什么放蓝区：</strong>这题需要模型消化大量上下文，弱模型上下文窗口不够、
+跨文件推理能力弱，会变成纯粹的挫败而非学习。黄区的对应练法见样题 D 思路（任务分解）。</p>
+</div>
+</details>
+
+<details>
+<summary>样题 C · 产出验证：绿灯下的陷阱<span class="sp"><span class="tag both">两区皆可</span> 团队 2 人 · 集中场次 90 分钟</span></summary>
+<div class="body">
+<dl class="kv">
+  <dt>考察</dt><dd>代码评审能力、写反例测试的能力、对 AI 产出的怀疑意识</dd>
+  <dt>能力切面</dt><dd>「会不会验」——这是最难教、也最少被训练的一项</dd>
+</dl>
+<h4>题目形态</h4>
+<p>把角色反过来：<strong>不写代码，改做评审。</strong>给出 <strong>3 份 AI 生成的实现</strong>（同一道计费题），
+<strong>全部通过随题提供的 12 个公开测试</strong>。其中：</p>
+<ul>
+  <li>1 份是正确的</li>
+  <li>1 份有<strong>单一隐蔽缺陷</strong>（如浮点累加误差，只在特定金额组合下显现）</li>
+  <li>1 份有<strong>双缺陷互相抵消</strong>——两个 bug 在公开测试的取值范围内恰好抵消，
+    单独修掉任何一个，原本通过的测试反而会挂</li>
+</ul>
+
+<h4>交付物与评分</h4>
+<table class="compact">
+  <thead><tr><th style="width:150px">交付物</th><th>评分方式</th></tr></thead>
+  <tbody>
+    <tr><td>缺陷报告</td><td>找出的真缺陷数 − 误报数。定位到行号才计分</td></tr>
+    <tr><td><strong>复现测试</strong></td><td><strong>核心</strong>：提交的测试必须在缺陷实现上挂、在正确实现上过。
+      平台自动交叉验证，不靠人判</td></tr>
+    <tr><td>修复补丁</td><td>修完必须 25 道隐藏测试全绿</td></tr>
+    <tr><td>评审记录</td><td>与 AI 的对话：怎么用 AI 辅助找 bug，而不是让 AI 替你下结论</td></tr>
+  </tbody>
+</table>
+
+<div class="card ac o tight">
+<p style="margin:0"><strong>「双缺陷互相抵消」这一份是全题的题眼。</strong>
+它精确演示了为什么抽查几个用例验证 AI 代码是不够的——
+现场把其中一个 bug 单独修掉、另一道原本通过的测试当场变红，这个瞬间比讲十遍都管用。</p>
+</div>
+<p class="note">本题的评分不用标准四维度，改用专属权重：缺陷发现 35 · 复现测试 35 · 修复正确性 15 · 协作过程 15。
+Schema 不变，只是 criteria 列表不同——这正是三维正交模型的好处。</p>
+</div>
+</details>
+
+<div class="card ac tight">
+<p style="margin:0"><strong>黄区团队训战的第四个方向（建议后续补齐）：任务分解。</strong>
+给 15 个文件做同一类改造（统一错误处理或日志格式），规模明显超出弱模型单次能力，必须拆解 + 设检查点 + 批量验证。
+评分重点是完成率、<strong>15 个文件改法的一致性</strong>、有没有引入回归。这道题在黄区的教学价值最高，
+因为它逼出的正是黄区 P3 那四个抽取项测的能力。</p>
+</div>
+
+<!-- ══════════════════ 08 ══════════════════ -->
+<h2 id="s8"><span class="n">08</span>分期实施</h2>
+<p>不建议一次做完。按「先让它跑起来、再让它评得准、最后让它比得出」三步走。</p>
+
+<table>
+  <thead><tr><th style="width:96px">阶段</th><th style="width:80px">周期</th><th>范围</th><th style="width:150px">验收标准</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>一期</strong><br><span class="muted">能跑起来</span></td><td>4–6 周</td>
+      <td>黄区单区 · 个人项目 · 开放窗口<br>
+        CI 流水线打通：沙箱跑测试 + tree-sitter 度量<br>
+        <strong>Verify 40 + Code 20</strong> 两个维度自动评<br>
+        <strong>组织树与作用域</strong>（地基，必须一期就有，后补会污染历史数据）<br>
+        <strong>drill-grader skill</strong>：判据 + 脚本 + Schema，蓝黄共用<br>
+        成绩用静态页展示（GitLab Pages），暂不做完整学员端</td>
+      <td>一道题、10 人、push 后 5 分钟内出分，重跑同分</td>
+    </tr>
+    <tr>
+      <td><strong>二期</strong><br><span class="muted">评得准</span></td><td>6–8 周</td>
+      <td>补齐 <strong>Spec 25 + Collab 15</strong><br>
+        结构化抽取 skill + 引用校验 + 人工复核台<br>
+        <strong>阅卷校准集</strong>：20 份人工标注样本验证抽取准确率<br>
+        学员端 + 管理端 + SSO 接入<br>
+        集中场次赛制（封存与一键揭晓）</td>
+      <td>抽取项与人工标注一致率 ≥ 85%；<br>一场 30 人集中训战当场出榜</td>
+    </tr>
+    <tr>
+      <td><strong>三期</strong><br><span class="muted">比得出</span></td><td>6–8 周</td>
+      <td>蓝区结果导入 + Schema 校验<br>
+        <strong>蓝区接入</strong>：批量评测指令 + 结果导入（<strong>无需部署，工作量小</strong>）<br>
+        <strong>模型基准库</strong>：出题体检双模型裸跑<br>
+        赛季与团队项目 · 能力画像与图表 · 部门报表<br>
+        多语言支持补齐（Go / Java / Python）<br>
+        <strong>众包出题</strong>：出题工作台 + 自动体检 + 终审台<br>
+        <strong>挑战题</strong>：Verify 插槽化（悬赏 / 探索）+ 挑战榜 + 评审台</td>
+      <td>产出第一份部门 AI 能力基线报告<br>与内部模型能力差距量化值</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="card ac">
+<h4 style="margin-top:0">一期就要做对的三件事</h4>
+<ol style="margin-bottom:0">
+  <li><strong>Schema 先定死。</strong>一期只填 Verify 和 Code 两个维度，但字段结构必须是完整版——
+    二三期只是把空字段填上，而不是改结构。改 Schema 意味着历史成绩全部作废。</li>
+  <li><strong>rubricVersion 从第一天就带上。</strong>否则半年后没人说得清某个分数是按哪版判据算的。</li>
+  <li><strong>幂等性一期就要验证。</strong>同一 commit 重跑必须同分，这是后面所有可比性的地基。</li>
+</ol>
+</div>
+
+<!-- ══════════════════ 09 ══════════════════ -->
+<h2 id="s9"><span class="n">09</span>风险与对策</h2>
+
+<table>
+  <thead><tr><th style="width:190px">风险</th><th style="width:70px">影响</th><th>对策</th></tr></thead>
+  <tbody>
+    <tr><td><strong>弱模型抽取准确率不达标</strong></td><td>高</td>
+      <td><strong>二期设阅卷校准集</strong>：人工标注 20 份对话记录作金标准，跑内部模型看一致率。
+        ≥85% 则自动阅卷；80–85% 提高人工复核比例；&lt;80% 该项降级为纯人工。
+        <strong>校准结果本身就是内部模型的能力证据</strong></td></tr>
+    <tr><td><strong>题库消耗，答案流传</strong></td><td>高</td>
+      <td>疲劳度追踪（均分上升 + 离散度下降即退役）、同批次分卷、每季度轮值出题 3–5 道</td></tr>
+    <tr><td><strong>蓝区评测结果抖动</strong></td><td>中</td>
+      <td>强制结构化抽取（不许自由打分）+ 隐藏测试必须真跑（不许模型推断）+ 温度设 0。
+        定期用同一份提交做双盲重评，抖动 &gt;2 分则复查评测指令</td></tr>
+    <tr><td><strong>集中场次 CI 资源争抢</strong></td><td>中</td>
+      <td>并发上限 + 队列 + 场次前临时扩 runner。集中场次结果本就封存，
+        允许最慢一份延后几分钟，不影响揭晓</td></tr>
+    <tr><td><strong>沙箱逃逸 / 恶意代码</strong></td><td>中</td>
+      <td>K8s Job：禁网、只读根、非 root、CPU/内存配额、硬超时；评测容器与平台服务网络隔离</td></tr>
+    <tr><td><strong>团队项目搭便车</strong></td><td>中</td>
+      <td>强制角色分工（领航员 / 驾驶员，定时轮换）+ 团队页展示各成员 commit 贡献。
+        团队分不进个人口径，从机制上消除争议</td></tr>
+    <tr><td><strong>判据被质疑不公平</strong></td><td>中</td>
+      <td>判据全文对学员公开（评分标准页），每分扣减附证据链与原文引用，
+        <code>source</code> 字段标明是脚本/模型/人判的。开放申诉入口，
+        <strong>申诉本身也是训战素材</strong></td></tr>
+    <tr><td><strong>语言选择影响分数</strong></td><td>中</td>
+      <td>见 4.5：进入评分的指标必须跨语言可比或按参考实现归一化，不可比的只展示不计分。
+        每季度做一次分语言均分校验，偏差 &gt;3 分则调整归一化基准</td></tr>
+    <tr><td><strong>出题人评审拖延</strong></td><td>中</td>
+      <td>悬赏题的分全压在出题人身上，他不评就一直挂着。对策：发布时强制承诺 SLA、
+        超期自动提醒、连续超期暂停发布权；平台首页常驻「待你评审 N 份」提示</td></tr>
+    <tr><td><strong>众包题质量参差</strong></td><td>中</td>
+      <td>自动体检卡住大部分问题（尤其「裸提示基准分 60–75」这一条），人工终审兜底；
+        上架后持续监控区分度，满分率过高或离散度过低即退役</td></tr>
+    <tr><td><strong>真实代码越权访问</strong></td><td>中</td>
+      <td>题目必须声明 <code>requiredRepos</code>，终审时按需授权，参与者访问范围不扩大；
+        发布前自动扫描客户名、IP、密钥、工号</td></tr>
+    <tr><td><strong>跨部门横向比较的敏感性</strong></td><td>中</td>
+      <td>榜单默认全域但支持按组织下钻，个人可切到「本级榜」降低压力；
+        部门级报表只对该节点管理员可见，不做跨兄弟部门的公开排名</td></tr>
+    <tr><td><strong>组织调整导致历史数据错乱</strong></td><td>中</td>
+      <td>成绩快照里固化提交时的 <code>orgPath</code>，组织调整不追溯改写历史；
+        画像按「当时归属」统计，避免调岗后成绩凭空转移</td></tr>
+    <tr><td><strong>新人挫败感</strong></td><td>低</td>
+      <td>首场明确定位为「暴露问题」而非考试；成绩页强调改进建议而非排名；
+        薄弱项直接推荐对应练习题</td></tr>
+  </tbody>
+</table>
+
+<h3>需要另行确认的外部依赖</h3>
+<ul>
+  <li>黄区 K8s 资源额度与 GitLab runner 配额（集中场次的并发峰值）</li>
+  <li>内部模型网关的调用配额、限流策略与是否支持 temperature 参数</li>
+  <li>公司 SSO 的接入形态（OIDC / SAML）与工号、部门字段的取用方式</li>
+  <li>蓝区 GitHub 组织的创建与权限管理归属</li>
+  <li>蓝→黄结果 JSON 上传的具体通道与审批流程</li>
+</ul>
+
+<div class="foot">
+新员工 AI 能力训战平台 · 设计方案 v1.0<br>
+华为 ICT BG 云核心网产品线 · 分组核心网控制开发部<br>
+本方案的评测引擎、统一 Schema 与结构化抽取 skill 可在确认后进入实现验证阶段
+</div>
+
+</main>
+</div>
+
+<script>
+// 侧边导航高亮
+(function(){
+  var links = [].slice.call(document.querySelectorAll('.side a'));
+  var targets = links.map(function(a){ return document.querySelector(a.getAttribute('href')); });
+  function sync(){
+    var y = window.scrollY + 120, best = 0;
+    targets.forEach(function(t, i){ if (t && t.offsetTop <= y) best = i; });
+    links.forEach(function(a, i){ a.classList.toggle('on', i === best); });
+  }
+  window.addEventListener('scroll', sync, { passive: true });
+  sync();
+})();
+</script>
+</body>
+</html>

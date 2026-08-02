@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0",
+  "resultId": "result-001",
+  "gradingRunId": "run-001",
+  "challengeVersion": "parking-fee-01@1",
+  "rubricVersion": "1.0",
+  "graderVersion": "0.1.0",
+  "idempotencyKey": "0123456789abcdef0123456789abcdef",
+  "triggerType": "AUTO",
+  "status": "COMPLETE",
+  "submission": {
+    "sourceType": "GIT_REF",
+    "snapshotHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "repository": "training/parking-fee",
+    "branch": "drill/w00123",
+    "commitSha": "abcdef1234567",
+    "submittedAt": "2026-08-01T10:00:00Z"
+  },
+  "subject": { "kind": "person", "id": "w00123", "name": "测试用户" },
+  "dimensions": {
+    "verify": { "score": 40, "max": 40, "evaluated": true },
+    "spec": { "score": null, "max": 25, "evaluated": false },
+    "code": { "score": 20, "max": 20, "evaluated": true },
+    "collab": { "score": null, "max": 15, "evaluated": false }
+  },
+  "total": 60,
+  "criteria": [
+    { "key": "V1", "dim": "verify", "name": "基础档", "max": 40, "level": "A", "score": 40, "source": "auto", "rule": "基础测试全部通过", "evidenceType": "test", "evidence": { "passed": 8, "total": 8 } },
+    { "key": "C1", "dim": "code", "name": "业务常量抽取", "max": 20, "level": "A", "score": 20, "source": "auto", "rule": "无业务魔法数字", "evidenceType": "metric", "evidence": { "magicNumbers": 0 } }
+  ],
+  "validationDiagnostics": [],
+  "gradedBy": "ci",
+  "triggeredBy": { "kind": "system" },
+  "startedAt": "2026-08-01T10:00:01Z",
+  "finishedAt": "2026-08-01T10:00:03Z",
+  "durationMs": 2000
+}

@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-training-platform.local/contracts/evaluation-input.schema.json",
+  "title": "Evaluation Input Batch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "event", "challenge", "submissions"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "challengeVersion", "rubricVersion", "trigger", "submissionSource", "reveal"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "challengeVersion": { "type": "string", "minLength": 1 },
+        "rubricVersion": { "type": "string", "minLength": 1 },
+        "trigger": { "const": "IMPORT" },
+        "submissionSource": { "enum": ["UPLOAD", "GIT_REF"] },
+        "reveal": { "enum": ["IMMEDIATE", "ON_RELEASE"] }
+      }
+    },
+    "challenge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "version", "evaluationEngine"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "version": { "type": "integer", "minimum": 1 },
+        "evaluationEngine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "version", "mode", "input", "output"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$" },
+            "version": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$" },
+            "mode": { "enum": ["EXTERNAL_CLI", "PLATFORM_LOCAL"] },
+            "input": { "$ref": "#/$defs/contract" },
+            "output": { "$ref": "#/$defs/contract" }
+          }
+        }
+      }
+    },
+    "submissions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["submissionId", "subject", "snapshot", "grading"],
+        "properties": {
+          "submissionId": { "type": "string", "minLength": 1 },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "orgPath"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "orgPath": { "type": "string", "minLength": 1 }
+            }
+          },
+          "snapshot": { "type": "object", "additionalProperties": true },
+          "grading": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["runId", "idempotencyKey", "triggerType"],
+            "properties": {
+              "runId": { "type": "string", "minLength": 1 },
+              "idempotencyKey": { "type": "string", "pattern": "^[a-f0-9]{16,128}$" },
+              "triggerType": { "const": "IMPORT" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "schemaVersion", "contractPath"],
+      "properties": {
+        "format": { "const": "JSON" },
+        "schemaVersion": { "type": "string", "minLength": 1 },
+        "contractPath": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -1,0 +1,1249 @@
+openapi: 3.0.3
+info:
+  title: AI 训战平台 API
+  version: 0.1.0
+  description: 一期评测提交、触发和结果导入接口
+servers:
+  - url: http://localhost:3000
+security:
+  - localEmployee: []
+paths:
+  /api/v1/health:
+    get:
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: 服务状态
+  /api/v1/me:
+    get:
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: 当前用户
+  /api/v1/auth/sso:
+    post:
+      operationId: syncSsoIdentity
+      security: []
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/SsoIdentity' } }
+      responses:
+        '201': { description: SSO 用户已同步 }
+  /api/v1/announcements:
+    get:
+      operationId: listAnnouncements
+      responses:
+        '200':
+          description: 员工首页公告
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Announcement' }
+    post:
+      operationId: createAnnouncement
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/Announcement' } }
+      responses:
+        '201': { description: 公告已创建 }
+  /api/v1/announcements/{announcementId}:
+    patch:
+      operationId: updateAnnouncement
+      parameters:
+        - name: announcementId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/Announcement' } }
+      responses:
+        '200': { description: 公告已更新 }
+    delete:
+      operationId: deleteAnnouncement
+      parameters:
+        - name: announcementId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: 公告已删除 }
+  /api/v1/admin/overview:
+    get:
+      operationId: getAdminOverview
+      responses:
+        '200': { description: 管理后台汇总指标 }
+  /api/v1/admin/grading-queue:
+    get:
+      operationId: getAdminGradingQueue
+      responses:
+        '200':
+          description: 本地评测队列状态
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [queued, running, maxConcurrency, scheduled]
+                properties:
+                  queued: { type: integer, minimum: 0 }
+                  running: { type: integer, minimum: 0 }
+                  maxConcurrency: { type: integer, minimum: 1 }
+                  scheduled: { type: integer, minimum: 0 }
+  /api/v1/org-units:
+    get:
+      operationId: listOrgUnits
+      parameters:
+        - name: parentId
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: 组织树节点 }
+    post:
+      operationId: createOrgUnit
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/OrgUnitInput' } }
+      responses:
+        '201': { description: 组织节点已创建 }
+  /api/v1/org-units/{orgUnitId}:
+    get:
+      operationId: getOrgUnit
+      parameters:
+        - name: orgUnitId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 组织节点 }
+    patch:
+      operationId: updateOrgUnit
+      parameters:
+        - name: orgUnitId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/OrgUnitPatch' } }
+      responses:
+        '200': { description: 组织节点已更新 }
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      parameters:
+        - name: orgPath
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: 用户列表 }
+  /api/v1/users/{userId}:
+    get:
+      operationId: getUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 用户详情 }
+    patch:
+      operationId: updateUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/UserPatch' } }
+      responses:
+        '200': { description: 用户已更新 }
+  /api/v1/hard-problems:
+    get:
+      operationId: listHardProblems
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [OPEN, RESOLVED] }
+        - name: reviewStatus
+          in: query
+          schema: { type: string, enum: [PENDING_REVIEW, APPROVED, REJECTED] }
+      responses:
+        '200': { description: 赛题库中难题榜视图 }
+    post:
+      operationId: createHardProblemChallenge
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/HardProblemInput' } }
+      responses:
+        '201': { description: 已创建赛题；审核通过后进入难题榜 }
+  /api/v1/hard-problems/{problemId}:
+    get:
+      operationId: getHardProblemChallenge
+      parameters:
+        - name: problemId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 赛题库中的难题详情 }
+  /api/v1/hard-problems/{problemId}/review:
+    post:
+      operationId: reviewHardProblem
+      parameters:
+        - name: problemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HardProblemReview' }
+      responses:
+        '201': { description: 难题审核结果已保存 }
+  /api/v1/hard-problems/{problemId}/resolve:
+    post:
+      operationId: resolveHardProblemChallenge
+      parameters:
+        - name: problemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                submissionId: { type: string, description: 选中的揭榜交付提交；不传时使用最近一份提交 }
+      responses:
+        '201': { description: 难题已揭榜并进入揭榜成功列表 }
+  /api/v1/challenges:
+    get:
+      operationId: listChallenges
+      responses:
+        '200': { description: 题目列表 }
+    post:
+      operationId: createChallenge
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/Challenge' } }
+      responses:
+        '201': { description: 题目已创建 }
+  /api/v1/challenges/{challengeId}:
+    get:
+      operationId: getChallenge
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 题目详情 }
+    patch:
+      operationId: updateChallenge
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChallengePatch' }
+      responses:
+        '200': { description: 赛题类型已更新 }
+  /api/v1/challenges/{challengeId}/publish:
+    post:
+      operationId: publishChallenge
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201': { description: 题目已发布 }
+  /api/v1/challenges/{challengeId}/archive:
+    post:
+      operationId: archiveChallenge
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201': { description: 题目已归档 }
+  /api/v1/challenges/{challengeId}/trash:
+    post:
+      operationId: trashChallenge
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201': { description: 题目已移入垃圾箱 }
+  /api/v1/challenges/{challengeId}/restore:
+    post:
+      operationId: restoreChallenge
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201': { description: 题目已恢复 }
+  /api/v1/challenges/{challengeId}/versions:
+    post:
+      operationId: createChallengeVersion
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/ChallengeVersion' } }
+      responses:
+        '201': { description: 题目版本草稿已创建 }
+  /api/v1/challenges/{challengeId}/versions/{versionId}:
+    patch:
+      operationId: updateChallengeVersion
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object, additionalProperties: true } }
+      responses:
+        '200': { description: 题目版本草稿已更新 }
+  /api/v1/challenges/{challengeId}/versions/{versionId}/publish:
+    post:
+      operationId: publishChallengeVersion
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201': { description: 题目版本已发布 }
+  /api/v1/seasons:
+    get:
+      operationId: listSeasons
+      responses:
+        '200': { description: 赛季列表 }
+    post:
+      operationId: createSeason
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object, additionalProperties: true } }
+      responses:
+        '201': { description: 赛季已创建 }
+  /api/v1/seasons/{seasonId}:
+    get:
+      operationId: getSeason
+      parameters:
+        - name: seasonId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 赛季详情 }
+  /api/v1/seasons/{seasonId}/leaderboard:
+    get:
+      operationId: getLeaderboard
+      parameters:
+        - name: seasonId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 榜单 }
+  /api/v1/profiles/{subjectId}:
+    get:
+      operationId: getProfile
+      parameters:
+        - name: subjectId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 能力画像与成绩历史 }
+  /api/v1/profiles/{subjectId}/capabilities:
+    get:
+      operationId: getCapabilityProfile
+      parameters:
+        - name: subjectId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 个人 AI 能力画像、四维评测证据、八个能力域和能力项统计
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapabilityProfile' }
+  /api/v1/admin/capabilities:
+    get:
+      operationId: getAdminCapabilityProfiles
+      parameters:
+        - name: orgPath
+          in: query
+          required: false
+          schema: { type: string }
+          description: 部门物化路径；不传表示全组织
+        - name: subjectIds
+          in: query
+          required: false
+          schema: { type: string }
+          description: 逗号分隔的员工 ID；不传表示所选部门全部员工
+        - name: includeProfiles
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+          description: 是否返回个人明细；部门或选定人员的群体画像可设为 false，仅返回平均聚合
+      responses:
+        '200':
+          description: 管理员选择范围内的个人画像、部门聚合和 16 个评分点
+        '400': { description: 选定员工不在部门范围内 }
+        '403': { description: 需要管理员权限 }
+  /api/v1/events:
+    get:
+      operationId: listEvents
+      responses:
+        '200':
+          description: 场次列表
+    post:
+      operationId: createEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventConfig'
+      responses:
+        '201':
+          description: 场次已创建
+  /api/v1/events/{eventId}:
+    get:
+      operationId: getEvent
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200': { description: 场次详情 }
+    patch:
+      operationId: updateEvent
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/EventConfig' } }
+      responses:
+        '200': { description: 场次已更新 }
+  /api/v1/events/{eventId}/participants:
+    get:
+      operationId: listEventParticipants
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200': { description: 场次参与者 }
+    put:
+      operationId: replaceEventParticipants
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subjectIds]
+              properties:
+                subjectIds: { type: array, maxItems: 10000, items: { type: string } }
+      responses:
+        '200': { description: 参与者名单已替换 }
+  /api/v1/events/{eventId}/participants:import:
+    post:
+      operationId: importEventParticipants
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [participants]
+              properties:
+                participants: { type: array, maxItems: 10000, items: { type: object, required: [subjectId], properties: { subjectId: { type: string } } } }
+      responses:
+        '201': { description: 参与者已导入 }
+  /api/v1/events/{eventId}/submissions:upload:
+    post:
+      operationId: uploadSubmissionMetadata
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadSubmission'
+      responses:
+        '201':
+          description: 上传快照已登记
+  /api/v1/events/{eventId}/submissions:register-git:
+    post:
+      operationId: registerGitSubmission
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitSubmission'
+      responses:
+        '201':
+          description: Git 快照已登记
+  /api/v1/submissions/{submissionId}/start-grading:
+    post:
+      operationId: startSubmissionGrading
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+      responses:
+        '201':
+          description: 评测已排队
+  /api/v1/submissions/{submissionId}/regrade:
+    post:
+      operationId: regradeSubmission
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+      responses:
+        '201': { description: 新评估任务已创建 }
+  /api/v1/submissions:
+    get:
+      operationId: listSubmissions
+      parameters:
+        - name: eventId
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: 提交列表 }
+    post:
+      operationId: createSubmission
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/Submission' } }
+      responses:
+        '201': { description: 提交已登记 }
+  /api/v1/submissions/{submissionId}:
+    get:
+      operationId: getSubmission
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+      responses:
+        '200': { description: 提交详情 }
+  /api/v1/submissions/{submissionId}/artifact:
+    get:
+      operationId: downloadSubmissionArtifact
+      description: 管理员下载指定提交的交付件，用于线下评测。
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+      responses:
+        '200':
+          description: 交付件文件
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { description: 交付件不存在 }
+  /api/v1/events/{eventId}/start-grading:
+    post:
+      operationId: startEventGrading
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                submissionIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  uniqueItems: true
+                  items: { type: string }
+      responses:
+        '201':
+          description: 批量评测已排队
+  /api/v1/events/{eventId}/regrade:
+    post:
+      operationId: regradeEvent
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                submissionIds:
+                  type: array
+                  maxItems: 500
+                  uniqueItems: true
+                  items: { type: string }
+      responses:
+        '201': { description: 新评估任务已创建 }
+  /api/v1/events/{eventId}/grading-input:
+    post:
+      operationId: prepareEvaluationInput
+      description: 为指定提交生成赛题评测引擎使用的输入清单；仅管理员可调用。
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [submissionIds]
+              properties:
+                submissionIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  uniqueItems: true
+                  items: { type: string }
+      responses:
+        '201':
+          description: 评测输入清单已生成
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluationInputBatch' }
+        '400':
+          description: 提交选择或评测契约无效
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /api/v1/grading-results:import:
+    post:
+      operationId: importGradingResult
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [result]
+              properties:
+                result:
+                  $ref: '#/components/schemas/EvaluationResult'
+                actorId:
+                  type: string
+      responses:
+        '201':
+          description: 结果已导入
+        '400':
+          description: Schema 或关联校验失败
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /api/v1/grading-results:import-batch:
+    post:
+      operationId: importGradingResultsBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [results]
+              properties:
+                results:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [result]
+                    properties:
+                      result: { $ref: '#/components/schemas/EvaluationResult' }
+                      eventId: { type: string }
+                      subjectId: { type: string }
+      responses:
+        '201': { description: 批量结果导入汇总 }
+  /api/v1/grading-runs/{runId}:
+    get:
+      operationId: getGradingRun
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 评测运行状态 }
+  /api/v1/grading-runs/{runId}/execute:
+    post:
+      operationId: executeLocalGrading
+      description: 本地开发执行器入口；生产环境由 GitLab 适配器替换。
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201': { description: 本地评测结果已写入 }
+        '400': { description: 本地工作区或结果契约无效 }
+  /api/v1/events/{eventId}/reveal:
+    post:
+      operationId: revealEvent
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '201':
+          description: 结果已揭晓
+  /api/v1/events/{eventId}/close:
+    post:
+      operationId: closeEvent
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '201': { description: 场次已关闭 }
+  /api/v1/events/{eventId}/execute-local:
+    post:
+      operationId: executeEventLocally
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '201': { description: 场次内排队运行已在本地执行 }
+  /api/v1/audits:
+    get:
+      operationId: listAudits
+      parameters:
+        - name: target
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: 操作审计记录 }
+  /api/v1/reports/{submissionId}:
+    get:
+      operationId: getSubmissionReport
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+      responses:
+        '200':
+          description: 评测报告
+components:
+  securitySchemes:
+    localEmployee:
+      type: apiKey
+      in: header
+      name: X-Employee-Id
+  parameters:
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema: { type: string }
+    SubmissionId:
+      name: submissionId
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, minLength: 16, maxLength: 128 }
+  schemas:
+    OrgUnitInput:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        parentId: { type: string }
+        label: { type: string }
+        name: { type: string }
+    OrgUnitPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        label: { type: string }
+        name: { type: string }
+    SsoIdentity:
+      type: object
+      additionalProperties: false
+      required: [employeeNo, name]
+      properties:
+        employeeNo: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        department: { type: string }
+    UserPatch:
+      type: object
+      additionalProperties: false
+      description: 管理员只能维护员工的部门归属和角色，员工账号由内部 SSO 首次登录自动登记
+      properties:
+        orgUnitId: { type: string }
+        roles: { type: array, items: { type: string } }
+        roleBindings:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [role, scopeOrgPath]
+            properties:
+              role: { type: string }
+              scopeOrgPath: { type: string }
+    Submission:
+      type: object
+      required: [eventId, subjectId, snapshot]
+      properties:
+        eventId: { type: string }
+        subjectId: { type: string }
+        snapshot: { type: object, additionalProperties: true }
+        challengeVersionSnapshot: { type: string, readOnly: true }
+        rubricVersionSnapshot: { type: string, readOnly: true }
+        gradingAttempt: { type: integer, minimum: 1, readOnly: true }
+        failureReason: { type: string, readOnly: true }
+    EventConfig:
+      type: object
+      required: [id, challengeVersion, submissionSource, trigger, reveal]
+      properties:
+        id: { type: string }
+        challengeVersion: { type: string }
+        purpose: { type: string, enum: [TRAINING, HARD_PROBLEM], description: 场次用途；难题榜交付入口使用 HARD_PROBLEM }
+        submissionSource: { type: string, enum: [UPLOAD, GIT_REF] }
+        trigger: { type: string, enum: [AUTO, MANUAL, IMPORT] }
+        reveal: { type: string, enum: [IMMEDIATE, ON_RELEASE] }
+        mode: { type: string, enum: [LIVE, WINDOW] }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        participantMode: { type: string, enum: [OPEN, ALLOWLIST] }
+        rubricVersion: { type: string }
+        deliveryConfig:
+          type: object
+          additionalProperties: true
+          properties:
+            repository: { type: string }
+            branch: { type: string }
+            branchTemplate: { type: string }
+            pinAt: { type: string, enum: [SUBMIT, DEADLINE] }
+            allowedFormats: { type: array, items: { type: string } }
+            maxBytes: { type: integer, minimum: 1 }
+            maxFiles: { type: integer, minimum: 1 }
+        localGrading: { type: object, additionalProperties: true }
+    UploadSubmission:
+      type: object
+      required: [subjectId, snapshot]
+      properties:
+        subjectId: { type: string }
+        artifactBase64: { type: string, format: byte, description: 开发期 JSON 上传适配；生产替换为对象存储直传 }
+        fileName: { type: string }
+        snapshot:
+          type: object
+          required: [submittedAt]
+          properties:
+            sourceType: { type: string, enum: [UPLOAD] }
+            snapshotHash: { type: string, pattern: '^[a-f0-9]{64}$', description: 服务端计算；客户端提供值会被忽略 }
+            artifactHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+            artifactUri: { type: string }
+            artifactName: { type: string }
+            workspacePath: { type: string, description: 本地开发工作区相对路径 }
+            submittedAt: { type: string, format: date-time }
+    GitSubmission:
+      type: object
+      required: [subjectId, snapshot]
+      properties:
+        subjectId: { type: string }
+        snapshot:
+          type: object
+          required: [repository, branch, submittedAt]
+          properties:
+            sourceType: { type: string, enum: [GIT_REF] }
+            snapshotHash: { type: string, pattern: '^[a-f0-9]{64}$', description: 服务端根据提交引用计算 }
+            repository: { type: string }
+            branch: { type: string }
+            commitSha: { type: string, description: SUBMIT 场次必填；DEADLINE 场次可由平台收卷时锁定 }
+            submittedAt: { type: string, format: date-time }
+    EvaluationResult:
+      type: object
+      description: 与 contracts/evaluation-result.schema.json 完全一致
+      required: [schemaVersion, resultId, gradingRunId, challengeVersion, rubricVersion, graderVersion, idempotencyKey, triggerType, status, submission, dimensions, criteria, total, validationDiagnostics, gradedBy, startedAt, finishedAt, durationMs]
+      properties:
+        schemaVersion: { type: string, enum: ['1.0'] }
+        resultId: { type: string }
+        gradingRunId: { type: string }
+        challengeVersion: { type: string }
+        rubricVersion: { type: string }
+        graderVersion: { type: string }
+        idempotencyKey: { type: string }
+        triggerType: { type: string, enum: [AUTO, MANUAL, IMPORT] }
+        status: { type: string, enum: [COMPLETE, PARTIAL, FAILED] }
+        submission: { type: object, additionalProperties: true }
+        subject:
+          type: object
+          additionalProperties: false
+          required: [kind, id]
+          properties:
+            kind: { type: string, enum: [person, team] }
+            id: { type: string }
+            name: { type: string }
+            orgPath: { type: string }
+            members:
+              type: array
+              items:
+                type: object
+                required: [id, role]
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  role: { type: string }
+        dimensions: { type: object, additionalProperties: true }
+        criteria: { type: array, items: { type: object, additionalProperties: true } }
+        total: { type: number, minimum: 0, maximum: 100 }
+        recalculatedTotal: { type: number, minimum: 0, maximum: 100 }
+        project: { type: object, additionalProperties: true }
+        importedBy: { type: object, additionalProperties: true }
+        validationDiagnostics: { type: array, items: { type: object, additionalProperties: true } }
+        gradedBy: { type: string, enum: [ci, claude, codex, human] }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        gradedAt: { type: string, format: date-time }
+        durationMs: { type: integer, minimum: 0 }
+        metadata: { type: object, additionalProperties: true }
+        verifyDetail: { type: object, additionalProperties: true }
+        metrics: { type: object, additionalProperties: true }
+        findings: { type: array, items: { type: object, additionalProperties: true } }
+    Challenge:
+      type: object
+      required: [id, ownerOrgPath, origin, category, status, versions]
+      properties:
+        id: { type: string }
+        ownerOrgPath: { type: string }
+        origin: { type: string, enum: [OFFICIAL, USER, IMPORTED, BOUNTY, EXPLORE] }
+        category: { $ref: '#/components/schemas/ChallengeCategory' }
+        status: { type: string, enum: [DRAFT, PUBLISHED, ARCHIVED] }
+        board: { $ref: '#/components/schemas/ChallengeBoard' }
+        versions: { type: array, items: { $ref: '#/components/schemas/ChallengeVersion' } }
+    ChallengeCategory:
+      type: string
+      enum: [TRAINING, COMPETITION, HARD_PROBLEM]
+      description: 发布者配置的赛题业务类型
+    ChallengePatch:
+      type: object
+      additionalProperties: false
+      properties:
+        category: { $ref: '#/components/schemas/ChallengeCategory' }
+        solutionVisibility: { type: string, enum: [PUBLIC, HIDDEN], description: 揭榜成功后是否公开交付件 }
+    ChallengeBoard:
+      type: object
+      required: [type, summary, publisherType, publisherId, publisherName, difficulty, tags, status, reviewStatus, solutionVisibility, createdAt, updatedAt]
+      properties:
+        type: { type: string, enum: [HARD_PROBLEM] }
+        summary: { type: string }
+        details: { type: string }
+        publisherType: { type: string, enum: [DEPARTMENT, EMPLOYEE] }
+        publisherId: { type: string }
+        publisherName: { type: string }
+        departmentName: { type: string }
+        orgPath: { type: string }
+        difficulty: { type: string, enum: [HIGH, MEDIUM, LOW] }
+        tags: { type: array, items: { type: string } }
+        status: { type: string, enum: [OPEN, RESOLVED] }
+        reviewStatus: { type: string, enum: [PENDING_REVIEW, APPROVED, REJECTED] }
+        solutionVisibility: { type: string, enum: [PUBLIC, HIDDEN], description: 揭榜成功后是否公开交付件 }
+        solutionSubmissionId: { type: string, description: 揭榜成功时选中的提交 ID }
+        reviewedAt: { type: string, format: date-time }
+        reviewedBy: { type: string }
+        reviewComment: { type: string }
+        submissionEventId: { type: string, description: 独立难题交付入口对应的上传场次 ID }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+        resolvedBy: { type: string }
+        resolvedByName: { type: string }
+        solverId: { type: string, description: 揭榜人的员工 ID }
+        solverName: { type: string, description: 揭榜人的姓名 }
+        solution: { $ref: '#/components/schemas/HardProblemSolution' }
+    HardProblemInput:
+      type: object
+      required: [title, summary, publisherType, publisherId, publisherName, difficulty, tags]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        details: { type: string }
+        publisherType: { type: string, enum: [DEPARTMENT, EMPLOYEE] }
+        publisherId: { type: string }
+        publisherName: { type: string }
+        departmentName: { type: string }
+        orgPath: { type: string }
+        difficulty: { type: string, enum: [HIGH, MEDIUM, LOW] }
+        tags: { type: array, items: { type: string } }
+        solutionVisibility: { type: string, enum: [PUBLIC, HIDDEN], default: PUBLIC, description: 揭榜成功后是否公开交付件 }
+    HardProblemReview:
+      type: object
+      required: [decision]
+      additionalProperties: false
+      properties:
+        decision: { type: string, enum: [APPROVE, REJECT] }
+        comment: { type: string, description: 审核意见；驳回时建议填写 }
+    HardProblemSolution:
+      type: object
+      required: [submissionId, solverId, solverName, submittedAt, state, sourceType]
+      properties:
+        submissionId: { type: string }
+        solverId: { type: string }
+        solverName: { type: string }
+        submittedAt: { type: string, format: date-time }
+        state: { type: string }
+        sourceType: { type: string, enum: [UPLOAD, GIT_REF] }
+        artifactName: { type: string }
+        artifactHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+        repository: { type: string }
+        branch: { type: string }
+        commitSha: { type: string }
+    ChallengeVersion:
+      type: object
+      required: [id, challengeId, version, title, zone, languagePolicy, deliveryPolicy, rubricVersion, submissionContract, status]
+      properties:
+        id: { type: string }
+        challengeId: { type: string }
+        version: { type: integer, minimum: 1 }
+        title: { type: string }
+        description: { type: string }
+        objectives: { type: array, items: { type: string } }
+        requirements: { type: array, items: { type: string } }
+        constraints: { type: array, items: { type: string } }
+        deliverables: { type: array, items: { type: string } }
+        tags: { type: array, items: { type: string } }
+        estimatedMinutes: { type: integer, minimum: 1 }
+        zone: { type: string, enum: [YELLOW, BLUE] }
+        languagePolicy: { type: object, additionalProperties: true }
+        deliveryPolicy: { type: object, additionalProperties: true }
+        rubricVersion: { type: string }
+        submissionContract: { type: string }
+        evaluationEngine: { $ref: '#/components/schemas/EvaluationEngineConfig' }
+        tests: { type: object, additionalProperties: true }
+        resources: { type: object, additionalProperties: true }
+        resourceLimits: { type: object, additionalProperties: true }
+        changePackage: { type: object, additionalProperties: true }
+        visibility: { type: string, enum: [PUBLIC, ORG, PRIVATE] }
+        bounty: { type: number, minimum: 0 }
+        explore: { type: boolean }
+        status: { type: string, enum: [DRAFT, PUBLISHED] }
+    EvaluationEngineConfig:
+      type: object
+      required: [id, version, mode, input, output]
+      properties:
+        id: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$' }
+        version: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$' }
+        mode: { type: string, enum: [EXTERNAL_CLI, PLATFORM_LOCAL] }
+        input:
+          type: object
+          required: [format, schemaVersion, contractPath]
+          properties:
+            format: { type: string, enum: [JSON] }
+            schemaVersion: { type: string }
+            contractPath: { type: string }
+        output:
+          type: object
+          required: [format, schemaVersion, contractPath]
+          properties:
+            format: { type: string, enum: [JSON] }
+            schemaVersion: { type: string }
+            contractPath: { type: string }
+    EvaluationInputBatch:
+      type: object
+      required: [schemaVersion, generatedAt, event, challenge, submissions]
+      properties:
+        schemaVersion: { type: string, enum: ['1.0'] }
+        generatedAt: { type: string, format: date-time }
+        event:
+          type: object
+          required: [id, challengeVersion, rubricVersion, trigger, submissionSource, reveal]
+          properties:
+            id: { type: string }
+            challengeVersion: { type: string }
+            rubricVersion: { type: string }
+            trigger: { type: string, enum: [IMPORT] }
+            submissionSource: { type: string, enum: [UPLOAD, GIT_REF] }
+            reveal: { type: string, enum: [IMMEDIATE, ON_RELEASE] }
+        challenge:
+          type: object
+          required: [id, title, version, evaluationEngine]
+          properties:
+            id: { type: string }
+            title: { type: string }
+            version: { type: integer, minimum: 1 }
+            evaluationEngine: { $ref: '#/components/schemas/EvaluationEngineConfig' }
+        submissions:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [submissionId, subject, snapshot, grading]
+            properties:
+              submissionId: { type: string }
+              subject: { type: object, required: [id, name, orgPath], additionalProperties: true }
+              snapshot: { type: object, additionalProperties: true }
+              grading:
+                type: object
+                required: [runId, idempotencyKey, triggerType]
+                properties:
+                  runId: { type: string }
+                  idempotencyKey: { type: string }
+                  triggerType: { type: string, enum: [IMPORT] }
+    Announcement:
+      type: object
+      required: [id, title, summary, tag, publishedAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        tag: { type: string, enum: [平台通知, 训战提醒, 规则更新] }
+        publishedAt: { type: string, format: date-time }
+        pinned: { type: boolean }
+    CapabilityProfile:
+      type: object
+      required: [subjectId, summary, dimensions, domains, skills, trend, capabilityCatalogVersion]
+      properties:
+        subjectId: { type: string }
+        capabilityCatalogVersion: { type: string, example: '1.0' }
+        summary:
+          type: object
+          required: [gradedSubmissions, overallAverage, latestTotal, delta, strongestDimension, focusDimension, strongestDomain, focusDomain, totalCapabilityDomains, evaluatedCapabilityDomains]
+          properties:
+            gradedSubmissions: { type: integer, minimum: 0 }
+            overallAverage: { type: [number, 'null'], minimum: 0, maximum: 100 }
+            latestTotal: { type: [number, 'null'], minimum: 0, maximum: 100 }
+            delta: { type: [number, 'null'] }
+            strongestDimension: { type: [string, 'null'] }
+            focusDimension: { type: [string, 'null'] }
+            strongestDomain: { type: [string, 'null'] }
+            focusDomain: { type: [string, 'null'] }
+            totalCapabilityDomains: { type: integer, minimum: 0 }
+            evaluatedCapabilityDomains: { type: integer, minimum: 0 }
+            totalSkillItems: { type: integer, minimum: 0 }
+            evaluatedSkillItems: { type: integer, minimum: 0 }
+            zoneStats: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        dimensions:
+          type: array
+          items: { $ref: '#/components/schemas/CapabilityDimension' }
+        domains:
+          type: array
+          minItems: 8
+          maxItems: 8
+          items: { $ref: '#/components/schemas/CapabilityDomain' }
+        capabilityDomains:
+          type: array
+          description: domains 的兼容别名
+          items: { $ref: '#/components/schemas/CapabilityDomain' }
+        skills: { type: array, items: { $ref: '#/components/schemas/CapabilitySkill' } }
+        gradeMatrix: { type: array, items: { $ref: '#/components/schemas/CapabilitySkill' } }
+        weakItems: { type: array, items: { type: object, additionalProperties: true } }
+        recommendations: { type: array, items: { type: string } }
+        trend: { type: array, items: { type: object, additionalProperties: true } }
+        zoneStats: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        lastUpdated: { type: [string, 'null'], format: date-time }
+    CapabilityDimension:
+      type: object
+      required: [key, label, description, percent, samples]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        description: { type: string }
+        score: { type: [number, 'null'] }
+        max: { type: [number, 'null'] }
+        percent: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        latestPercent: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        bestPercent: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        delta: { type: [number, 'null'] }
+        evaluatedCount: { type: integer, minimum: 0 }
+        peerMedianPercent: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        peerCount: { type: integer, minimum: 0 }
+        vsPeerMedian: { type: [number, 'null'] }
+        samples: { type: array, items: { type: object, additionalProperties: true } }
+    CapabilityDomain:
+      type: object
+      required: [key, label, shortLabel, description, evidenceMode, criterionKeys, evidenceKeys, percent, sampleCount, evidenceCount, status, samples]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        shortLabel: { type: string }
+        description: { type: string }
+        evidenceMode: { type: string, enum: [derived, direct] }
+        criterionKeys: { type: array, items: { type: string } }
+        evidenceKeys: { type: array, items: { type: string } }
+        score: { type: [number, 'null'] }
+        max: { type: [number, 'null'] }
+        percent: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        latestPercent: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        bestPercent: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        delta: { type: [number, 'null'] }
+        sampleCount: { type: integer, minimum: 0 }
+        evidenceCount: { type: integer, minimum: 0 }
+        peerMedianPercent: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        peerCount: { type: integer, minimum: 0 }
+        vsPeerMedian: { type: [number, 'null'] }
+        status: { type: string }
+        samples: { type: array, items: { type: object, additionalProperties: true } }
+    CapabilitySkill:
+      type: object
+      required: [key, criterionKey, name, dimension, description, max, percent, sampleCount, status]
+      properties:
+        key: { type: string }
+        criterionKey: { type: string }
+        name: { type: string }
+        dimension: { type: string, enum: [verify, spec, code, collab] }
+        domainKeys: { type: array, items: { type: string } }
+        description: { type: string }
+        max: { type: number, exclusiveMinimum: 0 }
+        averageScore: { type: [number, 'null'] }
+        percent: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        latestPercent: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        averageLevel: { type: [string, 'null'], enum: [A, B, C, D, null] }
+        sampleCount: { type: integer, minimum: 0 }
+        status: { type: string }
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: RESULT_SCORE_INCONSISTENT }
+        message: { type: string }
+        requestId: { type: string }
+        details: { type: object, additionalProperties: true }

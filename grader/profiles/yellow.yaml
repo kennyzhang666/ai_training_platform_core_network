@@ -1,0 +1,39 @@
+profile: yellow
+version: "1.0"
+levelRatios:
+  A: 1.0
+  B: 0.75
+  C: 0.5
+  D: 0.0
+verifyWeights:
+  basic: 8
+  boundary: 12
+  clarification: 12
+  change: 8
+dimensions:
+  verify: 40
+  spec: 25
+  code: 20
+  collab: 15
+rationale:
+  verify: "通过四档隐藏测试衡量基础正确性、边界推理、澄清后的规则理解和变更回归能力。"
+  spec: "一期保留为待人工/模型复核维度，不从文本关键词推断分数。"
+  code: "以可复现的静态指标衡量常量、异常、精度和复杂度。"
+  collab: "一期保留为待人工/模型复核维度，不从对话长度推断分数。"
+criteria:
+  C1:
+    max: 6
+    thresholds: { A: 0, B: 2, C: 100 }
+    rationale: "业务数字应集中为可读的命名常量；0、1、-1、2 等中性值不计入。"
+  C2:
+    max: 5
+    thresholds: { A: 1 }
+    rationale: "外部输入和预期失败路径需要显式异常或边界处理。"
+  C3:
+    max: 4
+    thresholds: { A: 0, B: 2, C: 100 }
+    rationale: "精度语义应集中并避免隐式浮点误差。"
+  C4:
+    max: 5
+    thresholds: { A: 8, B: 12, C: 20 }
+    rationale: "变化点应保持可拆解、可测试的复杂度。"

@@ -1,0 +1,27 @@
+[
+  {
+    "schemaVersion": "1.0", "resultId": "result-valid-01", "gradingRunId": "run-valid-01", "challengeVersion": "challenge@1", "rubricVersion": "1.0", "graderVersion": "0.1.0", "idempotencyKey": "11111111111111111111111111111111", "triggerType": "IMPORT", "status": "PARTIAL",
+    "submission": { "sourceType": "UPLOAD", "snapshotHash": "1111111111111111111111111111111111111111111111111111111111111111", "artifactHash": "2222222222222222222222222222222222222222222222222222222222222222", "submittedAt": "2026-08-01T10:00:00Z" },
+    "dimensions": { "verify": { "score": null, "max": 40, "evaluated": false }, "spec": { "score": null, "max": 25, "evaluated": false }, "code": { "score": null, "max": 20, "evaluated": false }, "collab": { "score": null, "max": 15, "evaluated": false } }, "criteria": [], "total": 0, "validationDiagnostics": [{ "severity": "INFO", "code": "WAITING_IMPORT", "message": "等待线下结果" }], "gradedBy": "human", "startedAt": "2026-08-01T10:00:00Z", "finishedAt": "2026-08-01T10:00:00Z", "durationMs": 0
+  },
+  {
+    "schemaVersion": "1.0", "resultId": "result-valid-02", "gradingRunId": "run-valid-02", "challengeVersion": "challenge@1", "rubricVersion": "1.0", "graderVersion": "0.1.0", "idempotencyKey": "33333333333333333333333333333333", "triggerType": "MANUAL", "status": "PARTIAL",
+    "submission": { "sourceType": "UPLOAD", "snapshotHash": "3333333333333333333333333333333333333333333333333333333333333333", "artifactHash": "4444444444444444444444444444444444444444444444444444444444444444", "submittedAt": "2026-08-01T10:01:00Z" },
+    "dimensions": { "verify": { "score": null, "max": 40, "evaluated": false }, "spec": { "score": null, "max": 25, "evaluated": false }, "code": { "score": null, "max": 20, "evaluated": false }, "collab": { "score": null, "max": 15, "evaluated": false } }, "criteria": [], "total": 0, "validationDiagnostics": [], "gradedBy": "ci", "startedAt": "2026-08-01T10:01:00Z", "finishedAt": "2026-08-01T10:01:00Z", "durationMs": 0
+  },
+  {
+    "schemaVersion": "1.0", "resultId": "result-valid-03", "gradingRunId": "run-valid-03", "challengeVersion": "challenge@1", "rubricVersion": "1.0", "graderVersion": "0.1.0", "idempotencyKey": "55555555555555555555555555555555", "triggerType": "AUTO", "status": "PARTIAL",
+    "submission": { "sourceType": "UPLOAD", "snapshotHash": "5555555555555555555555555555555555555555555555555555555555555555", "artifactHash": "6666666666666666666666666666666666666666666666666666666666666666", "submittedAt": "2026-08-01T10:02:00Z" },
+    "dimensions": { "verify": { "score": null, "max": 40, "evaluated": false }, "spec": { "score": null, "max": 25, "evaluated": false }, "code": { "score": null, "max": 20, "evaluated": false }, "collab": { "score": null, "max": 15, "evaluated": false } }, "criteria": [], "total": 0, "validationDiagnostics": [], "gradedBy": "ci", "startedAt": "2026-08-01T10:02:00Z", "finishedAt": "2026-08-01T10:02:00Z", "durationMs": 0
+  },
+  {
+    "schemaVersion": "1.0", "resultId": "result-valid-04", "gradingRunId": "run-valid-04", "challengeVersion": "challenge@1", "rubricVersion": "1.0", "graderVersion": "0.1.0", "idempotencyKey": "77777777777777777777777777777777", "triggerType": "IMPORT", "status": "PARTIAL",
+    "submission": { "sourceType": "UPLOAD", "snapshotHash": "7777777777777777777777777777777777777777777777777777777777777777", "artifactHash": "8888888888888888888888888888888888888888888888888888888888888888", "submittedAt": "2026-08-01T10:03:00Z" },
+    "dimensions": { "verify": { "score": null, "max": 40, "evaluated": false }, "spec": { "score": null, "max": 25, "evaluated": false }, "code": { "score": null, "max": 20, "evaluated": false }, "collab": { "score": null, "max": 15, "evaluated": false } }, "criteria": [], "total": 0, "validationDiagnostics": [], "gradedBy": "human", "startedAt": "2026-08-01T10:03:00Z", "finishedAt": "2026-08-01T10:03:00Z", "durationMs": 0
+  },
+  {
+    "schemaVersion": "1.0", "resultId": "result-valid-05", "gradingRunId": "run-valid-05", "challengeVersion": "challenge@1", "rubricVersion": "1.0", "graderVersion": "0.1.0", "idempotencyKey": "99999999999999999999999999999999", "triggerType": "MANUAL", "status": "PARTIAL",
+    "submission": { "sourceType": "UPLOAD", "snapshotHash": "9999999999999999999999999999999999999999999999999999999999999999", "artifactHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "submittedAt": "2026-08-01T10:04:00Z" },
+    "dimensions": { "verify": { "score": null, "max": 40, "evaluated": false }, "spec": { "score": null, "max": 25, "evaluated": false }, "code": { "score": null, "max": 20, "evaluated": false }, "collab": { "score": null, "max": 15, "evaluated": false } }, "criteria": [], "total": 0, "validationDiagnostics": [], "gradedBy": "ci", "startedAt": "2026-08-01T10:04:00Z", "finishedAt": "2026-08-01T10:04:00Z", "durationMs": 0
+  }
+]

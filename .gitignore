@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.pnpm-store/
+.env
+.env.*
+!.env.example
+*.log
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+artifacts/
+tmp/
+services/platform-api/prisma/dev.db

@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-training-platform.local/contracts/evaluation-result.schema.json",
+  "title": "Evaluation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "resultId",
+    "gradingRunId",
+    "challengeVersion",
+    "rubricVersion",
+    "graderVersion",
+    "idempotencyKey",
+    "triggerType",
+    "status",
+    "submission",
+    "dimensions",
+    "criteria",
+    "total",
+    "validationDiagnostics",
+    "gradedBy",
+    "startedAt",
+    "finishedAt",
+    "durationMs"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "resultId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{2,127}$" },
+    "gradingRunId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{2,127}$" },
+    "challengeVersion": { "type": "string", "minLength": 1 },
+    "rubricVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+    "graderVersion": { "type": "string", "minLength": 1 },
+    "idempotencyKey": { "type": "string", "pattern": "^[a-f0-9]{16,128}$" },
+    "triggerType": { "enum": ["AUTO", "MANUAL", "IMPORT"] },
+    "status": { "enum": ["COMPLETE", "PARTIAL", "FAILED"] },
+    "submission": { "$ref": "#/$defs/submission" },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "zone", "type", "mode", "trigger", "reveal", "origin", "orgPath", "season", "languagePolicy"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "repository": { "type": "string" },
+        "branch": { "type": "string" },
+        "commitSha": { "type": "string" },
+        "path": { "type": "string" }
+        ,"zone": { "enum": ["BLUE", "YELLOW", "blue", "yellow"] }
+        ,"type": { "type": "string" }
+        ,"mode": { "type": "string" }
+        ,"trigger": { "enum": ["AUTO", "MANUAL", "IMPORT"] }
+        ,"reveal": { "enum": ["IMMEDIATE", "ON_RELEASE"] }
+        ,"origin": { "type": "string" }
+        ,"orgPath": { "type": "string" }
+        ,"season": { "type": ["string", "object"] }
+        ,"languagePolicy": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["person", "team"] },
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "orgPath": { "type": "string" },
+        "members": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "role"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "name": { "type": "string" },
+              "role": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verify", "spec", "code", "collab"],
+      "properties": {
+        "verify": { "$ref": "#/$defs/dimension" },
+        "spec": { "$ref": "#/$defs/dimension" },
+        "code": { "$ref": "#/$defs/dimension" },
+        "collab": { "$ref": "#/$defs/dimension" }
+      }
+    },
+    "total": { "type": "number", "minimum": 0, "maximum": 100 },
+    "recalculatedTotal": { "type": "number", "minimum": 0, "maximum": 100 },
+    "criteria": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/criterion" }
+    },
+    "validationDiagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "verifyDetail": {
+      "type": "object",
+      "description": "本地或 CI 验证器的分档明细；具体字段由验证器版本决定。",
+      "additionalProperties": true
+    },
+    "metrics": {
+      "type": "object",
+      "description": "静态分析指标；具体字段由分析器版本决定。",
+      "additionalProperties": true
+    },
+    "extractions": {
+      "type": "array",
+      "description": "从交付件中抽取的可审计事实。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "q", "a", "quote", "quoteVerified"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "q": { "type": "string", "minLength": 1 },
+          "a": { "enum": ["yes", "no", "unclear"] },
+          "quote": { "type": "string" },
+          "quoteVerified": { "type": "boolean" },
+          "source": { "type": "string" }
+        }
+      }
+    },
+    "anchor": {
+      "type": "object",
+      "description": "规格、代码和对话证据之间的定位锚点。",
+      "additionalProperties": true
+    },
+    "gradedBy": { "enum": ["ci", "claude", "codex", "human"] },
+    "triggeredBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["system", "admin", "import"] },
+        "actorId": { "type": "string" }
+      }
+    },
+    "importedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actorId", "importedAt"],
+      "properties": {
+        "actorId": { "type": "string", "minLength": 1 },
+        "importedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "finishedAt": { "type": "string", "format": "date-time" },
+    "gradedAt": { "type": "string", "format": "date-time" },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "sha256"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "uri": { "type": "string" }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "submission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceType", "snapshotHash", "submittedAt"],
+      "properties": {
+        "sourceType": { "enum": ["UPLOAD", "GIT_REF"] },
+        "snapshotHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "repository": { "type": "string" },
+        "branch": { "type": "string" },
+        "commitSha": { "type": "string", "pattern": "^[a-f0-9]{7,64}$" },
+        "artifactUri": { "type": "string" },
+        "artifactHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "language": { "type": "string", "minLength": 1 },
+        "root": { "type": "string", "minLength": 1 },
+        "gradedAt": { "type": "string", "format": "date-time" },
+        "submittedAt": { "type": "string", "format": "date-time" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "sourceType": { "const": "GIT_REF" } } },
+          "then": { "required": ["repository", "branch", "commitSha"] }
+        },
+        {
+          "if": { "properties": { "sourceType": { "const": "UPLOAD" } } },
+          "then": { "required": ["artifactHash"] }
+        }
+      ]
+    },
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "max", "evaluated"],
+      "properties": {
+        "score": { "type": ["number", "null"], "minimum": 0 },
+        "max": { "type": "number", "exclusiveMinimum": 0 },
+        "evaluated": { "type": "boolean" }
+      },
+      "oneOf": [
+        { "properties": { "evaluated": { "const": true }, "score": { "type": "number", "minimum": 0 } } },
+        { "properties": { "evaluated": { "const": false }, "score": { "type": "null" } } }
+      ]
+    },
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "dim", "name", "max", "level", "score", "source", "rule"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[A-Z][A-Z0-9_-]{1,31}$" },
+        "dim": { "enum": ["verify", "spec", "code", "collab"] },
+        "name": { "type": "string", "minLength": 1 },
+        "max": { "type": "number", "exclusiveMinimum": 0 },
+        "level": { "enum": ["A", "B", "C", "D"] },
+        "score": { "type": "number", "minimum": 0 },
+        "source": { "enum": ["auto", "model", "human"] },
+        "rule": { "type": "string", "minLength": 1 },
+        "rationale": { "type": "string" },
+        "evidence": {},
+        "evidenceType": { "enum": ["test", "metric", "extraction", "human", "diagnostic"] },
+        "ruleVersion": { "type": "string" }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "code", "message"],
+      "properties": {
+        "severity": { "enum": ["BLOCKER", "WARNING", "INFO"] },
+        "code": { "type": "string", "pattern": "^[A-Z0-9_]{2,64}$" },
+        "path": { "type": "string" },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "dim", "criteria", "severity", "title", "detail"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "dim": { "enum": ["verify", "spec", "code", "collab"] },
+        "criteria": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["minor", "major", "critical"] },
+        "title": { "type": "string", "minLength": 1 },
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "snippet": { "type": "string" },
+        "detail": { "type": "string", "minLength": 1 },
+        "fix": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "2.0",
+  "id": "Bad ID",
+  "version": 0,
+  "title": "",
+  "origin": "official",
+  "zone": "yellow",
+  "languagePolicy": { "mode": "fixed", "languages": [] },
+  "deliveryPolicy": { "allowedSources": ["FTP"] },
+  "rubricVersion": "latest",
+  "submissionContract": ""
+}

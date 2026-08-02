@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "fixtures": [
+    { "id": "reference", "kind": "reference", "path": "challenges/parking-fee-v1/reference" },
+    { "id": "defect-basic", "kind": "defect-basic", "path": "grader/tests/fixtures/defect-basic" },
+    { "id": "magic-number", "kind": "magic-number", "path": "grader/tests/fixtures/magic-number" },
+    { "id": "missing-entry", "kind": "missing-entry", "path": "grader/tests/fixtures/missing-entry" },
+    { "id": "timeout", "kind": "timeout", "path": "grader/tests/fixtures/timeout" }
+  ]
+}

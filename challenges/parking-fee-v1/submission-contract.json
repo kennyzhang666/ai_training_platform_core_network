@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0",
+  "required": [
+    { "path": "SPEC.md", "type": "markdown", "minSections": 7, "notTemplate": true },
+    { "path": "transcript.md", "type": "markdown", "minChars": 200 },
+    { "path": "src/parking.py", "type": "source", "mustExport": "calculate_fee", "signature": "(entry_time, exit_time, is_member=False)" }
+  ],
+  "optional": [
+    { "path": "tests/", "type": "directory" },
+    { "path": "NOTES.md", "type": "markdown" }
+  ],
+  "forbidden": ["**/.env", "**/*credential*", "hidden_*"] ,
+  "languageEntry": { "python": "src/parking.py" }
+}

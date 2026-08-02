@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "id": "parking-fee-01",
+  "version": 1,
+  "title": "停车场计费",
+  "origin": "official",
+  "zone": "yellow",
+  "ownerOrgPath": "/1/12/125/",
+  "languagePolicy": { "mode": "fixed", "languages": ["python"] },
+  "deliveryPolicy": {
+    "allowedSources": ["UPLOAD", "GIT_REF"],
+    "upload": { "formats": ["zip"], "maxBytes": 52428800, "maxFiles": 2000, "allowResubmit": true },
+    "git": {
+      "provider": "GITLAB",
+      "repository": "training/parking-fee",
+      "branchTemplate": "drill/{subjectId}",
+      "pinAt": "SUBMIT",
+      "credentialRef": "gitlab-grader-readonly"
+    }
+  },
+  "rubricVersion": "1.0",
+  "submissionContract": "contracts/parking-fee-submission.json"
+}

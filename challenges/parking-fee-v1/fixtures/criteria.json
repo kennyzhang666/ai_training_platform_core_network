@@ -1,0 +1,4 @@
+[
+  { "key": "V1", "dim": "verify", "name": "基础档", "max": 10, "level": "A", "source": "auto", "rule": "基础测试全部通过", "evidenceType": "test" },
+  { "key": "C1", "dim": "code", "name": "业务常量抽取", "max": 6, "level": "B", "source": "auto", "rule": "魔法数字不超过阈值", "evidenceType": "metric" }
+]

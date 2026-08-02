@@ -1,0 +1,46 @@
+stages:
+  - lint
+  - test
+  - build
+  - contract
+  - grader
+
+default:
+  image: node:20-bookworm
+  cache:
+    key: pnpm-lock
+    paths:
+      - .pnpm-store/
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@11.8.0 --activate
+    - pnpm config set store-dir .pnpm-store
+    - pnpm install --frozen-lockfile
+
+lint:
+  stage: lint
+  script:
+    - pnpm lint
+
+node-test:
+  stage: test
+  script:
+    - pnpm test
+
+build:
+  stage: build
+  script:
+    - pnpm build
+
+contract-test:
+  stage: contract
+  script:
+    - pnpm contract:test
+
+grader-test:
+  stage: grader
+  image: python:3.11-slim
+  before_script:
+    - python -m pip install --disable-pip-version-check -r grader/requirements.txt
+  script:
+    - python -m unittest discover -s grader/tests -v

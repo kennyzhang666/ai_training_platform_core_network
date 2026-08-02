@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+  - services/*
+  - packages/*
+overrides:
+  find-my-way: 9.7.0
+allowBuilds:
+  esbuild: true

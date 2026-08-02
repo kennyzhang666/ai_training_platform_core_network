@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0",
+  "resultId": "bad",
+  "gradingRunId": "bad",
+  "challengeVersion": "parking-fee-01@1",
+  "rubricVersion": "latest",
+  "graderVersion": "",
+  "idempotencyKey": "not-a-key",
+  "triggerType": "PUSH",
+  "status": "DONE",
+  "submission": { "sourceType": "GIT_REF", "snapshotHash": "bad", "submittedAt": "not-date" },
+  "dimensions": {},
+  "criteria": [],
+  "total": 101,
+  "validationDiagnostics": [],
+  "gradedBy": "robot",
+  "startedAt": "not-date",
+  "finishedAt": "not-date",
+  "durationMs": -1
+}

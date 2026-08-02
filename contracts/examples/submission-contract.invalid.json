@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0",
+  "required": [{ "path": "../secret", "type": "unknown" }],
+  "forbidden": [],
+  "languageEntry": { "ruby": "main.rb" }
+}

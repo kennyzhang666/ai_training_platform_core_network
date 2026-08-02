@@ -1,0 +1,39 @@
+profile: blue
+version: "1.0"
+levelRatios:
+  A: 1.0
+  B: 0.8
+  C: 0.6
+  D: 0.0
+verifyWeights:
+  basic: 8
+  boundary: 12
+  clarification: 12
+  change: 8
+dimensions:
+  verify: 40
+  spec: 25
+  code: 20
+  collab: 15
+rationale:
+  verify: "蓝区沿用可审计的四档测试证据，保留更严格的等级比例。"
+  spec: "模型抽取和人工复核结果必须附带可验证引用。"
+  code: "静态指标只作为可追溯证据，不直接读取客户端分数。"
+  collab: "协作证据必须绑定提交快照和审计记录。"
+criteria:
+  C1:
+    max: 6
+    thresholds: { A: 0, B: 2, C: 100 }
+    rationale: "业务数字应集中为可读的命名常量。"
+  C2:
+    max: 5
+    thresholds: { A: 1 }
+    rationale: "外部输入和预期失败路径需要显式异常或边界处理。"
+  C3:
+    max: 4
+    thresholds: { A: 0, B: 2, C: 100 }
+    rationale: "精度语义应集中并避免隐式浮点误差。"
+  C4:
+    max: 5
+    thresholds: { A: 8, B: 12, C: 20 }
+    rationale: "变化点应保持可拆解、可测试的复杂度。"
