@@ -65,3 +65,40 @@ test('the external evaluation input manifest satisfies evaluation-input.schema.j
   }
   assert.equal((store.evaluationEngineForSubmission(submission).executor?.params as { entry?: string })?.entry, 'src/parking.py');
 });
+
+test('the Code Agent batch manifest and result index satisfy their public schemas', () => {
+  const ajv = new Ajv2020({ allErrors: true, strict: false });
+  addFormats(ajv);
+  const manifestValidator = ajv.compile(JSON.parse(readFileSync(join(root, 'contracts', 'evaluation-agent-batch-v1.1.schema.json'), 'utf8')));
+  const indexValidator = ajv.compile(JSON.parse(readFileSync(join(root, 'contracts', 'evaluation-agent-result-index.schema.json'), 'utf8')));
+  const runId = 'run-contract-01';
+  const manifest = {
+    schemaVersion: '1.1',
+    generatedAt: '2026-08-03T01:00:00.000Z',
+    batch: { id: 'batch-contract-01', leaseId: 'lease-contract-01', challengeVersion: 'parking-fee-01@1' },
+    agent: { instructionPath: 'engine/instruction.md', skillPaths: ['engine/skills/evaluation'] },
+    contracts: {
+      input: { format: 'JSON', schemaVersion: '1.1', sourcePath: 'contracts/evaluation-agent-batch-v1.1.schema.json', path: 'contracts/batch-input.schema.json', sha256: 'c'.repeat(64) },
+      output: { format: 'JSON', schemaVersion: '1.0', sourcePath: 'contracts/evaluation-result.schema.json', path: 'contracts/evaluation-result.schema.json', sha256: 'd'.repeat(64) },
+    },
+    engine: {
+      id: 'drill-grader', version: '1.0.0', source: 'BUILT_IN', packageHash: 'a'.repeat(64),
+      root: 'engine', entrypoint: 'engine/judge.py', assets: {}, params: {}, limits: { outputBytes: 1024 },
+    },
+    challenge: { challengeVersion: 'parking-fee-01@1', rubricVersion: '1.0' },
+    submissions: [{
+      runId, idempotencyKey: 'idem-contract-01', subject: { id: 'w00124' },
+      submission: { id: 'submission-contract-01', snapshotHash: 'b'.repeat(64) },
+      workspace: 'submissions/submission-contract-01/workspace',
+      outputPath: `results/${runId}.json`, scratchDir: 'submissions/submission-contract-01/scratch',
+    }],
+    resultIndexPath: 'results/index.json',
+  };
+  const resultIndex = {
+    schemaVersion: '1.0', batchId: 'batch-contract-01',
+    results: [{ runId, resultPath: `results/${runId}.json` }], failures: [],
+  };
+
+  assert.equal(manifestValidator(manifest), true, JSON.stringify(manifestValidator.errors));
+  assert.equal(indexValidator(resultIndex), true, JSON.stringify(indexValidator.errors));
+});

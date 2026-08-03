@@ -32,9 +32,13 @@ import {
   EvaluationInputBatch,
   EnginePackageRecord,
   SsoIdentity,
+  EvaluationBatch,
+  CodeAgentRuntimeConfig,
+  CodeAgentRuntimeInput,
 } from './domain';
 import { validateEvaluationResult } from './contract-validator';
 import { checkEvaluationScore } from './score-validator';
+import { buildCodeAgentRuntimeConfig, defaultCodeAgentRuntimeConfig } from './code-agent-runtime';
 import {
   CAPABILITY_CATALOG_VERSION,
   CAPABILITY_DOMAINS,
@@ -86,13 +90,37 @@ const DEFAULT_EVALUATION_ENGINE: EvaluationEngineConfig = {
   output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
 };
 
+const EXTERNAL_EVALUATION_INPUT_CONTRACT: EvaluationEngineConfig['input'] = {
+  format: 'JSON',
+  schemaVersion: '1.0',
+  contractPath: 'contracts/evaluation-input.schema.json',
+};
+
+const CODE_AGENT_BATCH_INPUT_CONTRACT: EvaluationEngineConfig['input'] = {
+  format: 'JSON',
+  schemaVersion: '1.1',
+  contractPath: 'contracts/evaluation-agent-batch-v1.1.schema.json',
+};
+
+const PLATFORM_RESULT_CONTRACT: EvaluationEngineConfig['output'] = {
+  format: 'JSON',
+  schemaVersion: '1.0',
+  contractPath: 'contracts/evaluation-result.schema.json',
+};
+
 function evaluationEngineForVersion(version: ChallengeVersion): EvaluationEngineConfig {
   const configured = version.evaluationEngine;
   if (!configured) return { ...DEFAULT_EVALUATION_ENGINE, input: { ...DEFAULT_EVALUATION_ENGINE.input }, output: { ...DEFAULT_EVALUATION_ENGINE.output } };
   return {
     ...configured,
-    input: { ...configured.input },
-    output: { ...configured.output },
+    ...(configured.agent ? { agent: { instructionPath: configured.agent.instructionPath, skillPaths: [...configured.agent.skillPaths] } } : {}),
+    // Online Code Agent evaluation always receives the batch manifest. The
+    // per-engine invocation schema is an internal bridge-to-engine protocol,
+    // not a field challenge authors should have to guess.
+    input: configured.mode === 'EXTERNAL_CLI' ? { ...configured.input } : { ...CODE_AGENT_BATCH_INPUT_CONTRACT },
+    // Platform ingestion currently has one stable result envelope. Individual
+    // challenges vary their criteria/evidence inside it, not the outer schema.
+    output: { ...PLATFORM_RESULT_CONTRACT },
   };
 }
 
@@ -138,6 +166,13 @@ function validateEvaluationEngine(engine?: EvaluationEngineConfig): void {
   } else if (engine.package) {
     throw new BadRequestException(`${engine.mode} engine must not reference an engine package`);
   }
+  if (engine.agent) {
+    assertRepositoryPath(engine.agent.instructionPath, 'code agent instruction path');
+    if (!Array.isArray(engine.agent.skillPaths) || !engine.agent.skillPaths.length) {
+      throw new BadRequestException({ code: 'CODE_AGENT_SKILLS_REQUIRED', message: '线上评测引擎至少需要配置一个 Code Agent skill' });
+    }
+    for (const path of engine.agent.skillPaths) assertRepositoryPath(path, 'code agent skill path');
+  }
 }
 
 const PARKING_FEE_EXECUTOR: EvaluationEngineConfig['executor'] = {
@@ -180,7 +215,11 @@ function assertTriggerMatchesEngine(engine: EvaluationEngineConfig, trigger: Tri
 /** The grader component of the idempotency key; a new package is new rules. */
 function engineIdentityOf(engine: EvaluationEngineConfig): string {
   const packageHash = engine.mode === 'PACKAGED' ? engine.package?.packageHash : undefined;
-  return packageHash ? `${engine.id}@${engine.version}+${packageHash.slice(0, 16)}` : `${engine.id}@${engine.version}`;
+  const agentHash = engine.agent
+    ? createHash('sha256').update(JSON.stringify(engine.agent)).digest('hex').slice(0, 12)
+    : undefined;
+  const suffix = [packageHash?.slice(0, 16), agentHash].filter(Boolean).join('.');
+  return suffix ? `${engine.id}@${engine.version}+${suffix}` : `${engine.id}@${engine.version}`;
 }
 
 // The grading key describes an immutable snapshot and rubric. It is stable
@@ -195,6 +234,7 @@ export class PlatformStore {
   private readonly events = new Map<string, EventConfig>();
   private readonly submissions = new Map<string, SubmissionRecord>();
   private readonly runs = new Map<string, GradingRun>();
+  private readonly evaluationBatches = new Map<string, EvaluationBatch>();
   private readonly results = new Map<string, StoredResult>();
   private readonly resultsByIdempotency = new Map<string, string>();
   private readonly orgUnits = new Map<string, OrgUnit>();
@@ -205,6 +245,7 @@ export class PlatformStore {
   private readonly announcements = new Map<string, Announcement>();
   private readonly hardProblems = new Map<string, HardProblem>();
   private readonly participants = new Map<string, ParticipantRecord>();
+  private codeAgentRuntimeConfig: CodeAgentRuntimeConfig = defaultCodeAgentRuntimeConfig();
   private readonly dataFile: string;
 
   constructor(dataFile = process.env.PLATFORM_DATA_FILE ?? join(existsSync(join(process.cwd(), 'grader')) ? process.cwd() : resolve(process.cwd(), '..', '..'), 'tmp', 'platform-data.json')) {
@@ -350,6 +391,7 @@ export class PlatformStore {
           version: '1.0.0',
           mode: 'PLATFORM_LOCAL',
           executor: { ...PARKING_FEE_EXECUTOR!, params: { ...PARKING_FEE_EXECUTOR!.params } },
+          agent: { instructionPath: 'instruction.md', skillPaths: ['skills/evaluation'] },
           input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
           output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
         },
@@ -430,6 +472,17 @@ export class PlatformStore {
         if (!legacy || version.evaluationEngine?.executor) continue;
         version.evaluationEngine = { ...version.evaluationEngine!, mode: 'PLATFORM_LOCAL', executor: executorFromLegacyLocal(legacy) };
         delete version.evaluationEngine.local;
+        seeded = true;
+      }
+    }
+    // Code Agent orchestration is versioned with the challenge engine. Older
+    // runnable versions use the conventional package paths until an author
+    // customizes them in a new challenge version.
+    for (const challenge of this.challenges.values()) {
+      for (const version of challenge.versions) {
+        const engine = version.evaluationEngine;
+        if (!engine || engine.mode === 'EXTERNAL_CLI' || engine.agent) continue;
+        engine.agent = { instructionPath: 'instruction.md', skillPaths: ['skills/evaluation'] };
         seeded = true;
       }
     }
@@ -629,6 +682,7 @@ export class PlatformStore {
         events?: EventConfig[];
         submissions?: SubmissionRecord[];
         runs?: GradingRun[];
+        evaluationBatches?: EvaluationBatch[];
         results?: StoredResult[];
         orgUnits?: OrgUnit[];
         users?: AppUser[];
@@ -638,10 +692,12 @@ export class PlatformStore {
         announcements?: Announcement[];
         hardProblems?: HardProblem[];
         participants?: ParticipantRecord[];
+        codeAgentRuntimeConfig?: CodeAgentRuntimeConfig;
       };
       for (const event of state.events ?? []) this.events.set(event.id, event);
       for (const submission of state.submissions ?? []) this.submissions.set(submission.id, submission);
       for (const run of state.runs ?? []) this.runs.set(run.id, run);
+      for (const batch of state.evaluationBatches ?? []) this.evaluationBatches.set(batch.id, batch);
       for (const result of state.results ?? []) {
         this.results.set(result.resultId, result);
         const key = (result.result as { idempotencyKey?: string }).idempotencyKey;
@@ -655,6 +711,13 @@ export class PlatformStore {
       for (const announcement of state.announcements ?? []) this.announcements.set(announcement.id, announcement);
       for (const problem of state.hardProblems ?? []) this.hardProblems.set(problem.id, problem);
       for (const participant of state.participants ?? []) this.participants.set(`${participant.eventId}:${participant.subjectId}`, participant);
+      if (state.codeAgentRuntimeConfig) {
+        this.codeAgentRuntimeConfig = buildCodeAgentRuntimeConfig(
+          state.codeAgentRuntimeConfig,
+          state.codeAgentRuntimeConfig.updatedBy || 'system',
+          state.codeAgentRuntimeConfig.updatedAt || now(),
+        );
+      }
     } catch {
       throw new Error(`platform data file is invalid: ${this.dataFile}`);
     }
@@ -672,6 +735,7 @@ export class PlatformStore {
       events: [...this.events.values()],
       submissions: [...this.submissions.values()],
       runs: [...this.runs.values()],
+      evaluationBatches: [...this.evaluationBatches.values()],
       results: [...this.results.values()],
       orgUnits: [...this.orgUnits.values()],
       users: [...this.users.values()],
@@ -681,6 +745,7 @@ export class PlatformStore {
       announcements: [...this.announcements.values()],
       hardProblems: [...this.hardProblems.values()],
       participants: [...this.participants.values()],
+      codeAgentRuntimeConfig: this.codeAgentRuntimeConfig,
     }, null, 2), 'utf8');
     renameSync(temporary, this.dataFile);
   }
@@ -1452,6 +1517,21 @@ export class PlatformStore {
     if (this.resolveAdminAccess(userId).level !== 'GLOBAL') throw new ForbiddenException('global administrator role is required');
   }
 
+  getCodeAgentRuntimeConfig(actorId: string): CodeAgentRuntimeConfig {
+    this.assertGlobalAdmin(actorId);
+    return { ...this.codeAgentRuntimeConfig, args: [...this.codeAgentRuntimeConfig.args] };
+  }
+
+  updateCodeAgentRuntimeConfig(input: CodeAgentRuntimeInput, actorId: string): CodeAgentRuntimeConfig {
+    this.assertGlobalAdmin(actorId);
+    const before = this.getCodeAgentRuntimeConfig(actorId);
+    const next = buildCodeAgentRuntimeConfig(input, actorId);
+    this.codeAgentRuntimeConfig = next;
+    this.audit(actorId, 'code-agent-runtime.update', 'system:code-agent-runtime', before, next);
+    this.persist();
+    return { ...next, args: [...next.args] };
+  }
+
   private normalizeOrgPath(path: string): string {
     const trimmed = path.trim();
     if (!trimmed || trimmed === '/') return '/';
@@ -1600,6 +1680,15 @@ export class PlatformStore {
       if (version) return version;
     }
     throw new BadRequestException(`challenge version not found: ${challengeVersionId}`);
+  }
+
+  /** Internal, version-frozen challenge configuration used by upload checks. */
+  getChallengeVersionRecord(challengeVersionId: string): ChallengeVersion {
+    return this.getChallengeVersion(challengeVersionId);
+  }
+
+  challengeVersionForEvent(eventId: string): ChallengeVersion {
+    return this.getChallengeVersion(this.getEvent(eventId).challengeVersion);
   }
 
   private submissionChallengeVersion(submission: SubmissionRecord): string {
@@ -2787,11 +2876,14 @@ export class PlatformStore {
       // Executor selection, parameters and package binding are in-platform
       // execution configuration; an external evaluator receives the engine's
       // identity and contracts, not the paths the platform would run.
-      challenge: (({ local: _local, executor: _executor, package: _package, ...engine }) => ({
+      challenge: (({ local: _local, executor: _executor, package: _package, agent: _agent, ...engine }) => ({
         id: this.challengeForVersion(event.challengeVersion).id,
         title: this.getChallengeVersion(event.challengeVersion).title,
         version: this.getChallengeVersion(event.challengeVersion).version,
-        evaluationEngine: engine,
+        // This endpoint is the external evaluator manifest even when the same
+        // challenge also has an online engine. Its input contract therefore
+        // follows the IMPORT flow, not the challenge's online batch protocol.
+        evaluationEngine: { ...engine, input: { ...EXTERNAL_EVALUATION_INPUT_CONTRACT } },
       }))(evaluationEngineForVersion(this.getChallengeVersion(event.challengeVersion))),
       submissions: prepared,
     };
@@ -2853,7 +2945,9 @@ export class PlatformStore {
       const availableIds = new Set(available.map((submission) => submission.id));
       if (selectedIds.some((id) => !availableIds.has(id))) throw new BadRequestException('selected submissions are outside this event or administrator scope');
     }
-    const selected = available.filter((submission) => !selectedIds || selectedIds.includes(submission.id));
+    const selected = selectedIds
+      ? selectedIds.map((id) => available.find((submission) => submission.id === id)!)
+      : available;
     return selected.filter((submission) => ['WAITING_TRIGGER', 'RECEIVED'].includes(submission.state)).map((submission) => this.startGrading(submission.id, actorId));
   }
 
@@ -2943,6 +3037,189 @@ export class PlatformStore {
     return [...this.runs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
+  /** Freeze an exact, same-event set of queued runs into one Code Agent job. */
+  createEvaluationBatch(runIds: string[], actorId: string): EvaluationBatch {
+    const uniqueRunIds = [...new Set((runIds ?? []).map((id) => String(id).trim()).filter(Boolean))];
+    if (!uniqueRunIds.length) throw new BadRequestException('at least one grading run must be selected');
+    if (uniqueRunIds.length > 500) throw new BadRequestException('at most 500 grading runs can be evaluated in one batch');
+    const runs = uniqueRunIds.map((id) => this.getRun(id));
+    const submissions = runs.map((run) => this.getSubmission(run.submissionId));
+    const eventIds = new Set(submissions.map((submission) => submission.eventId));
+    const challengeVersions = new Set(submissions.map((submission) => this.submissionChallengeVersion(submission)));
+    if (eventIds.size !== 1 || challengeVersions.size !== 1) {
+      throw new BadRequestException('an evaluation batch must contain one training event and one challenge version');
+    }
+    const eventId = [...eventIds][0];
+    const event = this.getEvent(eventId);
+    if (actorId !== 'system') this.assertAdminEventScope(event, actorId);
+    const engine = this.evaluationEngineForSubmission(submissions[0]);
+    if (engine.mode !== 'PLATFORM_LOCAL' && engine.mode !== 'PACKAGED') {
+      throw new BadRequestException({ code: 'ENGINE_NOT_RUNNABLE', message: '该赛题仅支持线下评测结果录入' });
+    }
+    const engineIdentity = engineIdentityOf(engine);
+    for (const [index, run] of runs.entries()) {
+      if (run.status !== 'QUEUED') throw new ConflictException(`grading run cannot enter a batch from state ${run.status}`);
+      if (engineIdentityOf(this.evaluationEngineForSubmission(submissions[index])) !== engineIdentity) {
+        throw new BadRequestException('an evaluation batch cannot mix evaluation engines');
+      }
+      if (run.evaluationBatchId) {
+        const existingOwner = this.evaluationBatches.get(run.evaluationBatchId);
+        if (existingOwner && ['QUEUED', 'RUNNING'].includes(existingOwner.status)) {
+          throw new ConflictException(`grading run already belongs to evaluation batch ${existingOwner.id}`);
+        }
+      }
+    }
+    const batchId = `batch-${createHash('sha256').update(uniqueRunIds.slice().sort().join('|')).digest('hex').slice(0, 32)}`;
+    const existing = this.evaluationBatches.get(batchId);
+    if (existing) return existing;
+    const batch: EvaluationBatch = {
+      id: batchId,
+      eventId,
+      challengeVersion: [...challengeVersions][0],
+      runIds: uniqueRunIds,
+      submissionIds: submissions.map((submission) => submission.id),
+      engineIdentity,
+      ...(this.codeAgentRuntimeConfig.enabled ? {
+        codeAgentRuntime: {
+          schemaVersion: this.codeAgentRuntimeConfig.schemaVersion,
+          executable: this.codeAgentRuntimeConfig.executable,
+          args: [...this.codeAgentRuntimeConfig.args],
+          prompt: this.codeAgentRuntimeConfig.prompt,
+          timeoutSeconds: this.codeAgentRuntimeConfig.timeoutSeconds,
+          configHash: this.codeAgentRuntimeConfig.configHash,
+        },
+      } : {}),
+      status: 'QUEUED',
+      createdBy: actorId,
+      createdAt: now(),
+      completedRunIds: [],
+      failedRunIds: [],
+    };
+    for (const run of runs) run.evaluationBatchId = batch.id;
+    this.evaluationBatches.set(batch.id, batch);
+    this.audit(actorId, 'grading.batch-create', `evaluation-batch:${batch.id}`, undefined, {
+      eventId,
+      runIds: uniqueRunIds,
+      engineIdentity,
+      codeAgentConfigHash: batch.codeAgentRuntime?.configHash,
+    });
+    this.persist();
+    return batch;
+  }
+
+  getEvaluationBatch(batchId: string): EvaluationBatch {
+    const batch = this.evaluationBatches.get(batchId);
+    if (!batch) throw new NotFoundException(`evaluation batch not found: ${batchId}`);
+    return batch;
+  }
+
+  systemEvaluationBatches(): EvaluationBatch[] {
+    return [...this.evaluationBatches.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  listEvaluationBatches(actorId: string, eventId?: string): EvaluationBatch[] {
+    this.assertAdmin(actorId);
+    return [...this.evaluationBatches.values()]
+      .filter((batch) => !eventId || batch.eventId === eventId)
+      .filter((batch) => {
+        try { this.assertAdminEventScope(this.getEvent(batch.eventId), actorId); return true; } catch { return false; }
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  assertEvaluationBatchScope(batchId: string, actorId: string): void {
+    const batch = this.getEvaluationBatch(batchId);
+    this.assertAdminEventScope(this.getEvent(batch.eventId), actorId);
+  }
+
+  assertGradingRunScope(runId: string, actorId: string): void {
+    const submission = this.getSubmission(this.getRun(runId).submissionId);
+    this.assertAdminEventScope(this.getEvent(submission.eventId), actorId);
+  }
+
+  acquireEvaluationBatchLease(batchId: string, workerId: string, leaseSeconds: number): { leaseId: string; leaseExpiresAt: string } {
+    const batch = this.getEvaluationBatch(batchId);
+    if (batch.status !== 'QUEUED') throw new ConflictException(`evaluation batch cannot be leased from state ${batch.status}`);
+    const runs = batch.runIds.map((runId) => this.getRun(runId));
+    if (runs.some((run) => !['QUEUED', 'GRADED', 'FAILED'].includes(run.status))) {
+      throw new ConflictException('evaluation batch contains a run that cannot be resumed');
+    }
+    if (!runs.some((run) => run.status === 'QUEUED')) throw new ConflictException('evaluation batch has no unfinished runs');
+    const leaseId = `batch-lease-${randomUUID()}`;
+    const leaseExpiresAt = new Date(Date.now() + leaseSeconds * 1000).toISOString();
+    batch.status = 'RUNNING';
+    batch.leaseId = leaseId;
+    batch.leasedBy = workerId;
+    batch.leaseExpiresAt = leaseExpiresAt;
+    batch.failureReason = undefined;
+    for (const run of runs.filter((item) => item.status === 'QUEUED')) {
+      run.status = 'RUNNING';
+      run.leaseId = leaseId;
+      run.leasedBy = workerId;
+      run.leaseExpiresAt = leaseExpiresAt;
+      this.getSubmission(run.submissionId).gradingStatus = 'RUNNING';
+    }
+    this.persist();
+    return { leaseId, leaseExpiresAt };
+  }
+
+  extendEvaluationBatchLease(batchId: string, leaseSeconds: number): string {
+    const batch = this.getEvaluationBatch(batchId);
+    const leaseExpiresAt = new Date(Date.now() + leaseSeconds * 1000).toISOString();
+    batch.leaseExpiresAt = leaseExpiresAt;
+    for (const runId of batch.runIds) {
+      const run = this.getRun(runId);
+      if (run.status === 'RUNNING') run.leaseExpiresAt = leaseExpiresAt;
+    }
+    this.persist();
+    return leaseExpiresAt;
+  }
+
+  releaseEvaluationBatchLease(batchId: string, reason?: string): EvaluationBatch {
+    const batch = this.getEvaluationBatch(batchId);
+    if (batch.status !== 'RUNNING') return batch;
+    batch.status = 'QUEUED';
+    batch.leaseId = undefined;
+    batch.leasedBy = undefined;
+    batch.leaseExpiresAt = undefined;
+    if (reason) batch.failureReason = reason.slice(0, 2000);
+    for (const runId of batch.runIds) {
+      const run = this.getRun(runId);
+      if (run.status !== 'RUNNING') continue;
+      run.status = 'QUEUED';
+      run.leaseId = undefined;
+      run.leasedBy = undefined;
+      run.leaseExpiresAt = undefined;
+      this.getSubmission(run.submissionId).gradingStatus = 'QUEUED';
+    }
+    this.persist();
+    return batch;
+  }
+
+  finishEvaluationBatch(batchId: string, completedRunIds: string[], failedRunIds: string[], failureReason?: string): EvaluationBatch {
+    const batch = this.getEvaluationBatch(batchId);
+    batch.completionLeaseId = batch.leaseId;
+    batch.completedRunIds = [...new Set(completedRunIds)];
+    batch.failedRunIds = [...new Set(failedRunIds)];
+    batch.status = batch.completedRunIds.length === batch.runIds.length
+      ? 'COMPLETED'
+      : batch.completedRunIds.length > 0
+        ? 'PARTIAL'
+        : 'FAILED';
+    batch.failureReason = failureReason?.slice(0, 2000);
+    batch.finishedAt = now();
+    batch.leaseId = undefined;
+    batch.leasedBy = undefined;
+    batch.leaseExpiresAt = undefined;
+    this.audit(batch.createdBy, 'grading.batch-finish', `evaluation-batch:${batch.id}`, undefined, {
+      status: batch.status,
+      completedRunIds: batch.completedRunIds,
+      failedRunIds: batch.failedRunIds,
+    });
+    this.persist();
+    return batch;
+  }
+
   /** Hand a queued run to an evaluation worker. */
   acquireLease(runId: string, workerId: string, leaseSeconds: number): { leaseId: string; leaseExpiresAt: string } {
     const run = this.getRun(runId);
@@ -2986,6 +3263,12 @@ export class PlatformStore {
     const run = this.runs.get(runId);
     if (!run) throw new NotFoundException(`grading run not found: ${runId}`);
     return run;
+  }
+
+  getStoredResult(resultId: string): StoredResult {
+    const result = this.results.get(resultId);
+    if (!result) throw new NotFoundException(`grading result not found: ${resultId}`);
+    return result;
   }
 
   markRunRunning(runId: string): GradingRun {

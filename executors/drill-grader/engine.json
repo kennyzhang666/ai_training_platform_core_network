@@ -50,5 +50,8 @@
     "wallClockSeconds": 180,
     "memoryMB": 512,
     "outputBytes": 4194304
+  },
+  "platformDependencies": {
+    "graderSource": "grader/src/drill_grader"
   }
 }

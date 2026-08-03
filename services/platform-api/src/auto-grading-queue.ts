@@ -5,14 +5,14 @@ import { GradingExecutor, GRADING_EXECUTOR } from './grading-executor';
 /**
  * Embedded evaluation worker, for single-host development.
  *
- * The production shape is pull-based: an evaluation environment leases tasks
- * through `/evaluation-tasks:lease` and posts results back, so the API never
- * executes engine code. Set `EMBEDDED_EVALUATION_WORKER=false` to turn this
- * off and let only external workers drain the queue.
+ * The production shape is pull-based: an evaluation environment leases full
+ * batches through `/evaluation-batches:lease` and posts results back, so the
+ * API never executes engine code. This class is only the explicit compatibility
+ * path used by local tests when `EMBEDDED_EVALUATION_WORKER=true`.
  */
 @Injectable()
 export class AutoGradingQueue implements OnModuleInit {
-  private readonly embedded = process.env.EMBEDDED_EVALUATION_WORKER !== 'false';
+  private readonly embedded = process.env.EMBEDDED_EVALUATION_WORKER === 'true';
   private readonly scheduled = new Set<string>();
   private readonly pending: string[] = [];
   private readonly maxConcurrency = Math.max(1, Math.min(8, Number(process.env.LOCAL_GRADING_CONCURRENCY ?? 2)));

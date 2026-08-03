@@ -71,6 +71,7 @@ export class EvaluationTaskService {
           outputBytes: manifest.limits?.outputBytes ?? 5 * 1024 * 1024,
         },
         assets,
+        ...(engine.platformDependencies.length ? { platformDependencies: engine.platformDependencies } : {}),
       },
       challenge: context.challenge,
       subject: {
@@ -94,7 +95,7 @@ export class EvaluationTaskService {
     };
   }
 
-  lease(workerId: string, limit = 1, executorIds: string[] = []): EvaluationTask[] {
+  lease(workerId: string, limit = 1, executorIds: string[] = [], actorId = 'w00123'): EvaluationTask[] {
     if (!workerId.trim()) throw new BadRequestException({ code: 'WORKER_ID_REQUIRED', message: '评测环境必须声明 workerId' });
     this.reclaimExpiredLeases();
     const wanted = Math.max(1, Math.min(limit, MAX_LEASE_BATCH));
@@ -102,6 +103,10 @@ export class EvaluationTaskService {
     for (const run of this.store.systemRuns()) {
       if (tasks.length >= wanted) break;
       if (run.status !== 'QUEUED') continue;
+      // Runs owned by a Code Agent batch must stay together; the legacy
+      // single-run endpoint may not split one learner out of that batch.
+      if (run.evaluationBatchId) continue;
+      try { this.store.assertGradingRunScope(run.id, actorId); } catch { continue; }
       let task: EvaluationTask | undefined;
       try {
         task = this.taskFor(run, workerId, LEASE_SECONDS);
@@ -120,7 +125,8 @@ export class EvaluationTaskService {
     return tasks;
   }
 
-  private assertLease(runId: string, leaseId: string): GradingRun {
+  private assertLease(runId: string, leaseId: string, actorId: string): GradingRun {
+    this.store.assertGradingRunScope(runId, actorId);
     const run = this.store.getRun(runId);
     if (run.status === 'GRADED') throw new ConflictException({ code: 'TASK_ALREADY_COMPLETED', message: '该评测任务已完成' });
     if (!run.leaseId || run.leaseId !== leaseId) {
@@ -129,18 +135,18 @@ export class EvaluationTaskService {
     return run;
   }
 
-  heartbeat(runId: string, leaseId: string): { leaseExpiresAt: string } {
-    const run = this.assertLease(runId, leaseId);
+  heartbeat(runId: string, leaseId: string, actorId = 'w00123'): { leaseExpiresAt: string } {
+    const run = this.assertLease(runId, leaseId, actorId);
     return { leaseExpiresAt: this.store.extendLease(run.id, LEASE_SECONDS) };
   }
 
-  complete(runId: string, leaseId: string, result: Record<string, unknown>): StoredResult {
-    this.assertLease(runId, leaseId);
+  complete(runId: string, leaseId: string, result: Record<string, unknown>, actorId = 'w00123'): StoredResult {
+    this.assertLease(runId, leaseId, actorId);
     return this.store.completeRun(runId, result);
   }
 
-  fail(runId: string, leaseId: string, reason: string): GradingRun {
-    this.assertLease(runId, leaseId);
+  fail(runId: string, leaseId: string, reason: string, actorId = 'w00123'): GradingRun {
+    this.assertLease(runId, leaseId, actorId);
     return this.store.failRun(runId, reason || '评测环境未给出失败原因');
   }
 

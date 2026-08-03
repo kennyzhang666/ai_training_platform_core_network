@@ -49,16 +49,17 @@ def main(argv: list[str] | None = None) -> int:
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started))
     payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
 
-    sys.path.insert(0, str(_grader_root()))
+    params: dict[str, Any] = payload.get("params") or {}
+    workspace = Path(payload["workspace"])
+    assets = payload["engine"].get("assets", {})
+    grader_source = Path(assets["graderSource"]).parent if assets.get("graderSource") else _grader_root()
+    sys.path.insert(0, str(grader_source))
     from drill_grader.cli import _heuristic_criteria, _load_profile  # noqa: E402
     from drill_grader.scoring import score_criteria  # noqa: E402
     from drill_grader.submission import validate_submission  # noqa: E402
 
-    params: dict[str, Any] = payload.get("params") or {}
-    workspace = Path(payload["workspace"])
     # 平台已经把参数里的仓库路径解析成沙箱内的绝对路径放进 engine.assets，
     # 因此判题器不需要知道仓库根在哪。
-    assets = payload["engine"].get("assets", {})
     contract = Path(assets["submissionContract"]) if assets.get("submissionContract") else Path(params["contractPath"])
     tests_dir = Path(assets["testsDir"]) if assets.get("testsDir") else (Path(params["testsDir"]) if params.get("testsDir") else None)
     entry = params["entry"]
@@ -84,7 +85,11 @@ def main(argv: list[str] | None = None) -> int:
         "idempotencyKey": payload["grading"]["idempotencyKey"],
         "triggerType": payload["grading"]["triggerType"],
         "status": "PARTIAL" if blocked or not criteria else "COMPLETE",
-        "submission": {key: value for key, value in payload["submission"].items() if key != "id"},
+        "submission": {
+            key: value
+            for key, value in payload["submission"].items()
+            if key in {"sourceType", "repository", "branch", "commitSha", "snapshotHash", "artifactHash", "submittedAt"}
+        },
         "dimensions": scored["dimensions"],
         "criteria": scored["criteria"],
         "total": scored["total"],

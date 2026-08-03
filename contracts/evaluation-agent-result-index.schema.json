@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-training-platform.local/contracts/evaluation-agent-result-index.schema.json",
+  "title": "Code Agent Evaluation Batch Result Index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "batchId", "results", "failures"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "batchId": { "type": "string", "minLength": 1 },
+    "results": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["runId"],
+        "properties": {
+          "runId": { "type": "string", "minLength": 1 },
+          "result": { "type": "object" },
+          "resultPath": { "type": "string", "minLength": 1 }
+        },
+        "oneOf": [
+          { "required": ["result"] },
+          { "required": ["resultPath"] }
+        ]
+      }
+    },
+    "failures": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["runId", "reason"],
+        "properties": {
+          "runId": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    }
+  }
+}

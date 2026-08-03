@@ -4,7 +4,7 @@ import { richTextPreview, sanitizeRichText } from './rich-text';
 const API = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:3000/api/v1';
 const ADMIN_EMPLOYEE_ID = import.meta.env.VITE_EMPLOYEE_ID ?? 'w00123';
 
-type AdminSection = 'overview' | 'organization' | 'challenges' | 'events' | 'participants' | 'capabilities' | 'grading' | 'announcements' | 'audit';
+type AdminSection = 'overview' | 'organization' | 'challenges' | 'events' | 'participants' | 'capabilities' | 'grading' | 'evaluation-runtime' | 'announcements' | 'audit';
 type ChallengeStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 type ChallengeCategory = 'TRAINING' | 'COMPETITION' | 'HARD_PROBLEM';
 type HardProblemReviewStatus = 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
@@ -31,6 +31,7 @@ type EvaluationEngineConfig = {
   executor?: PlatformExecutorReference;
   local?: LocalEvaluationConfig;
   package?: EnginePackageReference;
+  agent?: { instructionPath: string; skillPaths: string[] };
   input: { format: 'JSON'; schemaVersion: string; contractPath: string };
   output: { format: 'JSON'; schemaVersion: string; contractPath: string };
 };
@@ -52,6 +53,7 @@ type ChallengeVersion = {
   deliveryPolicy: { allowedSources?: Source[]; upload?: Record<string, unknown>; git?: Record<string, unknown> };
   rubricVersion: string;
   submissionContract: string;
+  submissionContractDefinition?: Record<string, unknown>;
   evaluationEngine?: EvaluationEngineConfig;
   status: VersionStatus;
 };
@@ -74,6 +76,18 @@ type Overview = {
   recentAudits: Audit[];
 };
 type QueueStats = { queued: number; running: number; maxConcurrency: number; scheduled: number };
+type CodeAgentRuntimeConfig = {
+  schemaVersion: '1.0';
+  enabled: boolean;
+  commandLine: string;
+  executable: string;
+  args: string[];
+  prompt: string;
+  timeoutSeconds: number;
+  configHash: string;
+  updatedAt: string;
+  updatedBy: string;
+};
 type OrgUnit = { id: string; parentId?: string; path: string; level: number; label: string; name: string };
 type AdminUser = { id: string; employeeNo: string; name: string; orgUnitId: string; orgPath: string; departmentHint?: string; departmentSource?: 'SSO' | 'ADMIN'; roles: string[]; roleBindings?: Array<{ role: string; scopeOrgPath: string }>; status: 'ACTIVE' | 'DISABLED' };
 type AdminCapabilityProfile = {
@@ -119,6 +133,7 @@ type ChallengeDraft = {
   branchTemplate: string;
   rubricVersion: string;
   submissionContract: string;
+  submissionContractJson: string;
   evaluationEngineId: string;
   evaluationEngineVersion: string;
   evaluationEngineMode: EngineMode;
@@ -128,6 +143,8 @@ type ChallengeDraft = {
   executorParams: Record<string, string>;
   evaluationInputContract: string;
   evaluationOutputContract: string;
+  agentInstructionPath: string;
+  agentSkillPaths: string;
 };
 
 type EventDraft = {
@@ -178,8 +195,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const detail = await response.text();
     let message = '';
     try {
-      const payload = JSON.parse(detail) as { message?: string | string[] };
-      message = Array.isArray(payload.message) ? payload.message.join('；') : payload.message ?? '';
+      const payload = JSON.parse(detail) as { message?: string | string[]; issues?: Array<{ message?: string }>; errors?: string[]; details?: { issues?: Array<{ message?: string }>; errors?: string[] } };
+      const issues = payload.details?.issues ?? payload.issues;
+      const errors = payload.details?.errors ?? payload.errors;
+      message = issues?.map((issue) => issue.message).filter(Boolean).slice(0, 4).join('；')
+        || errors?.slice(0, 4).join('；')
+        || (Array.isArray(payload.message) ? payload.message.join('；') : payload.message ?? '');
     } catch {
       message = detail.trim();
     }
@@ -271,7 +292,7 @@ function sourceLabel(source?: string): string {
 }
 
 function triggerLabel(trigger?: string): string {
-  return trigger === 'AUTO' ? '自动评测' : trigger === 'MANUAL' ? '手动触发' : trigger === 'IMPORT' ? '线下评测' : trigger ?? '—';
+  return trigger === 'AUTO' ? '自动评测' : trigger === 'MANUAL' ? '管理员发起' : trigger === 'IMPORT' ? '结果导入' : trigger ?? '—';
 }
 
 function revealLabel(reveal?: string): string {
@@ -303,12 +324,12 @@ function auditActionLabel(action: string): string {
     'challenge.create': '创建赛题', 'challenge.update': '更新赛题', 'challenge.publish': '发布赛题', 'challenge.archive': '移入垃圾箱', 'challenge.restore': '恢复赛题',
     'challenge.version.create': '创建赛题版本', 'challenge.version.update': '更新赛题版本', 'challenge.version.publish': '发布赛题版本',
     'event.create': '创建训战', 'event.update': '更新训战', 'event.start-grading': '批量安排评测', 'event.execute-local': '执行线上评测', 'event.close': '结束训战', 'event.reveal': '公布评测结果',
-    'submission.start-grading': '安排评测', 'grading-result.import': '录入评测结果', 'grading.regrade': '重新评测', 'org-unit.create': '创建部门', 'org-unit.update': '更新部门', 'user.create': '同步员工资料', 'user.update': '配置员工', 'user.roles.update': '配置员工权限', 'sso.user-provision': '登记员工资料', 'sso.user-sync': '同步员工资料', 'announcement.create': '发布公告', 'announcement.update': '更新公告', 'announcement.delete': '删除公告',
+    'submission.start-grading': '安排评测', 'grading-result.import': '录入评测结果', 'grading.regrade': '重新评测', 'code-agent-runtime.update': '更新评测环境', 'org-unit.create': '创建部门', 'org-unit.update': '更新部门', 'user.create': '同步员工资料', 'user.update': '配置员工', 'user.roles.update': '配置员工权限', 'sso.user-provision': '登记员工资料', 'sso.user-sync': '同步员工资料', 'announcement.create': '发布公告', 'announcement.update': '更新公告', 'announcement.delete': '删除公告',
   } as Record<string, string>)[action] ?? action;
 }
 
 function auditTargetLabel(target: string): string {
-  return target.replace(/^challenge:/, '赛题：').replace(/^event:/, '场次：').replace(/^submission:/, '提交：').replace(/^org-unit:/, '部门：').replace(/^user:/, '员工：').replace(/^announcement:/, '公告：');
+  return target.replace(/^system:code-agent-runtime$/, 'Code Agent 运行配置').replace(/^challenge:/, '赛题：').replace(/^event:/, '场次：').replace(/^submission:/, '提交：').replace(/^org-unit:/, '部门：').replace(/^user:/, '员工：').replace(/^announcement:/, '公告：');
 }
 
 /** Only a PLATFORM_LOCAL engine can be driven by the platform's own executor. */
@@ -322,8 +343,46 @@ function versionTitle(versionId: string, challenges: Challenge[]): string {
   return challenges.flatMap((challenge) => challenge.versions).find((version) => version.id === versionId)?.title ?? versionId;
 }
 
+const SKILLS_DELIVERY_CONTRACT = JSON.stringify({
+  schemaVersion: '1.1',
+  root: { mode: 'ARCHIVE_ROOT' },
+  required: [
+    { path: 'skills', type: 'directory', minFiles: 1 },
+    { path: 'skills/*/SKILL.md', type: 'markdown' },
+  ],
+  optional: [{ path: 'README.md', type: 'markdown' }, { path: 'skills/**', type: 'text' }],
+  forbidden: ['**/.env', '**/.git/**', '**/__pycache__/**', '**/*.pyc'],
+  allowedPaths: ['README.md', 'skills/**'],
+  allowAdditionalPaths: false,
+  maxDepth: 8,
+  maxFiles: 500,
+}, null, 2);
+
+const SOURCE_DELIVERY_CONTRACT = JSON.stringify({
+  schemaVersion: '1.1',
+  root: { mode: 'ARCHIVE_ROOT' },
+  required: [
+    { path: 'README.md', type: 'markdown' },
+    { path: 'src', type: 'directory', minFiles: 1 },
+  ],
+  optional: [{ path: 'tests', type: 'directory' }],
+  forbidden: ['**/.env', '**/.git/**', '**/*credential*', '**/__pycache__/**', '**/*.pyc'],
+  allowAdditionalPaths: true,
+  maxDepth: 12,
+  maxFiles: 1000,
+}, null, 2);
+
 function blankChallenge(): ChallengeDraft {
-  return { id: '', title: '', category: 'TRAINING', description: '', objectives: '', requirements: '', constraints: '', deliverables: '', tags: '', estimatedMinutes: '45', zone: 'YELLOW', languages: 'python', allowUpload: true, allowGit: true, repository: '', branchTemplate: 'drill/{subjectId}', rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', evaluationEngineId: '', evaluationEngineVersion: '1.0.0', evaluationEngineMode: 'EXTERNAL_CLI', enginePackage: null, enginePackageSummary: '', executorId: '', executorParams: {}, evaluationInputContract: 'contracts/evaluation-input.schema.json', evaluationOutputContract: 'contracts/evaluation-result.schema.json' };
+  return { id: '', title: '', category: 'TRAINING', description: '', objectives: '', requirements: '', constraints: '', deliverables: '', tags: '', estimatedMinutes: '45', zone: 'YELLOW', languages: 'python', allowUpload: true, allowGit: true, repository: '', branchTemplate: 'drill/{subjectId}', rubricVersion: '1.0', submissionContract: 'contracts/submission-contract-v1.1.schema.json', submissionContractJson: '', evaluationEngineId: '', evaluationEngineVersion: '1.0.0', evaluationEngineMode: 'EXTERNAL_CLI', enginePackage: null, enginePackageSummary: '', executorId: '', executorParams: {}, evaluationInputContract: 'contracts/evaluation-input.schema.json', evaluationOutputContract: 'contracts/evaluation-result.schema.json', agentInstructionPath: 'instruction.md', agentSkillPaths: 'skills/evaluation' };
+}
+
+function evaluationContracts(mode: EngineMode): Pick<ChallengeDraft, 'evaluationInputContract' | 'evaluationOutputContract'> {
+  return {
+    evaluationInputContract: mode === 'EXTERNAL_CLI'
+      ? 'contracts/evaluation-input.schema.json'
+      : 'contracts/evaluation-agent-batch-v1.1.schema.json',
+    evaluationOutputContract: 'contracts/evaluation-result.schema.json',
+  };
 }
 
 function blankEvent(versionId = '', challenges: Challenge[] = []): EventDraft {
@@ -365,7 +424,8 @@ function draftFromVersion(version?: ChallengeVersion): ChallengeDraft {
   const languages = (version?.languagePolicy.languages as string[] | undefined) ?? ['python'];
   const allowed = version?.deliveryPolicy.allowedSources ?? ['UPLOAD', 'GIT_REF'];
   const engine = version?.evaluationEngine;
-  return { id: version?.challengeId ?? '', title: version?.title ?? '', category: 'TRAINING', description: version?.description ?? '', objectives: (version?.objectives ?? []).join('\n'), requirements: (version?.requirements ?? []).join('\n'), constraints: (version?.constraints ?? []).join('\n'), deliverables: (version?.deliverables ?? []).join('\n'), tags: (version?.tags ?? []).join('\n'), estimatedMinutes: String(version?.estimatedMinutes ?? 45), zone: version?.zone ?? 'YELLOW', languages: languages.join('\n'), allowUpload: allowed.includes('UPLOAD'), allowGit: allowed.includes('GIT_REF'), repository: String(git.repository ?? ''), branchTemplate: String(git.branchTemplate ?? 'drill/{subjectId}'), rubricVersion: version?.rubricVersion ?? '1.0', submissionContract: version?.submissionContract ?? 'contracts/submission-contract.schema.json', evaluationEngineId: engine?.id ?? `${version?.challengeId ?? 'challenge'}-evaluator`, evaluationEngineVersion: engine?.version ?? '1.0.0', evaluationEngineMode: engine?.mode ?? 'EXTERNAL_CLI', enginePackage: engine?.package ?? null, enginePackageSummary: engine?.package ? `${engine.package.fileName ?? '引擎包'} · ${engine.package.packageHash.slice(0, 12)}…` : '', executorId: engine?.executor?.id ?? '', executorParams: Object.fromEntries(Object.entries(engine?.executor?.params ?? {}).map(([key, value]) => [key, String(value ?? '')])), evaluationInputContract: engine?.input.contractPath ?? 'contracts/evaluation-input.schema.json', evaluationOutputContract: engine?.output.contractPath ?? 'contracts/evaluation-result.schema.json' };
+  const mode = engine?.mode ?? 'EXTERNAL_CLI';
+  return { id: version?.challengeId ?? '', title: version?.title ?? '', category: 'TRAINING', description: version?.description ?? '', objectives: (version?.objectives ?? []).join('\n'), requirements: (version?.requirements ?? []).join('\n'), constraints: (version?.constraints ?? []).join('\n'), deliverables: (version?.deliverables ?? []).join('\n'), tags: (version?.tags ?? []).join('\n'), estimatedMinutes: String(version?.estimatedMinutes ?? 45), zone: version?.zone ?? 'YELLOW', languages: languages.join('\n'), allowUpload: allowed.includes('UPLOAD'), allowGit: allowed.includes('GIT_REF'), repository: String(git.repository ?? ''), branchTemplate: String(git.branchTemplate ?? 'drill/{subjectId}'), rubricVersion: version?.rubricVersion ?? '1.0', submissionContract: version?.submissionContract ?? 'contracts/submission-contract-v1.1.schema.json', submissionContractJson: version?.submissionContractDefinition ? JSON.stringify(version.submissionContractDefinition, null, 2) : '', evaluationEngineId: engine?.id ?? `${version?.challengeId ?? 'challenge'}-evaluator`, evaluationEngineVersion: engine?.version ?? '1.0.0', evaluationEngineMode: mode, enginePackage: engine?.package ?? null, enginePackageSummary: engine?.package ? `${engine.package.fileName ?? '引擎包'} · ${engine.package.packageHash.slice(0, 12)}…` : '', executorId: engine?.executor?.id ?? '', executorParams: Object.fromEntries(Object.entries(engine?.executor?.params ?? {}).map(([key, value]) => [key, String(value ?? '')])), ...evaluationContracts(mode), agentInstructionPath: engine?.agent?.instructionPath ?? 'instruction.md', agentSkillPaths: (engine?.agent?.skillPaths ?? ['skills/evaluation']).join('\n') };
 }
 
 export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
@@ -383,10 +443,10 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [audits, setAudits] = useState<Audit[]>([]);
   const [queue, setQueue] = useState<QueueStats | null>(null);
+  const [codeAgentRuntime, setCodeAgentRuntime] = useState<CodeAgentRuntimeConfig | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [selectedGradingIds, setSelectedGradingIds] = useState<string[]>([]);
-  const [gradingInputText, setGradingInputText] = useState('');
   const [selectedChallengeId, setSelectedChallengeId] = useState('');
   const [challengeView, setChallengeView] = useState<'active' | 'trash'>('active');
   const [challengeForm, setChallengeForm] = useState<ChallengeDraft | null>(null);
@@ -410,8 +470,8 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   }, [users, capabilityOrgPath]);
 
   async function refresh() {
-    const [loadedOverview, loadedChallenges, loadedEvents, loadedSubmissions, loadedUsers, loadedOrgUnits, loadedCapabilities, loadedAnnouncements, loadedAudits, loadedQueue] = await Promise.all([
-      request<Overview>('/admin/overview'), request<Challenge[]>('/challenges'), request<EventConfig[]>('/events'), request<Submission[]>('/submissions'), request<AdminUser[]>('/users'), request<OrgUnit[]>('/org-units'), request<AdminCapabilityBundle>('/admin/capabilities'), request<Announcement[]>('/announcements'), request<Audit[]>('/audits'), request<QueueStats>('/admin/grading-queue'),
+    const [loadedOverview, loadedChallenges, loadedEvents, loadedSubmissions, loadedUsers, loadedOrgUnits, loadedCapabilities, loadedAnnouncements, loadedAudits, loadedQueue, loadedRuntime] = await Promise.all([
+      request<Overview>('/admin/overview'), request<Challenge[]>('/challenges'), request<EventConfig[]>('/events'), request<Submission[]>('/submissions'), request<AdminUser[]>('/users'), request<OrgUnit[]>('/org-units'), request<AdminCapabilityBundle>('/admin/capabilities'), request<Announcement[]>('/announcements'), request<Audit[]>('/audits'), request<QueueStats>('/admin/grading-queue'), adminAccess.level === 'GLOBAL' ? request<CodeAgentRuntimeConfig>('/admin/code-agent-runtime') : Promise.resolve(null),
     ]);
     setOverview(loadedOverview);
     setChallenges(loadedChallenges);
@@ -426,6 +486,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     setAnnouncements(loadedAnnouncements);
     setAudits(loadedAudits);
     setQueue(loadedQueue);
+    setCodeAgentRuntime(loadedRuntime);
     const firstActiveChallenge = loadedChallenges.find((challenge) => challenge.status !== 'ARCHIVED') ?? loadedChallenges[0];
     if (!selectedChallengeId && firstActiveChallenge) setSelectedChallengeId(firstActiveChallenge.id);
     if (!participantEventId && loadedEvents[0]) setParticipantEventId(loadedEvents[0].id);
@@ -471,12 +532,21 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     setCapabilitySubjectIds(capabilityUsers.map((user) => user.id));
   }
 
+  function submissionContractFromDraft(form: ChallengeDraft): Record<string, unknown> | undefined {
+    if (!form.submissionContractJson.trim()) return undefined;
+    const parsed = JSON.parse(form.submissionContractJson) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('交付目录规范必须是 JSON 对象');
+    return parsed as Record<string, unknown>;
+  }
+
   function buildVersion(form: ChallengeDraft, challengeId: string, versionNumber: number): ChallengeVersion {
     const allowedSources: Source[] = [form.allowUpload ? 'UPLOAD' : null, form.allowGit ? 'GIT_REF' : null].filter((source): source is Source => source !== null);
     const upload = form.allowUpload ? { formats: ['zip'], maxBytes: 50 * 1024 * 1024, maxFiles: 2000 } : undefined;
     const git = form.allowGit && form.repository ? { provider: 'GITLAB', repository: form.repository, branchTemplate: form.branchTemplate || 'drill/{subjectId}', pinAt: 'SUBMIT', credentialRef: 'gitlab-grader-readonly' } : undefined;
+    const submissionContractDefinition = submissionContractFromDraft(form);
+    const contracts = evaluationContracts(form.evaluationEngineMode);
     return {
-    id: `${challengeId}@${versionNumber}`, challengeId, version: versionNumber, title: form.title.trim(), description: sanitizeRichText(form.description).trim(), objectives: lines(form.objectives), requirements: lines(form.requirements), constraints: lines(form.constraints), deliverables: lines(form.deliverables), tags: lines(form.tags), estimatedMinutes: Number(form.estimatedMinutes) || 45, zone: form.zone, languagePolicy: { mode: 'fixed', languages: lines(form.languages) }, deliveryPolicy: { allowedSources, ...(upload ? { upload } : {}), ...(git ? { git } : {}) }, rubricVersion: form.rubricVersion || '1.0', submissionContract: form.submissionContract.trim(), status: 'DRAFT',
+    id: `${challengeId}@${versionNumber}`, challengeId, version: versionNumber, title: form.title.trim(), description: sanitizeRichText(form.description).trim(), objectives: lines(form.objectives), requirements: lines(form.requirements), constraints: lines(form.constraints), deliverables: lines(form.deliverables), tags: lines(form.tags), estimatedMinutes: Number(form.estimatedMinutes) || 45, zone: form.zone, languagePolicy: { mode: 'fixed', languages: lines(form.languages) }, deliveryPolicy: { allowedSources, ...(upload ? { upload } : {}), ...(git ? { git } : {}) }, rubricVersion: form.rubricVersion || '1.0', submissionContract: form.submissionContract.trim(), ...(submissionContractDefinition ? { submissionContractDefinition } : {}), status: 'DRAFT',
       evaluationEngine: {
         id: form.evaluationEngineId.trim() || `${challengeId}-evaluator`,
         version: form.evaluationEngineVersion.trim() || '1.0.0',
@@ -490,8 +560,9 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
             params: Object.fromEntries(Object.entries(form.executorParams).filter(([, value]) => String(value ?? '').trim()).map(([key, value]) => [key, String(value).trim()])),
           },
         } : {}),
-        input: { format: 'JSON', schemaVersion: '1.0', contractPath: form.evaluationInputContract.trim() || 'contracts/evaluation-input.schema.json' },
-        output: { format: 'JSON', schemaVersion: '1.0', contractPath: form.evaluationOutputContract.trim() || 'contracts/evaluation-result.schema.json' },
+        ...(form.evaluationEngineMode !== 'EXTERNAL_CLI' ? { agent: { instructionPath: form.agentInstructionPath.trim(), skillPaths: lines(form.agentSkillPaths) } } : {}),
+        input: { format: 'JSON', schemaVersion: form.evaluationEngineMode === 'EXTERNAL_CLI' ? '1.0' : '1.1', contractPath: contracts.evaluationInputContract },
+        output: { format: 'JSON', schemaVersion: '1.0', contractPath: contracts.evaluationOutputContract },
       },
     };
   }
@@ -503,6 +574,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     if (!challengeForm.allowUpload && !challengeForm.allowGit) { setMessage('至少选择一种提交方式'); return; }
     if (!lines(challengeForm.languages).length) { setMessage('至少填写一种支持的编程语言'); return; }
     if (challengeForm.allowGit && !/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+$/.test(challengeForm.repository.trim())) { setMessage('Git 仓库路径格式不正确'); return; }
+    try { submissionContractFromDraft(challengeForm); } catch (error) { setMessage(error instanceof Error ? error.message : '交付目录规范格式不正确'); return; }
     if (!localEngineComplete(challengeForm)) { setMessage(challengeForm.evaluationEngineMode === 'PACKAGED' ? '请先上传评测引擎包' : '请选择内置执行器并填写其必填参数'); return; }
     const version = buildVersion(challengeForm, challengeForm.id.trim(), 1);
     await runAction(() => request('/challenges', { method: 'POST', body: JSON.stringify({ id: challengeForm.id.trim(), ownerOrgPath: '/', origin: challengeForm.category === 'HARD_PROBLEM' ? 'BOUNTY' : 'OFFICIAL', category: challengeForm.category, status: 'DRAFT', versions: [version], actorId: 'admin-local' }) }), '赛题草稿已创建');
@@ -510,6 +582,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   }
 
   function localEngineComplete(form: ChallengeDraft): boolean {
+    if (form.evaluationEngineMode !== 'EXTERNAL_CLI' && (!form.agentInstructionPath.trim() || !lines(form.agentSkillPaths).length)) return false;
     if (form.evaluationEngineMode === 'PACKAGED') return Boolean(form.enginePackage?.packageHash);
     if (form.evaluationEngineMode !== 'PLATFORM_LOCAL') return true;
     const selected = builtInExecutors.find((item) => item.id === form.executorId);
@@ -535,7 +608,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
         evaluationEngineVersion: uploaded.engine.version,
         enginePackage: { packageHash: uploaded.packageHash, size: uploaded.size, fileName: uploaded.fileName },
         enginePackageSummary: `${uploaded.fileName ?? file.name} · ${(uploaded.size / 1024).toFixed(1)} KB · ${uploaded.packageHash.slice(0, 12)}…`,
-        evaluationInputContract: 'contracts/engine-invocation.schema.json',
+        ...evaluationContracts('PACKAGED'),
       });
       setMessage(`引擎包已入库：${uploaded.engine.id}@${uploaded.engine.version}，入口 ${uploaded.runtime.entrypoint}`);
     } catch (error) {
@@ -550,6 +623,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     if (!richTextPreview(versionForm.description)) { setMessage('请填写赛题详情'); return; }
     if (!lines(versionForm.languages).length) { setMessage('至少填写一种支持的编程语言'); return; }
     if (versionForm.allowGit && !/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+$/.test(versionForm.repository.trim())) { setMessage('Git 仓库路径格式不正确'); return; }
+    try { submissionContractFromDraft(versionForm); } catch (error) { setMessage(error instanceof Error ? error.message : '交付目录规范格式不正确'); return; }
     if (!localEngineComplete(versionForm)) { setMessage(versionForm.evaluationEngineMode === 'PACKAGED' ? '请先上传评测引擎包' : '请选择内置执行器并填写其必填参数'); return; }
     if (versionEditId) {
       const current = selectedChallenge.versions.find((item) => item.id === versionEditId);
@@ -581,8 +655,8 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     if (success) { setEventForm(null); setEventEditId(''); }
   }
 
-  async function eventAction(event: EventConfig, action: 'start-grading' | 'execute-local' | 'close' | 'reveal') {
-    if (action === 'start-grading' || action === 'execute-local') {
+  async function eventAction(event: EventConfig, action: 'start-grading' | 'close' | 'reveal') {
+    if (action === 'start-grading') {
       setSelectedGradingIds([]);
       setSection('grading');
       setMessage(`请在评测中心选择「${versionTitle(event.challengeVersion, challenges)}」的提交`);
@@ -611,26 +685,26 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     if (!submissionIds.length) { setMessage('请选择要评测的提交'); return; }
     await runAction(async () => {
       const batch = await request<EvaluationInputBatch>(`/events/${eventId}/grading-input`, { method: 'POST', body: JSON.stringify({ submissionIds, actorId: 'admin-local' }) });
-      setGradingInputText(JSON.stringify(batch, null, 2));
-      setSection('grading');
-    }, `已生成 ${submissionIds.length} 份评测输入`);
+      const blob = new Blob([JSON.stringify(batch, null, 2)], { type: 'application/json' });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = `evaluation-task-${eventId}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    }, `已导出 ${submissionIds.length} 份提交的评测任务`);
   }
 
   async function startSelectedGrading(eventId: string) {
     const submissionIds = selectedGradingIds.filter((id) => pendingSubmissions.some((submission) => submission.id === id && submission.eventId === eventId));
     if (!submissionIds.length) { setMessage('请选择要评测的提交'); return; }
-    await runAction(() => request(`/events/${eventId}/start-grading`, { method: 'POST', body: JSON.stringify({ submissionIds, actorId: 'admin-local' }) }), `已安排 ${submissionIds.length} 份提交进入评测队列`);
+    await runAction(() => request(`/events/${eventId}/start-grading`, { method: 'POST', body: JSON.stringify({ submissionIds, actorId: 'admin-local' }) }), `已创建评测批次，共 ${submissionIds.length} 份提交`);
   }
 
-  async function executeSelectedGrading(eventId: string) {
-    const submissionIds = selectedGradingIds.filter((id) => pendingSubmissions.some((submission) => submission.id === id && submission.eventId === eventId));
-    if (!submissionIds.length) { setMessage('请选择要执行的提交'); return; }
-    await runAction(() => request(`/events/${eventId}/execute-local`, { method: 'POST', body: JSON.stringify({ submissionIds, actorId: 'admin-local' }) }), `已完成 ${submissionIds.length} 份提交的线上评测`);
-  }
-
-  async function submissionAction(submission: Submission, action: 'trigger' | 'execute') {
-    const path = action === 'trigger' ? `/submissions/${submission.id}/start-grading` : `/grading-runs/${submission.gradingRunId}/execute`;
-    await runAction(() => request(path, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), action === 'trigger' ? '已进入评测队列' : '线上评测已完成');
+  async function submissionAction(submission: Submission) {
+    await runAction(() => request(`/submissions/${submission.id}/start-grading`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '已创建单人评测批次');
   }
 
   async function regradeSubmission(submission: Submission) {
@@ -663,11 +737,23 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     setMessage(`已下载 ${anchor.download}`);
   }
 
-  async function importResult() {
+  async function importResult(): Promise<boolean> {
     try {
       const result = JSON.parse(importText) as Record<string, unknown>;
-      if (await runAction(() => request('/grading-results:import', { method: 'POST', body: JSON.stringify({ result, actorId: 'admin-local' }) }), '线下评测结果已导入')) setImportText('');
-    } catch (error) { setMessage(error instanceof Error ? error.message : '评测结果格式不正确'); }
+      const success = await runAction(() => request('/grading-results:import', { method: 'POST', body: JSON.stringify({ result, actorId: 'admin-local' }) }), '评测结果已导入');
+      if (success) setImportText('');
+      return success;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '评测结果格式不正确');
+      return false;
+    }
+  }
+
+  async function saveCodeAgentRuntime(input: Pick<CodeAgentRuntimeConfig, 'enabled' | 'commandLine' | 'prompt' | 'timeoutSeconds'>) {
+    await runAction(
+      () => request('/admin/code-agent-runtime', { method: 'PUT', body: JSON.stringify(input) }),
+      'Code Agent 运行配置已保存',
+    );
   }
 
   async function createAnnouncement() {
@@ -699,6 +785,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     { id: 'participants', label: '参训名单', icon: '♙' },
     { id: 'capabilities', label: 'AI 能力画像', icon: '◎', count: adminCapabilities?.selectedCount },
     { id: 'grading', label: '评测中心', icon: '✓', count: overview?.grading.queuedOrRunning },
+    ...(adminAccess.level === 'GLOBAL' ? [{ id: 'evaluation-runtime' as const, label: '评测环境', icon: '⌘' }] : []),
     { id: 'announcements', label: '公告管理', icon: '✦', count: overview?.announcements },
     { id: 'audit', label: '审计日志', icon: '≡' },
   ];
@@ -717,7 +804,8 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
         {section === 'events' && <EventsSection events={events} challenges={challenges} overview={overview} users={users} orgUnits={orgUnits} eventForm={eventForm} setEventForm={setEventForm} eventEditId={eventEditId} onNew={() => { setEventEditId(''); setEventForm(blankEvent(publishedVersions[0]?.id ?? '', challenges)); }} onEdit={(event) => { setEventEditId(event.id); setEventForm(draftFromEvent(event)); }} onCreate={() => void saveEvent()} onAction={(event, action) => void eventAction(event, action)} busy={busy} />}
         {section === 'participants' && <ParticipantSection events={events} eventId={participantEventId} setEventId={setParticipantEventId} text={participantText} setText={setParticipantText} onLoad={(id) => void loadParticipants(id)} onSave={() => void saveParticipants()} busy={busy} />}
         {section === 'capabilities' && <CapabilityAdminSection data={adminCapabilities} users={capabilityUsers} orgUnits={orgUnits} orgPath={capabilityOrgPath} selectedIds={capabilitySubjectIds} onOrgPathChange={(path) => { setCapabilityOrgPath(path); setCapabilitySubjectIds([]); }} onToggle={toggleCapabilitySubject} onSelectAll={selectAllCapabilityUsers} onClear={() => setCapabilitySubjectIds([])} onViewAll={() => void loadAdminCapabilities('ALL')} onViewSelected={() => void loadAdminCapabilities('SELECTED')} busy={busy} />}
-        {section === 'grading' && <GradingSection submissions={gradingSubmissions} events={events} challenges={challenges} users={users} queue={queue} selectedIds={selectedGradingIds} inputText={gradingInputText} importText={importText} setInputText={setGradingInputText} setImportText={setImportText} onToggle={toggleGradingSelection} onSelectEvent={selectEventSubmissions} onClearEvent={clearEventSubmissions} onPrepareInput={(eventId) => void prepareEvaluationInput(eventId)} onStartSelected={(eventId) => void startSelectedGrading(eventId)} onExecuteSelected={(eventId) => void executeSelectedGrading(eventId)} onSubmission={(submission, action) => void submissionAction(submission, action)} onRegrade={(submission) => void regradeSubmission(submission)} onDownload={(submission) => void downloadSubmissionArtifact(submission).catch((error) => setMessage(error instanceof Error ? error.message : '交付件下载失败'))} onImport={() => void importResult()} busy={busy} />}
+        {section === 'grading' && <GradingSection submissions={gradingSubmissions} events={events} challenges={challenges} users={users} queue={queue} selectedIds={selectedGradingIds} importText={importText} setImportText={setImportText} onToggle={toggleGradingSelection} onSelectEvent={selectEventSubmissions} onClearEvent={clearEventSubmissions} onPrepareInput={(eventId) => void prepareEvaluationInput(eventId)} onStartSelected={(eventId) => void startSelectedGrading(eventId)} onSubmission={(submission) => void submissionAction(submission)} onRegrade={(submission) => void regradeSubmission(submission)} onDownload={(submission) => void downloadSubmissionArtifact(submission).catch((error) => setMessage(error instanceof Error ? error.message : '交付件下载失败'))} onImport={importResult} busy={busy} />}
+        {section === 'evaluation-runtime' && codeAgentRuntime && <CodeAgentRuntimeSection config={codeAgentRuntime} busy={busy} onSave={(input) => void saveCodeAgentRuntime(input)} />}
         {section === 'announcements' && <AnnouncementSection announcements={announcements} form={announcementForm} setForm={setAnnouncementForm} onCreate={() => void createAnnouncement()} onDelete={(id) => void runAction(() => request(`/announcements/${id}`, { method: 'DELETE', body: JSON.stringify({ actorId: 'admin-local' }) }), '公告已删除')} busy={busy} />}
         {section === 'audit' && <AuditSection audits={audits} />}
       </section>
@@ -975,6 +1063,64 @@ function ExecutorPicker({ form, setForm, executors }: { form: ChallengeDraft; se
   </>;
 }
 
+type DeliveryRule = { path: string; type: 'markdown' | 'source' | 'directory' | 'text' | 'json' | 'yaml'; minFiles?: number; allowedExtensions?: string[]; [key: string]: unknown };
+type DeliveryContract = {
+  schemaVersion: '1.1';
+  root?: { mode: 'ARCHIVE_ROOT' | 'SINGLE_DIRECTORY'; directoryName?: string };
+  required: DeliveryRule[];
+  optional?: DeliveryRule[];
+  forbidden: string[];
+  allowedPaths?: string[];
+  allowAdditionalPaths?: boolean;
+  maxDepth?: number;
+  maxFiles?: number;
+  [key: string]: unknown;
+};
+
+function DeliveryContractEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  let contract: DeliveryContract | null = null;
+  let invalid = false;
+  if (value.trim()) {
+    try { contract = JSON.parse(value) as DeliveryContract; } catch { invalid = true; }
+  }
+  const save = (next: DeliveryContract) => onChange(JSON.stringify(next, null, 2));
+  const updateRule = (index: number, patch: Partial<DeliveryRule>) => {
+    if (!contract) return;
+    save({ ...contract, required: contract.required.map((rule, current) => current === index ? { ...rule, ...patch } : rule) });
+  };
+  const rootMode = contract?.root?.mode ?? 'ARCHIVE_ROOT';
+  return <div className="delivery-contract-editor">
+    <div className="admin-card-heading"><div><strong>交付目录规范</strong><small>不符合目录规范的 ZIP 或 Git 版本不能提交。</small></div><div className="contract-presets"><button type="button" className="small" onClick={() => onChange(SOURCE_DELIVERY_CONTRACT)}>源码项目</button><button type="button" className="small" onClick={() => onChange(SKILLS_DELIVERY_CONTRACT)}>Skills 交付</button></div></div>
+    {!value.trim() && <div className="contract-empty"><span>未配置交付目录规范</span><button type="button" className="secondary-button" onClick={() => onChange(SOURCE_DELIVERY_CONTRACT)}>配置规范</button></div>}
+    {invalid && <div className="contract-invalid">目录规范 JSON 格式不正确</div>}
+    {contract && !invalid && <>
+      <div className="contract-settings-grid">
+        <label>压缩包根目录<select value={rootMode} onChange={(event) => save({ ...contract!, root: { mode: event.target.value as 'ARCHIVE_ROOT' | 'SINGLE_DIRECTORY', ...(event.target.value === 'SINGLE_DIRECTORY' ? { directoryName: contract!.root?.directoryName ?? 'delivery' } : {}) } })}><option value="ARCHIVE_ROOT">文件直接位于根目录</option><option value="SINGLE_DIRECTORY">仅允许一个顶层目录</option></select></label>
+        {rootMode === 'SINGLE_DIRECTORY' && <label>顶层目录名称<input className="mono-value" value={contract.root?.directoryName ?? ''} onChange={(event) => save({ ...contract!, root: { mode: 'SINGLE_DIRECTORY', directoryName: event.target.value } })} /></label>}
+        <label>最多文件数<input type="number" min="1" max="10000" value={contract.maxFiles ?? 1000} onChange={(event) => save({ ...contract!, maxFiles: Number(event.target.value) || 1 })} /></label>
+        <label>最大目录层级<input type="number" min="1" max="30" value={contract.maxDepth ?? 12} onChange={(event) => save({ ...contract!, maxDepth: Number(event.target.value) || 1 })} /></label>
+        <label className="check-label"><input type="checkbox" checked={contract.allowAdditionalPaths !== false} onChange={(event) => save({ ...contract!, allowAdditionalPaths: event.target.checked })} /> 允许规范之外的文件</label>
+      </div>
+      <div className="contract-rule-heading"><strong>必需文件与目录</strong><button type="button" className="small" onClick={() => save({ ...contract!, required: [...(contract!.required ?? []), { path: '', type: 'text' }] })}>添加规则</button></div>
+      <div className="contract-rule-table">
+        <div className="contract-rule-row contract-rule-header"><span>路径或匹配规则</span><span>类型</span><span>最少文件</span><span>允许扩展名</span><span /></div>
+        {(contract.required ?? []).map((rule, index) => <div className="contract-rule-row" key={index}>
+          <input className="mono-value" value={rule.path} onChange={(event) => updateRule(index, { path: event.target.value })} />
+          <select value={rule.type} onChange={(event) => updateRule(index, { type: event.target.value as DeliveryRule['type'] })}><option value="directory">目录</option><option value="markdown">Markdown</option><option value="source">源代码</option><option value="text">文本</option><option value="json">JSON</option><option value="yaml">YAML</option></select>
+          <input type="number" min="1" value={rule.minFiles ?? ''} onChange={(event) => updateRule(index, { minFiles: event.target.value ? Number(event.target.value) : undefined })} disabled={rule.type !== 'directory' && !rule.path.includes('*')} />
+          <input className="mono-value" value={(rule.allowedExtensions ?? []).join(', ')} onChange={(event) => { const extensions = event.target.value.split(',').map((item) => item.trim()).filter(Boolean); updateRule(index, { allowedExtensions: extensions.length ? extensions : undefined }); }} />
+          <button type="button" className="quiet danger-text" onClick={() => save({ ...contract!, required: contract!.required.filter((_, current) => current !== index) })}>删除</button>
+        </div>)}
+      </div>
+      <div className="contract-text-grid">
+        <label>禁止路径<textarea className="mono-value" rows={4} value={(contract.forbidden ?? []).join('\n')} onChange={(event) => save({ ...contract!, forbidden: lines(event.target.value) })} /></label>
+        {contract.allowAdditionalPaths === false && <label>允许路径<textarea className="mono-value" rows={4} value={(contract.allowedPaths ?? []).join('\n')} onChange={(event) => save({ ...contract!, allowedPaths: lines(event.target.value) })} /></label>}
+      </div>
+    </>}
+    <details className="contract-json"><summary>高级配置</summary><label>目录规范 JSON<textarea className="mono-value" value={value} onChange={(event) => onChange(event.target.value)} rows={14} /></label></details>
+  </div>;
+}
+
 function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, executors, busy, title }: { form: ChallengeDraft; setForm: (form: ChallengeDraft) => void; onCancel: () => void; onSave: () => void; onUploadPackage: (file: File) => Promise<void>; executors: BuiltInExecutor[]; busy: boolean; title: string }) {
   const update = <K extends keyof ChallengeDraft>(key: K, value: ChallengeDraft[K]) => setForm({ ...form, [key]: value });
   const creatingChallenge = title === '创建赛题草稿';
@@ -989,13 +1135,34 @@ function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, exe
       <label className="span-2 rich-field"><span>赛题详情</span><RichTextEditor value={form.description} onChange={(value) => update('description', value)} /></label>
       <label>训战目标<textarea value={form.objectives} onChange={(event) => update('objectives', event.target.value)} rows={4} /></label>
       <label>赛题要求<textarea value={form.requirements} onChange={(event) => update('requirements', event.target.value)} rows={4} /></label>
-      <label>约束与评估<textarea value={form.constraints} onChange={(event) => update('constraints', event.target.value)} rows={4} /></label>
+      <label>约束与评测<textarea value={form.constraints} onChange={(event) => update('constraints', event.target.value)} rows={4} /></label>
       <label>交付件<textarea value={form.deliverables} onChange={(event) => update('deliverables', event.target.value)} rows={4} /></label>
       <label>标签<textarea value={form.tags} onChange={(event) => update('tags', event.target.value)} rows={3} /></label>
       <label>支持的编程语言<textarea value={form.languages} onChange={(event) => update('languages', event.target.value)} rows={3} /></label>
     </div>
-     <div className="delivery-policy-editor"><div><strong>提交方式</strong><small>配置员工可用的提交方式。</small></div><label className="check-label"><input type="checkbox" checked={form.allowUpload} onChange={(event) => update('allowUpload', event.target.checked)} /> 上传 ZIP</label><label className="check-label"><input type="checkbox" checked={form.allowGit} onChange={(event) => update('allowGit', event.target.checked)} /> Git 仓库路径</label>{form.allowGit && <><label>Git 仓库路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label></>}<label>评分标准版本<input value={form.rubricVersion} onChange={(event) => update('rubricVersion', event.target.value)} /></label></div>
-     <div className="evaluation-engine-editor"><div><strong>评测引擎</strong><small>每个赛题版本独立配置评测引擎，管理员按输入契约执行并上传标准结果。</small></div><div className="form-grid"><label>引擎标识<input value={form.evaluationEngineId} onChange={(event) => update('evaluationEngineId', event.target.value)} placeholder="例如 parking-fee-evaluator" /></label><label>引擎版本<input value={form.evaluationEngineVersion} onChange={(event) => update('evaluationEngineVersion', event.target.value)} /></label><label>执行方式<select value={form.evaluationEngineMode} onChange={(event) => update('evaluationEngineMode', event.target.value as ChallengeDraft['evaluationEngineMode'])}><option value="EXTERNAL_CLI">管理员线下评测（结果录入）</option><option value="PLATFORM_LOCAL">平台内置执行器</option><option value="PACKAGED">上传评测引擎包</option></select></label><label>输入契约路径<input value={form.evaluationInputContract} onChange={(event) => update('evaluationInputContract', event.target.value)} /></label><label className="span-2">输出契约路径<input value={form.evaluationOutputContract} onChange={(event) => update('evaluationOutputContract', event.target.value)} /></label>{form.evaluationEngineMode === 'PACKAGED' && <label className="span-2">评测引擎包<span className="field-hint">zip：engine.json + 判题脚本 + 隐藏测试 + 提交契约</span><input type="file" accept=".zip" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUploadPackage(file); event.target.value = ''; }} />{form.enginePackageSummary ? <small className="engine-package-summary">已绑定：{form.enginePackageSummary}</small> : <small className="field-hint">上传后平台会校验 engine.json 并按内容哈希固化；引擎包变更等于判据变更，历史成绩需要重跑。</small>}</label>}{form.evaluationEngineMode === 'PLATFORM_LOCAL' && <ExecutorPicker form={form} setForm={setForm} executors={executors} />}</div><small className="field-hint">选择「平台本地执行器」后，训战可使用自动评估或管理员安排；选择「管理员本地命令」的赛题只能使用线下结果录入。</small></div>
+     <div className="delivery-policy-editor"><div><strong>提交方式</strong></div><label className="check-label"><input type="checkbox" checked={form.allowUpload} onChange={(event) => update('allowUpload', event.target.checked)} /> 上传 ZIP</label><label className="check-label"><input type="checkbox" checked={form.allowGit} onChange={(event) => update('allowGit', event.target.checked)} /> Git 仓库路径</label>{form.allowGit && <><label>Git 仓库路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label></>}<label>评分标准版本<input value={form.rubricVersion} onChange={(event) => update('rubricVersion', event.target.value)} /></label></div>
+     <DeliveryContractEditor value={form.submissionContractJson} onChange={(value) => update('submissionContractJson', value)} />
+     <div className="evaluation-engine-editor">
+       <div><strong>评测引擎</strong></div>
+       <div className="form-grid">
+         <label>引擎标识<input value={form.evaluationEngineId} onChange={(event) => update('evaluationEngineId', event.target.value)} /></label>
+         <label>引擎版本<input value={form.evaluationEngineVersion} onChange={(event) => update('evaluationEngineVersion', event.target.value)} /></label>
+         <label>执行方式<select value={form.evaluationEngineMode} onChange={(event) => { const mode = event.target.value as ChallengeDraft['evaluationEngineMode']; setForm({ ...form, evaluationEngineMode: mode, ...evaluationContracts(mode) }); }}><option value="EXTERNAL_CLI">外部评测结果导入</option><option value="PLATFORM_LOCAL">Code Agent + 内置执行器</option><option value="PACKAGED">Code Agent + 引擎包</option></select></label>
+         <div className="evaluation-contract-summary span-2">
+           <div><strong>评测协议</strong><span>{form.evaluationEngineMode === 'EXTERNAL_CLI' ? '评测任务 → 评测结果' : 'Code Agent 批次 → 评测结果'}</span></div>
+           <dl>
+             <div><dt>输入</dt><dd className="mono-value">{form.evaluationInputContract}</dd></div>
+             <div><dt>输出</dt><dd className="mono-value">{form.evaluationOutputContract}</dd></div>
+           </dl>
+         </div>
+         {form.evaluationEngineMode !== 'EXTERNAL_CLI' && <>
+           <label>评测指令路径<input className="mono-value" value={form.agentInstructionPath} onChange={(event) => update('agentInstructionPath', event.target.value)} /><small className="field-hint">相对于评测引擎根目录。</small></label>
+           <label>Skills 路径<textarea className="mono-value" value={form.agentSkillPaths} onChange={(event) => update('agentSkillPaths', event.target.value)} rows={3} /><small className="field-hint">每行一个目录；目录内必须包含 SKILL.md。</small></label>
+         </>}
+         {form.evaluationEngineMode === 'PACKAGED' && <label className="span-2">评测引擎包<span className="field-hint">ZIP 根目录包含 engine.json、instruction.md、Skills、评测入口和评测资产。</span><input type="file" accept=".zip" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUploadPackage(file); event.target.value = ''; }} />{form.enginePackageSummary ? <small className="engine-package-summary">已绑定：{form.enginePackageSummary}</small> : null}</label>}
+         {form.evaluationEngineMode === 'PLATFORM_LOCAL' && <ExecutorPicker form={form} setForm={setForm} executors={executors} />}
+       </div>
+     </div>
     <div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy} onClick={onSave}>{busy ? '保存中…' : '保存草稿'}</button></div>
   </section>;
 }
@@ -1015,7 +1182,7 @@ function EventEditorLegacy({ form, setForm, challenges, onCancel, onSave, busy }
   return <section className="panel admin-editor"><div className="admin-card-heading"><div><p className="kicker">场次草稿</p><h3>创建训战场次</h3></div><button className="quiet" onClick={onCancel}>取消</button></div><div className="form-grid"><label>场次 ID<input value={form.id} onChange={(event) => update('id', event.target.value)} /></label><label>赛题版本<select value={form.challengeVersion} onChange={(event) => { const challengeVersion = event.target.value; setForm({ ...form, challengeVersion, trigger: engineSupportsPlatformExecution(challengeVersion, challenges) ? form.trigger : 'IMPORT' }); }}>{versions.map((version) => <option key={version.id} value={version.id}>{version.title} · v{version.version}</option>)}</select></label><label>提交方式<select value={form.submissionSource} onChange={(event) => update('submissionSource', event.target.value as Source)}><option value="UPLOAD">上传 ZIP</option><option value="GIT_REF">Git 仓库路径</option></select></label><label>评测方式<select value={form.trigger} onChange={(event) => { const trigger = event.target.value as Trigger; setForm({ ...form, trigger, pinAt: trigger === 'AUTO' ? 'SUBMIT' : form.pinAt }); }}>{engineSupportsPlatformExecution(form.challengeVersion, challenges) && <><option value="AUTO">自动评测</option><option value="MANUAL">手动触发</option></>}<option value="IMPORT">线下评测</option></select>{!engineSupportsPlatformExecution(form.challengeVersion, challenges) && <small className="field-hint">该赛题的评测引擎为管理员本地命令，只能使用线下结果录入。</small>}</label><label>结果公布<select value={form.reveal} onChange={(event) => update('reveal', event.target.value as EventDraft['reveal'])}><option value="IMMEDIATE">评测后公布</option><option value="ON_RELEASE">公布后可见</option></select></label><label>场次类型<select value={form.mode} onChange={(event) => update('mode', event.target.value as EventDraft['mode'])}><option value="WINDOW">开放窗口</option><option value="LIVE">集中训战</option></select></label><label>开始时间<input type="datetime-local" value={form.startsAt} onChange={(event) => update('startsAt', event.target.value)} /></label><label>结束时间<input type="datetime-local" value={form.endsAt} onChange={(event) => update('endsAt', event.target.value)} /></label>{form.submissionSource === 'GIT_REF' && <><label>Git 仓库路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label><label>Git 版本固定时点<select value={form.pinAt} disabled={form.trigger === 'AUTO'} onChange={(event) => update('pinAt', event.target.value as EventDraft['pinAt'])}><option value="SUBMIT">提交时锁定</option><option value="DEADLINE">截止时锁定</option></select><small className="field-hint">自动评测在提交时锁定版本。</small></label></>}</div><div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy || !versions.length} onClick={onSave}>{busy ? '创建中…' : '创建场次'}</button></div></section>;
 }
 
-function EventsSection({ events, challenges, overview, users, orgUnits, eventForm, setEventForm, eventEditId, onNew, onEdit, onCreate, onAction, busy }: { events: EventConfig[]; challenges: Challenge[]; overview: Overview | null; users: AdminUser[]; orgUnits: OrgUnit[]; eventForm: EventDraft | null; setEventForm: (form: EventDraft | null) => void; eventEditId: string; onNew: () => void; onEdit: (event: EventConfig) => void; onCreate: () => void; onAction: (event: EventConfig, action: 'start-grading' | 'execute-local' | 'close' | 'reveal') => void; busy: boolean }) {
+function EventsSection({ events, challenges, overview, users, orgUnits, eventForm, setEventForm, eventEditId, onNew, onEdit, onCreate, onAction, busy }: { events: EventConfig[]; challenges: Challenge[]; overview: Overview | null; users: AdminUser[]; orgUnits: OrgUnit[]; eventForm: EventDraft | null; setEventForm: (form: EventDraft | null) => void; eventEditId: string; onNew: () => void; onEdit: (event: EventConfig) => void; onCreate: () => void; onAction: (event: EventConfig, action: 'start-grading' | 'close' | 'reveal') => void; busy: boolean }) {
   return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">训战管理</p><h2>训战管理</h2></div><button className="primary compact" onClick={onNew}>＋ 新建训战</button></div>{eventForm && <EventEditor form={eventForm} setForm={setEventForm} challenges={challenges} users={users} orgUnits={orgUnits} editing={Boolean(eventEditId)} onCancel={() => setEventForm(null)} onSave={onCreate} busy={busy} />}{!eventForm && <div className="event-admin-list">{events.map((event) => { const stat = overview?.eventStats.find((item) => item.eventId === event.id); return <article className="panel event-admin-card" key={event.id}><div className="event-admin-main"><div className="event-badge">{event.submissionSource === 'GIT_REF' ? '⌘' : '↑'}</div><div><div className="event-admin-title"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><span className={`status-badge status-${event.status.toLowerCase()}`}>{statusLabel(event.status)}</span></div><small>{modeLabel(event.mode)} · {sourceLabel(event.submissionSource)} · {triggerLabel(event.trigger)} · {revealLabel(event.reveal)}</small><div className="event-admin-schedule"><strong>开放时间</strong><span>{eventScheduleLabel(event)}</span></div><div className="event-admin-meta"><span>{accessScopeLabel(event)}</span><span>{stat?.submissionCount ?? 0} 份提交</span><span>{stat?.pendingCount ?? 0} 待处理</span>{event.deliveryConfig?.repository && <span>{event.deliveryConfig.repository}</span>}</div></div></div><div className="event-admin-actions">{event.status !== 'RELEASED' && <button className="small" disabled={busy} onClick={() => onEdit(event)}>配置训战</button>}{event.status === 'OPEN' && (event.trigger === 'MANUAL' || event.trigger === 'IMPORT') && <button className="small" disabled={busy} onClick={() => onAction(event, 'start-grading')}>选择评测提交</button>}{event.status === 'OPEN' && <button className="small danger" disabled={busy} onClick={() => onAction(event, 'close')}>结束训战</button>}{event.status === 'CLOSED' && <button className="small" disabled={busy} onClick={() => onAction(event, 'reveal')}>公布结果</button>}</div></article>; })}{!events.length && <div className="panel empty">暂无训战</div>}</div>}</section>;
 }
 
@@ -1025,38 +1192,78 @@ function EventEditor({ form, setForm, challenges, users, orgUnits, editing, onCa
   const departments = orgUnits.filter((unit) => unit.id !== 'org-root').sort((a, b) => a.path.localeCompare(b.path));
   const mentors = users.filter((user) => user.status === 'ACTIVE' && user.roles.includes('mentor')).sort((a, b) => a.employeeNo.localeCompare(b.employeeNo));
   const selectMany = (field: 'departmentIds' | 'mentorIds', event: ChangeEvent<HTMLSelectElement>) => update(field, [...event.target.selectedOptions].map((option) => option.value));
-  return <section className="panel admin-editor"><div className="admin-card-heading"><div><p className="kicker">训战配置</p><h3>{editing ? '编辑训战' : '创建训战'}</h3><small>训战开放时间、交付方式和访问范围。</small></div><button className="quiet" onClick={onCancel}>取消</button></div><div className="form-grid"><label>训战 ID<input value={form.id} onChange={(event) => update('id', event.target.value)} disabled={editing} /></label><label>赛题版本<select value={form.challengeVersion} onChange={(event) => { const challengeVersion = event.target.value; setForm({ ...form, challengeVersion, trigger: engineSupportsPlatformExecution(challengeVersion, challenges) ? form.trigger : 'IMPORT' }); }}>{versions.map((version) => <option key={version.id} value={version.id}>{version.title} · v{version.version}</option>)}</select></label><label>提交方式<select value={form.submissionSource} onChange={(event) => update('submissionSource', event.target.value as Source)}><option value="UPLOAD">上传交付件</option><option value="GIT_REF">指定 Git 仓路径</option></select></label><label>评测方式<select value={form.trigger} onChange={(event) => { const trigger = event.target.value as Trigger; setForm({ ...form, trigger, pinAt: trigger === 'AUTO' ? 'SUBMIT' : form.pinAt }); }}>{engineSupportsPlatformExecution(form.challengeVersion, challenges) && <><option value="AUTO">自动评测</option><option value="MANUAL">手动触发</option></>}<option value="IMPORT">线下评测</option></select>{!engineSupportsPlatformExecution(form.challengeVersion, challenges) && <small className="field-hint">该赛题的评测引擎为管理员本地命令，只能使用线下结果录入。</small>}</label><label>结果公布<select value={form.reveal} onChange={(event) => update('reveal', event.target.value as EventDraft['reveal'])}><option value="IMMEDIATE">评测后公布</option><option value="ON_RELEASE">公布后可见</option></select></label><label>训战类型<select value={form.mode} onChange={(event) => update('mode', event.target.value as EventDraft['mode'])}><option value="WINDOW">开放窗口</option><option value="LIVE">集中训战</option></select></label></div><div className="event-time-config"><div><strong>训战开放时间</strong><span>员工可在该时间窗口内提交交付件。</span></div><div className="form-grid"><label>开始时间 <input required type="datetime-local" value={form.startsAt} onChange={(event) => update('startsAt', event.target.value)} /></label><label>结束时间 <input required type="datetime-local" value={form.endsAt} onChange={(event) => update('endsAt', event.target.value)} /></label></div><small className="field-hint">时间按本地时区保存。</small></div><section className="event-access-config"><div><strong>训战访问范围</strong><span>配置可进入该训战的人员范围。</span></div><div className="form-grid"><label>访问模式<select value={form.accessMode} onChange={(event) => update('accessMode', event.target.value as EventDraft['accessMode'])}><option value="OPEN">全员可见（组织范围内）</option><option value="RESTRICTED">定向访问</option></select></label>{form.accessMode === 'RESTRICTED' && <><label>目标部门<span className="field-hint">可多选</span><select multiple value={form.departmentIds} onChange={(event) => selectMany('departmentIds', event)}>{departments.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><label>指定导师（可选）<span className="field-hint">未指定时对全部导师开放</span><select multiple value={form.mentorIds} onChange={(event) => selectMany('mentorIds', event)}>{mentors.map((user) => <option key={user.id} value={user.id}>{displayPersonName(user.name)} · {user.employeeNo}</option>)}</select></label></>}</div><small className="event-access-help">员工、部门或导师任一范围匹配即可进入。</small></section><div className="form-grid">{form.submissionSource === 'GIT_REF' && <><label>Git 仓路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /><small className="field-hint">GitLab 项目路径。</small></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label><label>Git 版本固定时点<select value={form.pinAt} disabled={form.trigger === 'AUTO'} onChange={(event) => update('pinAt', event.target.value as EventDraft['pinAt'])}><option value="SUBMIT">提交时锁定</option><option value="DEADLINE">截止时锁定</option></select><small className="field-hint">自动评测在提交时锁定版本。</small></label></>}</div><div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy || !versions.length} onClick={onSave}>{busy ? '保存中…' : editing ? '保存训战配置' : '创建训战'}</button></div></section>;
+  return <section className="panel admin-editor"><div className="admin-card-heading"><div><p className="kicker">训战配置</p><h3>{editing ? '编辑训战' : '创建训战'}</h3><small>训战开放时间、交付方式和访问范围。</small></div><button className="quiet" onClick={onCancel}>取消</button></div><div className="form-grid"><label>训战 ID<input value={form.id} onChange={(event) => update('id', event.target.value)} disabled={editing} /></label><label>赛题版本<select value={form.challengeVersion} onChange={(event) => { const challengeVersion = event.target.value; setForm({ ...form, challengeVersion, trigger: engineSupportsPlatformExecution(challengeVersion, challenges) ? form.trigger : 'IMPORT' }); }}>{versions.map((version) => <option key={version.id} value={version.id}>{version.title} · v{version.version}</option>)}</select></label><label>提交方式<select value={form.submissionSource} onChange={(event) => update('submissionSource', event.target.value as Source)}><option value="UPLOAD">上传交付件</option><option value="GIT_REF">指定 Git 仓路径</option></select></label><label>评测方式<select value={form.trigger} onChange={(event) => { const trigger = event.target.value as Trigger; setForm({ ...form, trigger, pinAt: trigger === 'AUTO' ? 'SUBMIT' : form.pinAt }); }}>{engineSupportsPlatformExecution(form.challengeVersion, challenges) && <><option value="AUTO">自动评测</option><option value="MANUAL">管理员发起</option></>}<option value="IMPORT">导入评测结果</option></select>{!engineSupportsPlatformExecution(form.challengeVersion, challenges) && <small className="field-hint">该赛题使用外部评测引擎，评测完成后导入结果文件。</small>}</label><label>结果公布<select value={form.reveal} onChange={(event) => update('reveal', event.target.value as EventDraft['reveal'])}><option value="IMMEDIATE">评测后公布</option><option value="ON_RELEASE">公布后可见</option></select></label><label>训战类型<select value={form.mode} onChange={(event) => update('mode', event.target.value as EventDraft['mode'])}><option value="WINDOW">开放窗口</option><option value="LIVE">集中训战</option></select></label></div><div className="event-time-config"><div><strong>训战开放时间</strong><span>员工可在该时间窗口内提交交付件。</span></div><div className="form-grid"><label>开始时间 <input required type="datetime-local" value={form.startsAt} onChange={(event) => update('startsAt', event.target.value)} /></label><label>结束时间 <input required type="datetime-local" value={form.endsAt} onChange={(event) => update('endsAt', event.target.value)} /></label></div><small className="field-hint">时间按本地时区保存。</small></div><section className="event-access-config"><div><strong>训战访问范围</strong><span>配置可进入该训战的人员范围。</span></div><div className="form-grid"><label>访问模式<select value={form.accessMode} onChange={(event) => update('accessMode', event.target.value as EventDraft['accessMode'])}><option value="OPEN">全员可见（组织范围内）</option><option value="RESTRICTED">定向访问</option></select></label>{form.accessMode === 'RESTRICTED' && <><label>目标部门<span className="field-hint">可多选</span><select multiple value={form.departmentIds} onChange={(event) => selectMany('departmentIds', event)}>{departments.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><label>指定导师（可选）<span className="field-hint">未指定时对全部导师开放</span><select multiple value={form.mentorIds} onChange={(event) => selectMany('mentorIds', event)}>{mentors.map((user) => <option key={user.id} value={user.id}>{displayPersonName(user.name)} · {user.employeeNo}</option>)}</select></label></>}</div><small className="event-access-help">员工、部门或导师任一范围匹配即可进入。</small></section><div className="form-grid">{form.submissionSource === 'GIT_REF' && <><label>Git 仓路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /><small className="field-hint">GitLab 项目路径。</small></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label><label>Git 版本固定时点<select value={form.pinAt} disabled={form.trigger === 'AUTO'} onChange={(event) => update('pinAt', event.target.value as EventDraft['pinAt'])}><option value="SUBMIT">提交时锁定</option><option value="DEADLINE">截止时锁定</option></select><small className="field-hint">自动评测在提交时锁定版本。</small></label></>}</div><div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy || !versions.length} onClick={onSave}>{busy ? '保存中…' : editing ? '保存训战配置' : '创建训战'}</button></div></section>;
 }
 
-function GradingSection({ submissions, events, challenges, users, queue, selectedIds, inputText, importText, setInputText, setImportText, onToggle, onSelectEvent, onClearEvent, onPrepareInput, onStartSelected, onExecuteSelected, onSubmission, onRegrade, onDownload, onImport, busy }: {
+function CodeAgentRuntimeSection({ config, busy, onSave }: {
+  config: CodeAgentRuntimeConfig;
+  busy: boolean;
+  onSave: (input: Pick<CodeAgentRuntimeConfig, 'enabled' | 'commandLine' | 'prompt' | 'timeoutSeconds'>) => void;
+}) {
+  const [form, setForm] = useState({ enabled: config.enabled, commandLine: config.commandLine, prompt: config.prompt, timeoutSeconds: config.timeoutSeconds });
+  useEffect(() => setForm({ enabled: config.enabled, commandLine: config.commandLine, prompt: config.prompt, timeoutSeconds: config.timeoutSeconds }), [config]);
+  const status = form.enabled ? '平台配置已启用' : '使用 Worker 本地配置';
+  return <section className="admin-section">
+    <div className="admin-section-heading"><div><p className="kicker">评测环境</p><h2>Code Agent 运行配置</h2></div><span className={`status-badge ${form.enabled ? 'status-open' : 'status-closed'}`}>{status}</span></div>
+    <section className="panel admin-card code-agent-runtime-card">
+      <div className="runtime-config-heading"><div><strong>批次启动配置</strong><span>新建评测批次会冻结当前配置。</span></div><label className="check-label"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} /> 使用平台配置</label></div>
+      <div className="runtime-config-grid">
+        <label className="span-2">启动命令<textarea className="mono-value" rows={3} value={form.commandLine} onChange={(event) => setForm({ ...form, commandLine: event.target.value })} /><small className="field-hint">可用占位符：{'{{prompt}}'}、{'{{manifestPath}}'}、{'{{batchDir}}'}。命令不经过系统 Shell。</small></label>
+        <label className="span-2">任务指令<textarea rows={5} value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} /><small className="field-hint">Worker 会追加批次清单、Skills、评测引擎和结果写入要求。</small></label>
+        <label>批次超时（秒）<input className="mono-value" type="number" min="60" max="21600" value={form.timeoutSeconds} onChange={(event) => setForm({ ...form, timeoutSeconds: Number(event.target.value) })} /></label>
+        <div className="runtime-config-meta"><span>当前可执行文件</span><strong className="mono-value">{config.executable || '未配置'}</strong><small className="mono-value">配置校验值 {config.configHash.slice(0, 16)}</small></div>
+      </div>
+      <div className="runtime-security-note"><strong>运行凭据</strong><span>模型令牌和访问凭据由 Worker 环境变量提供，不写入启动命令或任务指令。</span></div>
+      <div className="editor-actions"><button className="primary compact" disabled={busy || (form.enabled && !form.commandLine.trim())} onClick={() => onSave(form)}>{busy ? '保存中…' : '保存运行配置'}</button></div>
+    </section>
+  </section>;
+}
+
+function GradingSection({ submissions, events, challenges, users, queue, selectedIds, importText, setImportText, onToggle, onSelectEvent, onClearEvent, onPrepareInput, onStartSelected, onSubmission, onRegrade, onDownload, onImport, busy }: {
   submissions: Submission[];
   events: EventConfig[];
   challenges: Challenge[];
   users: AdminUser[];
   queue: QueueStats | null;
   selectedIds: string[];
-  inputText: string;
   importText: string;
-  setInputText: (text: string) => void;
   setImportText: (text: string) => void;
   onToggle: (submissionId: string) => void;
   onSelectEvent: (eventId: string) => void;
   onClearEvent: (eventId: string) => void;
   onPrepareInput: (eventId: string) => void;
   onStartSelected: (eventId: string) => void;
-  onExecuteSelected: (eventId: string) => void;
-  onSubmission: (submission: Submission, action: 'trigger' | 'execute') => void;
+  onSubmission: (submission: Submission) => void;
   onRegrade: (submission: Submission) => void;
   onDownload: (submission: Submission) => void;
-  onImport: () => void;
+  onImport: () => Promise<boolean>;
   busy: boolean;
 }) {
   const [selectedEventId, setSelectedEventId] = useState('');
   const [expandedSubmissionId, setExpandedSubmissionId] = useState('');
+  const [resultImportOpen, setResultImportOpen] = useState(false);
+  const [resultFileName, setResultFileName] = useState('');
   const selectedSet = new Set(selectedIds);
   const groups = events.map((event) => ({ event, rows: submissions.filter((submission) => submission.eventId === event.id) }));
   const selectedGroup = groups.find((group) => group.event.id === selectedEventId);
-  const copyInput = () => { if (inputText) void navigator.clipboard?.writeText(inputText); };
+  const closeResultImport = () => {
+    setResultImportOpen(false);
+    setResultFileName('');
+    setImportText('');
+  };
+  const loadResultFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    setResultFileName(file.name);
+    setImportText(await file.text());
+  };
+  const submitImportedResult = async () => {
+    if (await onImport()) {
+      setResultImportOpen(false);
+      setResultFileName('');
+    }
+  };
   const statusText = (submission: Submission) => submission.resultId ? '已完成' : submission.gradingStatus === 'FAILED' || submission.failureReason ? '评测失败' : submission.gradingStatus === 'RUNNING' ? '评测中' : submission.gradingStatus === 'QUEUED' ? '排队中' : statusLabel(submission.state);
   const subjectFor = (submission: Submission) => users.find((user) => user.id === submission.subjectId);
   const submissionDate = (submission: Submission) => formatDate(submission.snapshot.submittedAt ?? submission.createdAt);
@@ -1081,39 +1288,93 @@ function GradingSection({ submissions, events, challenges, users, queue, selecte
   const renderEventDetail = ({ event, rows }: { event: EventConfig; rows: Submission[] }) => {
     const selectedCount = rows.filter((row) => selectedSet.has(row.id)).length;
     const selectedActionCount = rows.filter((row) => selectedSet.has(row.id) && !row.resultId && row.state !== 'GRADED').length;
-    const canExecute = event.trigger !== 'IMPORT' && rows.some((row) => row.gradingRunId && !row.resultId);
     return <>
-      <div className="grading-detail-back"><button className="quiet" onClick={() => { setSelectedEventId(''); setExpandedSubmissionId(''); }}>← 返回评测列表</button></div>
-      <section className="panel admin-card grading-event-detail">
-        <div className="grading-detail-heading"><div><p className="kicker">赛题评测</p><h3>{versionTitle(event.challengeVersion, challenges)}</h3><small>{event.id} · {eventScheduleLabel(event)}</small></div><span className={`status-badge status-${event.status.toLowerCase()}`}>{statusLabel(event.status)}</span></div>
-        <div className="grading-detail-facts"><span>赛制：{modeLabel(event.mode)}</span><span>提交：{sourceLabel(event.submissionSource)}</span><span>评测：{event.trigger === 'IMPORT' ? '线下评测' : '线上评测'}</span><span>{rows.length} 份提交</span></div>
-        <div className="grading-event-actions"><button className="quiet" disabled={busy || !rows.length} onClick={() => onSelectEvent(event.id)}>全选</button><button className="quiet" disabled={busy || !selectedCount} onClick={() => onClearEvent(event.id)}>清除</button>{event.trigger === 'MANUAL' && <button className="primary compact" disabled={busy || !selectedActionCount} onClick={() => onStartSelected(event.id)}>线上评测选中提交</button>}{event.trigger === 'IMPORT' && <button className="primary compact" disabled={busy || !selectedActionCount} onClick={() => onPrepareInput(event.id)}>生成线下评测清单</button>}{canExecute && <button className="small" disabled={busy || !selectedActionCount} onClick={() => onExecuteSelected(event.id)}>执行选中评测</button>}<span className="grading-selected-count">已选 {selectedCount}/{rows.length}</span></div>
-        <div className="grading-submission-list">{rows.map((submission) => { const subject = subjectFor(submission); const expanded = expandedSubmissionId === submission.id; return <div className="grading-submission-block" key={submission.id}><div className="grading-row"><label className="grading-check"><input type="checkbox" checked={selectedSet.has(submission.id)} onChange={() => onToggle(submission.id)} /><span className="grading-avatar">{(subject?.name ?? submission.subjectId).slice(-2)}</span></label><div><strong>{displayPersonName(subject?.name ?? submission.subjectId)}</strong><small>{subject?.employeeNo ?? submission.subjectId} · {sourceLabel(submission.snapshot.sourceType)} · {submissionDate(submission)}</small></div><span className={`status-badge status-${submission.state.toLowerCase()}`}>{statusText(submission)}</span><div className="row-actions"><button className="small" onClick={() => setExpandedSubmissionId(expanded ? '' : submission.id)}>{expanded ? '收起详情' : '查看提交'}</button>{submission.snapshot.artifactUri && <button className="small" disabled={busy} onClick={() => onDownload(submission)}>下载交付件</button>}{submission.resultId && <button className="small" disabled={busy} onClick={() => onRegrade(submission)}>重新评测</button>}{['WAITING_TRIGGER', 'RECEIVED', 'FAILED'].includes(submission.state) && event.trigger === 'MANUAL' && <button className="small" disabled={busy} onClick={() => onSubmission(submission, 'trigger')}>线上评测</button>}{submission.gradingRunId && !submission.resultId && ['QUEUED', 'RUNNING', 'FAILED'].includes(submission.state) && event.trigger !== 'IMPORT' && <button className="small" disabled={busy} onClick={() => onSubmission(submission, 'execute')}>执行线上评测</button>}</div></div>{expanded && renderSubmissionDetails(submission)}</div>; })}{!rows.length && <div className="empty">暂无提交记录</div>}</div>
-      </section>
+      <div className="grading-detail-back"><button className="quiet" onClick={() => { setSelectedEventId(''); setExpandedSubmissionId(''); closeResultImport(); }}>← 返回评测列表</button></div>
+      <div className="grading-event-detail">
+        <div className="grading-detail-heading"><div><p className="kicker">赛题评测</p><h3>{versionTitle(event.challengeVersion, challenges)}</h3><small>{eventScheduleLabel(event)}</small></div><span className={`status-badge status-${event.status.toLowerCase()}`}>{statusLabel(event.status)}</span></div>
+        <div className="grading-detail-facts"><span>赛制：{modeLabel(event.mode)}</span><span>提交：{sourceLabel(event.submissionSource)}</span><span>评测方式：{triggerLabel(event.trigger)}</span><span>{rows.length} 份提交</span></div>
+        <div className="grading-event-actions"><button className="quiet" disabled={busy || !rows.length} onClick={() => onSelectEvent(event.id)}>全选</button><button className="quiet" disabled={busy || !selectedCount} onClick={() => onClearEvent(event.id)}>清除</button>{event.trigger === 'MANUAL' && <button className="primary compact" disabled={busy || !selectedActionCount} onClick={() => onStartSelected(event.id)}>发起评测</button>}{event.trigger === 'IMPORT' && <button className="primary compact" disabled={busy || !selectedActionCount} onClick={() => onPrepareInput(event.id)}>导出评测任务</button>}<button className="secondary-button compact" disabled={busy} onClick={() => setResultImportOpen((current) => !current)}>{resultImportOpen ? '收起结果导入' : '导入评测结果'}</button><span className="grading-selected-count">已选 {selectedCount}/{rows.length}</span></div>
+        <div className="grading-submission-list">{rows.map((submission) => { const subject = subjectFor(submission); const expanded = expandedSubmissionId === submission.id; return <div className="grading-submission-block" key={submission.id}><div className="grading-row"><label className="grading-check"><input type="checkbox" checked={selectedSet.has(submission.id)} onChange={() => onToggle(submission.id)} /><span className="grading-avatar">{(subject?.name ?? submission.subjectId).slice(-2)}</span></label><div><strong>{displayPersonName(subject?.name ?? submission.subjectId)}</strong><small>{subject?.employeeNo ?? submission.subjectId} · {sourceLabel(submission.snapshot.sourceType)} · {submissionDate(submission)}</small></div><span className={`status-badge status-${submission.state.toLowerCase()}`}>{statusText(submission)}</span><div className="row-actions"><button className="small" onClick={() => setExpandedSubmissionId(expanded ? '' : submission.id)}>{expanded ? '收起详情' : '查看提交'}</button>{submission.snapshot.artifactUri && <button className="small" disabled={busy} onClick={() => onDownload(submission)}>下载交付件</button>}{submission.resultId && <button className="small" disabled={busy} onClick={() => onRegrade(submission)}>重新评测</button>}{['WAITING_TRIGGER', 'RECEIVED', 'FAILED'].includes(submission.state) && event.trigger === 'MANUAL' && <button className="small" disabled={busy} onClick={() => onSubmission(submission)}>发起评测</button>}</div></div>{expanded && renderSubmissionDetails(submission)}</div>; })}{!rows.length && <div className="empty">暂无提交记录</div>}</div>
+        {resultImportOpen && <section className="grading-result-import" aria-label="导入评测结果">
+          <div className="grading-result-import-heading"><div><p className="kicker">评测结果</p><h4>导入评测结果</h4></div><button className="quiet" onClick={closeResultImport}>取消</button></div>
+          <div className="grading-result-import-body">
+            <label className="grading-result-file"><input type="file" accept=".json,application/json" onChange={(event) => void loadResultFile(event)} /><span>选择 JSON 文件</span><small>{resultFileName || '未选择文件'}</small></label>
+            <span className="grading-result-divider">或</span>
+            <label className="grading-result-json"><span>结果内容</span><textarea aria-label="评测结果内容" value={importText} onChange={(event) => { setImportText(event.target.value); setResultFileName(''); }} rows={8} placeholder="粘贴评测结果 JSON" /></label>
+          </div>
+          <div className="grading-result-import-actions"><button className="secondary-button" onClick={closeResultImport}>取消</button><button className="primary compact" disabled={busy || !importText.trim()} onClick={() => void submitImportedResult()}>{busy ? '导入中…' : '校验并导入'}</button></div>
+        </section>}
+      </div>
     </>;
   };
   return <section className="admin-section">
     <div className="admin-section-heading"><div><p className="kicker">评测中心</p><h2>评测中心</h2></div><div className="grading-queue-summary"><span className="status-pill">{submissions.filter((row) => !row.resultId).length} 条待处理</span>{queue && <small>评测队列：进行中 {queue.running}/{queue.maxConcurrency} · 等待 {queue.queued}</small>}</div></div>
     <div className="admin-grading-grid">
-      <section className="panel admin-card grading-selection-card">{selectedGroup ? renderEventDetail(selectedGroup) : <><div className="admin-card-heading"><div><p className="kicker">训战列表</p><h3>选择赛题</h3><small>打开单个训战，查看提交内容并处理评测。</small></div></div><div className="grading-event-catalog">{groups.map(({ event, rows }) => { const pending = rows.filter((row) => !row.resultId).length; const completed = rows.length - pending; return <button type="button" className="grading-event-card" key={event.id} onClick={() => { setSelectedEventId(event.id); setExpandedSubmissionId(''); }}><span className="grading-event-card-main"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><small>{event.id} · {eventScheduleLabel(event)}</small></span><span className="grading-event-card-meta"><b>{statusLabel(event.status)}</b><span>{rows.length} 份提交</span><span>{completed} 已完成 · {pending} 待处理</span></span><span className="grading-event-card-arrow">打开 →</span></button>; })}{!groups.length && <div className="empty">暂无可评测训战</div>}</div></>}</section>
-      <div className="grading-tools"><section className="panel admin-card import-card"><div className="admin-card-heading"><div><p className="kicker">线下评测</p><h3>评测输入清单</h3><small>将选定提交交给对应赛题的评测引擎。</small></div><button className="quiet" disabled={!inputText} onClick={copyInput}>复制</button></div><textarea value={inputText} onChange={(event) => setInputText(event.target.value)} rows={10} placeholder="选择提交后生成清单" readOnly={!inputText} /></section><section className="panel admin-card import-card"><div className="admin-card-heading"><div><p className="kicker">评测结果</p><h3>导入线下结果</h3></div></div><textarea value={importText} onChange={(event) => setImportText(event.target.value)} rows={10} placeholder="粘贴评测结果 JSON" /><button className="primary" disabled={busy || !importText.trim()} onClick={onImport}>校验并保存结果</button></section></div>
+      <section className="panel admin-card grading-selection-card">{selectedGroup ? renderEventDetail(selectedGroup) : <><div className="admin-card-heading"><div><p className="kicker">训战列表</p><h3>选择赛题</h3></div></div><div className="grading-event-catalog">{groups.map(({ event, rows }) => { const pending = rows.filter((row) => !row.resultId).length; const completed = rows.length - pending; return <button type="button" className="grading-event-card" key={event.id} onClick={() => { setSelectedEventId(event.id); setExpandedSubmissionId(''); }}><span className="grading-event-card-main"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><small>{eventScheduleLabel(event)}</small></span><span className="grading-event-card-meta"><b>{statusLabel(event.status)}</b><span>{rows.length} 份提交</span><span>{completed} 已完成 · {pending} 待处理</span></span><span className="grading-event-card-arrow">打开 →</span></button>; })}{!groups.length && <div className="empty">暂无可评测训战</div>}</div></>}</section>
     </div>
   </section>;
 }
 
 function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMessage }: { users: AdminUser[]; orgUnits: OrgUnit[]; adminAccess: AdminAccess; busy: boolean; onSaved: () => void; onMessage: (message: string) => void }) {
   const pageSize = 8;
-  const [unitForm, setUnitForm] = useState({ id: '', name: '', label: '部门', parentId: orgUnits.find((unit) => unit.id !== 'org-root')?.id ?? 'org-root' });
+  const rootUnit = orgUnits.find((unit) => unit.level === 0) ?? orgUnits[0];
+  const rootUnitId = rootUnit?.id ?? 'org-root';
+  const [unitForm, setUnitForm] = useState({ id: '', name: '', label: '部门', parentId: rootUnitId });
   const [userForm, setUserForm] = useState({ orgUnitId: '', roles: ['learner'] });
   const [editingId, setEditingId] = useState('');
+  const [selectedOrgId, setSelectedOrgId] = useState(rootUnitId);
+  const [collapsedOrgIds, setCollapsedOrgIds] = useState<Set<string>>(new Set());
+  const [addingUnit, setAddingUnit] = useState(false);
+  const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [saving, setSaving] = useState(false);
-  const totalPages = Math.max(1, Math.ceil(users.length / pageSize));
-  const pageUsers = users.slice((page - 1) * pageSize, page * pageSize);
+  const orgById = new Map(orgUnits.map((unit) => [unit.id, unit]));
+  const unitTrail = (unit: OrgUnit, includeSelf = true) => {
+    const trail: OrgUnit[] = [];
+    const seen = new Set<string>();
+    let current: OrgUnit | undefined = includeSelf ? unit : (unit.parentId ? orgById.get(unit.parentId) : undefined);
+    while (current && !seen.has(current.id)) {
+      trail.unshift(current);
+      seen.add(current.id);
+      current = current.parentId ? orgById.get(current.parentId) : undefined;
+    }
+    return trail;
+  };
+  const childrenByParent = new Map<string, OrgUnit[]>();
+  for (const unit of orgUnits) {
+    const parent = unit.parentId ?? '__root__';
+    childrenByParent.set(parent, [...(childrenByParent.get(parent) ?? []), unit]);
+  }
+  for (const children of childrenByParent.values()) children.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+  const visibleOrgUnits: OrgUnit[] = [];
+  const appendVisible = (unit: OrgUnit) => {
+    visibleOrgUnits.push(unit);
+    if (!collapsedOrgIds.has(unit.id)) for (const child of childrenByParent.get(unit.id) ?? []) appendVisible(child);
+  };
+  for (const unit of childrenByParent.get('__root__') ?? []) appendVisible(unit);
+  if (!visibleOrgUnits.length && rootUnit) appendVisible(rootUnit);
+  const manageableUnits = orgUnits.filter((unit) => unit.level !== 0 && (adminAccess.level === 'GLOBAL' || adminAccess.scopeOrgPaths.some((scope) => unit.path === scope || unit.path.startsWith(scope))));
+  const selectedUnit = orgById.get(selectedOrgId);
+  const unitContainsUser = (unit: OrgUnit, user: AdminUser) => {
+    if (unit.level === 0) return true;
+    const userUnit = orgById.get(user.orgUnitId);
+    return Boolean(userUnit && (userUnit.path === unit.path || userUnit.path.startsWith(unit.path)));
+  };
+  const usersInScope = users.filter((user) => {
+    if (selectedOrgId === '__unassigned__') return !orgById.has(user.orgUnitId);
+    return selectedUnit ? unitContainsUser(selectedUnit, user) : true;
+  });
+  const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN');
+  const filteredUsers = usersInScope.filter((user) => {
+    if (!normalizedQuery) return true;
+    const department = orgById.get(user.orgUnitId)?.name ?? user.departmentHint ?? '';
+    return [user.name, user.employeeNo, department].some((value) => value.toLocaleLowerCase('zh-CN').includes(normalizedQuery));
+  });
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const pageUsers = filteredUsers.slice((page - 1) * pageSize, page * pageSize);
   const pageStart = Math.max(1, Math.min(page - 2, totalPages - 4));
   const pageNumbers = Array.from({ length: Math.min(5, totalPages) }, (_, index) => pageStart + index);
-  const manageableUnits = orgUnits.filter((unit) => unit.id !== 'org-root' && (adminAccess.level === 'GLOBAL' || adminAccess.scopeOrgPaths.some((scope) => unit.path === scope || unit.path.startsWith(scope))));
-  const sortedOrgUnits = orgUnits.slice().sort((a, b) => a.path.localeCompare(b.path));
+  const unassignedCount = users.filter((user) => !orgById.has(user.orgUnitId)).length;
   const roleOptions = [
     { value: 'learner', label: '新员工' },
     { value: 'mentor', label: '导师' },
@@ -1121,6 +1382,8 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
   ];
 
   useEffect(() => { setPage((current) => Math.min(current, totalPages)); }, [totalPages]);
+  useEffect(() => { setPage(1); }, [selectedOrgId, query]);
+  useEffect(() => { if (selectedOrgId !== '__unassigned__' && !orgById.has(selectedOrgId)) setSelectedOrgId(rootUnitId); }, [orgUnits, selectedOrgId, rootUnitId]);
 
   const save = async (action: () => Promise<unknown>, success: string): Promise<boolean> => {
     setSaving(true);
@@ -1136,26 +1399,50 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
   };
   const departmentFor = (user: AdminUser) => {
     const unit = orgUnits.find((item) => item.id === user.orgUnitId);
-    if (unit) return { name: unit.name, meta: `${unit.label} · ${unit.path}` };
+    if (unit) {
+      const parentTrail = unitTrail(unit, false).map((item) => item.name);
+      return { name: unit.name, meta: parentTrail.length ? parentTrail.join(' / ') : unit.label };
+    }
     if (user.departmentHint) return { name: '未配置部门', meta: `SSO 部门：${user.departmentHint}` };
-    return { name: '未配置部门', meta: '等待管理员配置' };
+    return { name: '未配置部门', meta: '待分配' };
   };
+  const createUnit = async () => {
+    if (!unitForm.id.trim() || !unitForm.name.trim()) { onMessage('请填写部门编号和名称'); return; }
+    const success = await save(() => request('/org-units', { method: 'POST', body: JSON.stringify(unitForm) }), '部门已创建');
+    if (success) {
+      setUnitForm({ id: '', name: '', label: '部门', parentId: rootUnitId });
+      setAddingUnit(false);
+    }
+  };
+  const toggleOrg = (unit: OrgUnit) => setCollapsedOrgIds((current) => {
+    const next = new Set(current);
+    if (next.has(unit.id)) next.delete(unit.id); else next.add(unit.id);
+    return next;
+  });
+  const selectOrg = (unitId: string) => { setSelectedOrgId(unitId); clearEdit(); };
+  const selectedLabel = selectedOrgId === '__unassigned__' ? '未配置部门' : selectedUnit?.level === 0 ? '全部员工' : selectedUnit?.name ?? '全部员工';
   return <section className="admin-section">
     <div className="admin-section-heading"><div><p className="kicker">组织与人员</p><h2>组织与人员</h2></div><span className="last-sync">{users.length} 名员工 · {Math.max(0, orgUnits.length - 1)} 个部门</span></div>
-    <div className="admin-overview-grid">
-      <section className="panel admin-card organization-departments-card">
-        <div className="admin-card-heading"><div><p className="kicker">部门维护</p><h3>新增部门</h3></div></div>
-        <div className="form-grid"><label>部门编号<input value={unitForm.id} onChange={(event) => setUnitForm({ ...unitForm, id: event.target.value })} /></label><label>部门名称<input value={unitForm.name} onChange={(event) => setUnitForm({ ...unitForm, name: event.target.value })} /></label><label>组织层级<select value={unitForm.parentId} onChange={(event) => setUnitForm({ ...unitForm, parentId: event.target.value })}>{orgUnits.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level))}{unit.name}</option>)}</select></label><label>组织标签<input value={unitForm.label} onChange={(event) => setUnitForm({ ...unitForm, label: event.target.value })} /></label></div>
-        <button className="primary compact" disabled={busy || saving} onClick={() => void save(() => request('/org-units', { method: 'POST', body: JSON.stringify({ ...unitForm, actorId: 'admin-local' }) }), '部门已创建')}>保存部门</button>
-        <div className="org-unit-list-heading"><strong>组织结构</strong><span>{Math.max(0, orgUnits.length - 1)} 个部门</span></div>
-        <div className="org-unit-list">{sortedOrgUnits.map((unit) => <div className="org-unit-row" data-level={unit.level} key={unit.id}><span className="org-unit-branch" aria-hidden="true" /><div className="org-unit-main"><strong>{unit.name}</strong><small>{unit.id} · {unit.path}</small></div><span className="org-unit-label">{unit.label}</span></div>)}</div>
-      </section>
+    <div className="organization-workspace">
       <section className="panel admin-card organization-users-card">
-        <div className="admin-card-heading"><div><p className="kicker">员工配置</p><h3>{editingId ? '配置员工' : '员工角色与部门'}</h3><small>员工首次登录后自动登记；管理员仅配置部门和角色。</small></div></div>
-        {editingId ? <><div className="edit-user-summary">{(() => { const user = users.find((item) => item.id === editingId); return user ? <><strong>{displayPersonName(user.name)}</strong><span>{user.employeeNo}</span></> : null; })()}</div><div className="form-grid"><label>所属部门<select value={userForm.orgUnitId} onChange={(event) => setUserForm({ ...userForm, orgUnitId: event.target.value })}><option value="">未配置部门</option>{manageableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select></label><fieldset><legend>角色</legend><div className="checkbox-list">{roleOptions.map((role) => <label className="check-label" key={role.value}><input type="checkbox" checked={userForm.roles.includes(role.value)} onChange={() => toggleRole(role.value)} />{role.label}</label>)}</div></fieldset></div><div className="editor-actions"><button className="secondary-button" onClick={clearEdit}>取消</button><button className="primary compact" disabled={busy || saving} onClick={submitUser}>保存配置</button></div></> : <div className="empty compact-empty">员工通过内部 SSO 首次登录后自动登记</div>}
+        <div className="admin-card-heading organization-users-heading"><div><p className="kicker">员工管理</p><h3>{editingId ? '配置员工' : '员工列表'}</h3></div><label className="employee-search"><span>搜索</span><input aria-label="搜索员工" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="姓名、工号或部门" /></label></div>
+        {editingId && <div className="employee-editor"><div className="edit-user-summary">{(() => { const user = users.find((item) => item.id === editingId); return user ? <><strong>{displayPersonName(user.name)}</strong><span>{user.employeeNo}</span></> : null; })()}</div><div className="form-grid"><label>所属部门<select value={userForm.orgUnitId} onChange={(event) => setUserForm({ ...userForm, orgUnitId: event.target.value })}><option value="">未配置部门</option>{manageableUnits.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><fieldset><legend>角色</legend><div className="checkbox-list">{roleOptions.map((role) => <label className="check-label" key={role.value}><input type="checkbox" checked={userForm.roles.includes(role.value)} onChange={() => toggleRole(role.value)} />{role.label}</label>)}</div></fieldset></div><div className="editor-actions"><button className="secondary-button" onClick={clearEdit}>取消</button><button className="primary compact" disabled={busy || saving} onClick={submitUser}>保存配置</button></div></div>}
+        <div className="employee-list-toolbar"><div><strong>{selectedLabel}</strong><span>{filteredUsers.length} 人</span></div>{(selectedOrgId !== rootUnitId || query) && <button className="small" onClick={() => { setSelectedOrgId(rootUnitId); setQuery(''); }}>清除筛选</button>}</div>
         <div className="admin-table-wrap organization-user-table"><table className="admin-table"><thead><tr><th>员工</th><th>部门</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>{pageUsers.map((user) => { const department = departmentFor(user); return <tr key={user.id}><td><strong>{displayPersonName(user.name)}</strong><small>{user.employeeNo}</small></td><td><div className="department-cell"><strong>{department.name}</strong><small>{department.meta}</small></div></td><td><div className="role-list">{roleLabels(user.roles).map((role) => <span className="role-tag" key={role}>{role}</span>)}</div></td><td><span className={`status-badge status-${user.status.toLowerCase()}`}>{user.status === 'ACTIVE' ? '在职' : '已停用'}</span></td><td><button className="small" onClick={() => edit(user)}>配置</button></td></tr>; })}</tbody></table>{!pageUsers.length && <div className="empty">暂无员工</div>}</div>
-        <div className="table-pagination"><span>第 {page} / {totalPages} 页 · 共 {users.length} 人</span><div><button className="small" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</button>{pageNumbers.map((number) => <button className={`small page-number${page === number ? ' active' : ''}`} key={number} onClick={() => setPage(number)}>{number}</button>)}<button className="small" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>下一页</button></div></div>
+        <div className="table-pagination"><span>第 {page} / {totalPages} 页 · 共 {filteredUsers.length} 人</span><div><button className="small" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</button>{pageNumbers.map((number) => <button className={`small page-number${page === number ? ' active' : ''}`} key={number} onClick={() => setPage(number)}>{number}</button>)}<button className="small" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>下一页</button></div></div>
       </section>
+      <aside className="organization-side">
+        <section className="panel admin-card organization-departments-card">
+          <div className="admin-card-heading organization-tree-heading"><div><p className="kicker">组织结构</p><h3>部门</h3></div>{adminAccess.level === 'GLOBAL' && <button className="small" onClick={() => setAddingUnit((current) => !current)}>{addingUnit ? '取消' : '新增部门'}</button>}</div>
+          <div className="organization-tree" role="tree" aria-label="组织结构">{visibleOrgUnits.map((unit) => {
+            const children = childrenByParent.get(unit.id) ?? [];
+            const count = users.filter((user) => unitContainsUser(unit, user)).length;
+            const collapsed = collapsedOrgIds.has(unit.id);
+            return <div className={`organization-tree-row${selectedOrgId === unit.id ? ' selected' : ''}`} style={{ paddingLeft: `${6 + Math.max(0, unit.level) * 16}px` }} role="treeitem" aria-expanded={children.length ? !collapsed : undefined} key={unit.id}>{children.length ? <button type="button" className="organization-tree-toggle" aria-label={`${collapsed ? '展开' : '收起'}${unit.name}`} onClick={() => toggleOrg(unit)}>{collapsed ? '+' : '−'}</button> : <span className="organization-tree-spacer" />}<button type="button" className="organization-tree-select" onClick={() => selectOrg(unit.id)}><span className={`organization-tree-mark${unit.level === 0 ? ' root' : ''}`} aria-hidden="true" /><strong>{unit.name}</strong><span>{count} 人</span></button></div>;
+          })}{unassignedCount > 0 && <div className={`organization-tree-row organization-unassigned${selectedOrgId === '__unassigned__' ? ' selected' : ''}`} role="treeitem"><span className="organization-tree-spacer" /><button type="button" className="organization-tree-select" onClick={() => selectOrg('__unassigned__')}><span className="organization-tree-mark unassigned" aria-hidden="true" /><strong>未配置部门</strong><span>{unassignedCount} 人</span></button></div>}</div>
+          {addingUnit && <div className="department-create-form"><strong>新增部门</strong><label>部门名称<input value={unitForm.name} onChange={(event) => setUnitForm({ ...unitForm, name: event.target.value })} /></label><label>部门编号<input value={unitForm.id} onChange={(event) => setUnitForm({ ...unitForm, id: event.target.value })} /></label><label>上级部门<select value={unitForm.parentId} onChange={(event) => setUnitForm({ ...unitForm, parentId: event.target.value })}>{orgUnits.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level))}{unit.name}</option>)}</select></label><label>组织类型<select value={unitForm.label} onChange={(event) => setUnitForm({ ...unitForm, label: event.target.value })}><option value="事业群">事业群</option><option value="部门">部门</option><option value="团队">团队</option></select></label><button className="primary compact" disabled={busy || saving} onClick={() => void createUnit()}>保存部门</button></div>}
+        </section>
+      </aside>
     </div>
   </section>;
 }

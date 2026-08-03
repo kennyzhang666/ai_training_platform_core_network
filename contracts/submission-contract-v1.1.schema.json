@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-training-platform.local/contracts/submission-contract-v1.1.schema.json",
+  "title": "Submission Contract 1.1",
+  "description": "赛题版本冻结的交付目录规范。平台在接收 ZIP 或固定 Git 版本时先校验，未通过的交付不会进入评测队列。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "required", "forbidden"],
+  "properties": {
+    "schemaVersion": { "const": "1.1" },
+    "root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["ARCHIVE_ROOT", "SINGLE_DIRECTORY"] },
+        "directoryName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[^/\\\\]+$"
+        }
+      }
+    },
+    "required": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/item" }
+    },
+    "optional": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/item" }
+    },
+    "forbidden": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/path" },
+      "uniqueItems": true
+    },
+    "languageEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(python|java|go)$": { "$ref": "#/$defs/path" }
+      }
+    },
+    "allowedPaths": {
+      "type": "array",
+      "maxItems": 300,
+      "items": { "$ref": "#/$defs/path" },
+      "uniqueItems": true
+    },
+    "allowAdditionalPaths": { "type": "boolean", "default": true },
+    "maxDepth": { "type": "integer", "minimum": 1, "maximum": 30 },
+    "maxFiles": { "type": "integer", "minimum": 1, "maximum": 10000 }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?![A-Za-z]:).+$"
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "type"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "type": { "enum": ["markdown", "source", "directory", "text", "json", "yaml"] },
+        "minSections": { "type": "integer", "minimum": 1 },
+        "minChars": { "type": "integer", "minimum": 0 },
+        "notTemplate": { "type": "boolean" },
+        "mustExport": { "type": "string", "minLength": 1 },
+        "signature": { "type": "string", "minLength": 1 },
+        "minFiles": { "type": "integer", "minimum": 1 },
+        "allowedExtensions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^\\.[A-Za-z0-9][A-Za-z0-9._+-]{0,20}$" }
+        }
+      }
+    }
+  }
+}

@@ -35,6 +35,7 @@ enum SubmissionState {
   WAITING_TRIGGER
   WAITING_IMPORT
   IMPORT_VALIDATING
+  FAILED
   GRADED
   SEALED
   REVEALED
@@ -60,10 +61,10 @@ model AppUser {
   id           String   @id
   employeeNo   String   @unique
   name         String
-  orgUnitId    String
-  orgPath      String
+  orgUnitId    String?
+  orgPath      String?
   status       String   @default("ACTIVE")
-  orgUnit      OrgUnit  @relation(fields: [orgUnitId], references: [id])
+  orgUnit      OrgUnit? @relation(fields: [orgUnitId], references: [id])
   roleBindings  RoleBinding[]
   submissions   Submission[] @relation("SubjectSubmissions")
   participations Participation[]
@@ -114,6 +115,8 @@ model ChallengeVersion {
   deliveryPolicy     Json
   rubricVersion      String
   submissionContract Json
+  submissionContractDefinition Json?
+  evaluationEngine   Json?
   tests              Json?
   resources          Json?
   resourceLimits     Json?
@@ -125,6 +128,7 @@ model ChallengeVersion {
   createdAt          DateTime @default(now())
 
   events Event[]
+  evaluationBatches EvaluationBatch[]
 
   @@unique([challengeId, version])
 }
@@ -145,6 +149,7 @@ model Event {
   status             EventStatus      @default(OPEN)
   localGrading       Json?
   submissions        Submission[]
+  evaluationBatches  EvaluationBatch[]
   participants       Participation[]
   seasonLinks        SeasonEvent[]
   createdAt          DateTime         @default(now())
@@ -169,7 +174,7 @@ model Submission {
   submittedAt   DateTime
   state         SubmissionState  @default(RECEIVED)
   gradingRuns   GradingRun[]
-  result        EvaluationResult?
+  results       EvaluationResult[]
   createdAt     DateTime         @default(now())
 
   @@unique([eventId, subjectId, snapshotHash])
@@ -185,10 +190,48 @@ model GradingRun {
   status          String
   idempotencyKey  String
   graderVersion   String?
+  evaluationBatchId String?
+  evaluationBatch EvaluationBatch? @relation(fields: [evaluationBatchId], references: [id])
   createdAt       DateTime         @default(now())
   result          EvaluationResult?
 
   @@unique([submissionId, idempotencyKey])
+  @@index([evaluationBatchId])
+}
+
+model EvaluationBatch {
+  id                 String           @id
+  eventId            String
+  event              Event            @relation(fields: [eventId], references: [id])
+  challengeVersionId String
+  challengeVersion   ChallengeVersion @relation(fields: [challengeVersionId], references: [id])
+  runIds             Json
+  submissionIds      Json
+  engineIdentity     String
+  codeAgentRuntime   Json?
+  createdBy          String
+  status             String
+  leaseId            String?
+  completionLeaseId  String?
+  leasedBy           String?
+  leaseExpiresAt     DateTime?
+  completedRunIds    Json?
+  failedRunIds       Json?
+  failureReason      String?
+  finishedAt         DateTime?
+  gradingRuns        GradingRun[]
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([eventId, status])
+  @@index([status, createdAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedBy String
+  updatedAt DateTime @updatedAt
 }
 
 model Participation {
@@ -227,7 +270,7 @@ model EvaluationResult {
   id                 String          @id
   gradingRunId       String          @unique
   gradingRun         GradingRun      @relation(fields: [gradingRunId], references: [id])
-  submissionId       String          @unique
+  submissionId       String
   submission         Submission      @relation(fields: [submissionId], references: [id])
   schemaVersion      String
   rubricVersion      String
@@ -238,6 +281,8 @@ model EvaluationResult {
   createdAt          DateTime        @default(now())
   criteria           CriterionResult[]
   findings           Finding[]
+
+  @@index([submissionId, createdAt])
 }
 
 model CriterionResult {

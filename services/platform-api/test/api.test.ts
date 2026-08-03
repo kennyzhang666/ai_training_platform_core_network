@@ -13,12 +13,43 @@ import { AppModule } from '../src/app.module';
 // file, especially when a dev server is running alongside the test process.
 process.env.PLATFORM_DATA_FILE = ':memory:';
 process.env.ALLOW_ANONYMOUS_LOCAL = 'true';
+process.env.EMBEDDED_EVALUATION_WORKER = 'true';
+
+function validParkingZip(label: string): string {
+  const directory = mkdtempSync(join(tmpdir(), 'api-delivery-'));
+  const archive = join(directory, 'delivery.zip');
+  const python = process.env.PYTHON ?? (process.platform === 'win32' ? join(__dirname, '..', '..', '..', '.venv', 'Scripts', 'python.exe') : 'python');
+  try {
+    execFileSync(python, ['-c', [
+      'import sys, zipfile',
+      'archive, label = sys.argv[1], sys.argv[2]',
+      'with zipfile.ZipFile(archive, "w") as z:',
+      '    z.writestr("SPEC.md", "# 需求\\n\\n" + label)',
+      '    z.writestr("transcript.md", (label + " ") * 40)',
+      '    z.writestr("src/parking.py", "def calculate_fee(entry_time, exit_time, is_member=False):\\n    return 0\\n# " + label)',
+    ].join('\n'), archive, label], { windowsHide: true });
+    return readFileSync(archive).toString('base64');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
 
 const ZIP_FIXTURES = {
-  local: 'UEsDBBQAAAAAAAAAIQBPvXcqFgAAABYAAAALAAAAcGF5bG9hZC50eHRsb2NhbCBhcnRpZmFjdCBmaXh0dXJlUEsBAhQAFAAAAAAAAAAhAE+9dyoWAAAAFgAAAAsAAAAAAAAAAAAAAIABAAAAAHBheWxvYWQudHh0UEsFBgAAAAABAAEAOQAAAD8AAAAAAA==',
-  first: 'UEsDBBQAAAAAAAAAIQDn+wecGAAAABgAAAALAAAAcGF5bG9hZC50eHRmaXJzdCBzZWxlY3RpdmUgYXJ0aWZhY3RQSwECFAAUAAAAAAAAACEA5/sHnBgAAAAYAAAACwAAAAAAAAAAAAAAgAEAAAAAcGF5bG9hZC50eHRQSwUGAAAAAAEAAQA5AAAAQQAAAAAA',
-  second: 'UEsDBBQAAAAAAAAAIQCs7g9dGQAAABkAAAALAAAAcGF5bG9hZC50eHRzZWNvbmQgc2VsZWN0aXZlIGFydGlmYWN0UEsBAhQAFAAAAAAAAAAhAKzuD10ZAAAAGQAAAAsAAAAAAAAAAAAAAIABAAAAAHBheWxvYWQudHh0UEsFBgAAAAABAAEAOQAAAEIAAAAAAA==',
-  allowlisted: 'UEsDBBQAAAAAAAAAIQCYPIA0EwAAABMAAAALAAAAcGF5bG9hZC50eHRhbGxvd2xpc3RlZCBmaXh0dXJlUEsBAhQAFAAAAAAAAAAhAJg8gDQTAAAAEwAAAAsAAAAAAAAAAAAAAIABAAAAAHBheWxvYWQudHh0UEsFBgAAAAABAAEAOQAAADwAAAAAAA==',
+  local: validParkingZip('local artifact fixture'),
+  first: validParkingZip('first selective artifact'),
+  second: validParkingZip('second selective artifact'),
+  allowlisted: validParkingZip('allowlisted fixture'),
+  invalidLayout: (() => {
+    const directory = mkdtempSync(join(tmpdir(), 'api-invalid-delivery-'));
+    const archive = join(directory, 'delivery.zip');
+    const python = process.env.PYTHON ?? (process.platform === 'win32' ? join(__dirname, '..', '..', '..', '.venv', 'Scripts', 'python.exe') : 'python');
+    try {
+      execFileSync(python, ['-c', 'import sys, zipfile\nwith zipfile.ZipFile(sys.argv[1], "w") as z: z.writestr("README.md", "missing required files")', archive], { windowsHide: true });
+      return readFileSync(archive).toString('base64');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  })(),
   traversal: 'UEsDBBQAAAAAAAAAIQCOsOglBgAAAAYAAAANAAAALi4vZXNjYXBlLnR4dGVzY2FwZVBLAQIUABQAAAAAAAAAIQCOsOglBgAAAAYAAAANAAAAAAAAAAAAAACAAQAAAAAuLi9lc2NhcGUudHh0UEsFBgAAAAABAAEAOwAAADEAAAAAAA==',
 } as const;
 
@@ -151,6 +182,25 @@ test('upload rejects an unsafe ZIP even when the event does not set maxFiles', a
     });
     assert.equal(uploaded.status, 400);
     assert.equal((await uploaded.json() as { code?: string }).code, 'ARTIFACT_ARCHIVE_INVALID');
+  });
+});
+
+test('upload rejects a ZIP that does not match the challenge delivery layout', async () => {
+  await withApp(async (baseUrl) => {
+    const uploaded = await fetch(`${baseUrl}/api/v1/events/event-local/submissions:upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00124' },
+      body: JSON.stringify({
+        subjectId: 'w00124',
+        artifactBase64: ZIP_FIXTURES.invalidLayout,
+        fileName: 'submission.zip',
+        snapshot: { sourceType: 'UPLOAD', submittedAt: '2026-08-01T10:00:00Z' },
+      }),
+    });
+    assert.equal(uploaded.status, 400);
+    const body = await uploaded.json() as { code?: string; details?: { issues?: Array<{ code: string; path?: string }> } };
+    assert.equal(body.code, 'DELIVERY_STRUCTURE_INVALID');
+    assert.ok(body.details?.issues?.some((issue) => issue.code === 'REQUIRED_PATH_MISSING' && issue.path === 'SPEC.md'));
   });
 });
 
@@ -881,10 +931,10 @@ test('an evaluation environment leases work through the API for both engine sour
       })).json() as { id: string };
       await fetch(`${baseUrl}/api/v1/submissions/${packagedSubmission.id}/start-grading`, { method: 'POST', headers: admin, body: '{}' });
 
-      const leased = await fetch(`${baseUrl}/api/v1/evaluation-tasks:lease`, { method: 'POST', headers: admin, body: JSON.stringify({ workerId: 'eval-host-api', limit: 5 }) });
+      const leased = await fetch(`${baseUrl}/api/v1/evaluation-batches:lease`, { method: 'POST', headers: admin, body: JSON.stringify({ workerId: 'eval-host-api', limit: 5 }) });
       assert.equal(leased.status, 200);
-      const { tasks } = await leased.json() as { tasks: Array<{ runId: string; leaseId: string; engine: { source: string; id: string; entrypoint: string } }> };
-      const sources = tasks.map((task) => task.engine.source).sort();
+      const { batches } = await leased.json() as { batches: Array<{ batchId: string; leaseId: string; engine: { source: string; id: string; entrypoint: string }; submissions: Array<{ runId: string }> }> };
+      const sources = batches.map((task) => task.engine.source).sort();
       assert.deepEqual(sources, ['BUILT_IN', 'PACKAGE']);
       // The package download the worker needs must be reachable.
       const download = await fetch(`${baseUrl}/api/v1/evaluation-engines/${enginePackage.packageHash}/package`, { headers: { 'x-employee-id': 'w00123' } });
@@ -892,7 +942,7 @@ test('an evaluation environment leases work through the API for both engine sour
       assert.ok((await download.arrayBuffer()).byteLength > 0);
 
       // A worker that gives up releases the task instead of stranding it.
-      const failed = await fetch(`${baseUrl}/api/v1/evaluation-tasks/${tasks[0].runId}/fail`, { method: 'POST', headers: admin, body: JSON.stringify({ leaseId: tasks[0].leaseId, reason: '评测环境磁盘不足' }) });
+      const failed = await fetch(`${baseUrl}/api/v1/evaluation-batches/${batches[0].batchId}/fail`, { method: 'POST', headers: admin, body: JSON.stringify({ leaseId: batches[0].leaseId, reason: '评测环境磁盘不足' }) });
       assert.equal(failed.status, 200);
     });
   } finally {

@@ -12,6 +12,12 @@ export interface StoredArtifact {
   size: number;
 }
 
+export interface ArtifactEntry {
+  path: string;
+  type: 'file' | 'directory';
+  size: number;
+}
+
 const execFileAsync = promisify(execFile);
 const ZIP_SNAPSHOT = [
   'import hashlib, pathlib, stat, sys, zipfile',
@@ -70,6 +76,20 @@ const ZIP_VALIDATE = [
   '        if info.is_dir(): continue',
   '        total += info.file_size',
   '        if total > max_expanded: raise RuntimeError(f"archive expands beyond limit: {total} > {max_expanded}")',
+].join('\n');
+
+const ZIP_INSPECT = [
+  'import json, pathlib, sys, zipfile',
+  'archive = pathlib.Path(sys.argv[1])',
+  'entries = []',
+  'with zipfile.ZipFile(archive) as z:',
+  '    for info in z.infolist():',
+  '        raw = info.filename.replace("\\\\", "/").strip("/")',
+  '        if not raw: continue',
+  '        path = pathlib.PurePosixPath(raw)',
+  '        if path.is_absolute() or ".." in path.parts: raise RuntimeError("archive path escapes workspace")',
+  '        entries.append({"path": path.as_posix(), "type": "directory" if info.is_dir() else "file", "size": 0 if info.is_dir() else info.file_size})',
+  'print(json.dumps(entries, ensure_ascii=False))',
 ].join('\n');
 
 @Injectable()
@@ -171,6 +191,33 @@ export class ArtifactStore {
       });
     } catch {
       throw new BadRequestException({ code: 'ARTIFACT_ARCHIVE_INVALID', message: '交付压缩包校验未通过' });
+    }
+  }
+
+  /** List archive paths without extracting learner-controlled files. */
+  async inspectArchive(uri: string): Promise<ArtifactEntry[]> {
+    const path = this.localPath(uri);
+    if (!path.toLowerCase().endsWith('.zip')) {
+      throw new BadRequestException({ code: 'DELIVERY_ARCHIVE_REQUIRED', message: '该赛题要求提交 ZIP 交付件' });
+    }
+    const projectRoot = resolve(process.env.PROJECT_ROOT ?? (existsSync(join(process.cwd(), 'grader', 'run_grader.py')) ? process.cwd() : join(process.cwd(), '..', '..')));
+    const python = process.env.PYTHON ?? (existsSync(join(projectRoot, '.venv', 'Scripts', 'python.exe')) ? join(projectRoot, '.venv', 'Scripts', 'python.exe') : 'python');
+    try {
+      const result = await execFileAsync(python, ['-c', ZIP_INSPECT, path], {
+        cwd: projectRoot,
+        maxBuffer: 16 * 1024 * 1024,
+        windowsHide: true,
+        env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' },
+      });
+      const entries = JSON.parse(result.stdout) as ArtifactEntry[];
+      if (!Array.isArray(entries)) throw new Error('archive listing is not an array');
+      return entries;
+    } catch (error) {
+      const details = error as { stderr?: string; message?: string };
+      throw new BadRequestException({
+        code: 'DELIVERY_ARCHIVE_INVALID',
+        message: `无法读取交付目录: ${(details.stderr ?? details.message ?? '').trim().slice(-500)}`,
+      });
     }
   }
 }

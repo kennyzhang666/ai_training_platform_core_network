@@ -9,6 +9,7 @@ import { AppModule } from '../src/app.module';
 process.env.PLATFORM_DATA_FILE = ':memory:';
 process.env.LOCAL_GRADING_CONCURRENCY = '2';
 process.env.ALLOW_ANONYMOUS_LOCAL = 'true';
+process.env.EMBEDDED_EVALUATION_WORKER = 'true';
 
 async function withApp(run: (baseUrl: string) => Promise<void>): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter());

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "1.1",
+  "root": {
+    "mode": "ARCHIVE_ROOT"
+  },
+  "required": [
+    {
+      "path": "skills",
+      "type": "directory",
+      "minFiles": 1
+    },
+    {
+      "path": "skills/*/SKILL.md",
+      "type": "markdown"
+    }
+  ],
+  "optional": [
+    {
+      "path": "README.md",
+      "type": "markdown"
+    },
+    {
+      "path": "skills/**",
+      "type": "text"
+    }
+  ],
+  "forbidden": [
+    "**/.env",
+    "**/.git/**",
+    "**/__pycache__/**",
+    "**/*.pyc"
+  ],
+  "allowedPaths": [
+    "README.md",
+    "skills/**"
+  ],
+  "allowAdditionalPaths": false,
+  "maxDepth": 8,
+  "maxFiles": 500
+}

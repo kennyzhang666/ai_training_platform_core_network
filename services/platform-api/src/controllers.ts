@@ -4,7 +4,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { PlatformStore } from './store';
-import { Announcement, Challenge, ChallengeCategory, ChallengeVersion, EventConfig, HardProblem, HardProblemReviewStatus, HardProblemSolutionVisibility, Season, SubmissionSnapshot, SsoIdentity } from './domain';
+import { Announcement, Challenge, ChallengeCategory, ChallengeVersion, CodeAgentRuntimeInput, EvaluationEngineConfig, EventConfig, HardProblem, HardProblemReviewStatus, HardProblemSolutionVisibility, Season, SubmissionSnapshot, SsoIdentity } from './domain';
 import { validateEvaluationResult } from './contract-validator';
 import { ArtifactStore } from './artifact-store';
 import { GradingExecutor, GRADING_EXECUTOR } from './grading-executor';
@@ -14,6 +14,8 @@ import { LocalGitSnapshotter } from './git-snapshotter';
 import { EnginePackageStore } from './engine-package-store';
 import { ExecutorRegistry } from './executor-registry';
 import { EvaluationTaskService } from './evaluation-task-service';
+import { SubmissionContractService } from './submission-contract-service';
+import { EvaluationBatchService } from './evaluation-batch-service';
 
 @Controller('/api/v1')
 export class PlatformController {
@@ -26,6 +28,8 @@ export class PlatformController {
     @Inject(EnginePackageStore) private readonly enginePackages: EnginePackageStore,
     @Inject(ExecutorRegistry) private readonly executors: ExecutorRegistry,
     @Inject(EvaluationTaskService) private readonly tasks: EvaluationTaskService,
+    @Inject(SubmissionContractService) private readonly submissionContracts: SubmissionContractService,
+    @Inject(EvaluationBatchService) private readonly evaluationBatches: EvaluationBatchService,
   ) {}
 
   private localWorkspaceHash(workspacePath: string): string {
@@ -73,20 +77,50 @@ export class PlatformController {
     return actorId;
   }
 
+  private requireGlobalAdmin(employeeId?: string): string {
+    const actorId = this.actor(employeeId);
+    this.store.assertGlobalAdmin(actorId);
+    return actorId;
+  }
+
   /**
    * A challenge may only select an executor that exists, with parameters its
    * manifest declares. Checking here means a misconfigured challenge is
    * rejected while the author is still editing it, not on the first delivery.
    */
-  private assertExecutorSelection(version: { evaluationEngine?: { mode?: string; executor?: { id?: string; params?: Record<string, unknown> } } } | undefined): void {
+  private assertExecutorSelection(version: { evaluationEngine?: EvaluationEngineConfig } | undefined): void {
     const engine = version?.evaluationEngine;
-    if (engine?.mode !== 'PLATFORM_LOCAL') return;
-    if (!engine.executor?.id) throw new BadRequestException({ code: 'EXECUTOR_REQUIRED', message: '请选择一个内置执行器' });
-    this.executors.assertExecutorConfiguration(engine.executor.id, engine.executor.params ?? {});
+    if (!engine) return;
+    if (engine.mode === 'PLATFORM_LOCAL') {
+      if (!engine.executor?.id) throw new BadRequestException({ code: 'EXECUTOR_REQUIRED', message: '请选择一个内置执行器' });
+      this.executors.assertExecutorConfiguration(engine.executor.id, engine.executor.params ?? {});
+    }
+    this.executors.assertAgentConfiguration(engine);
+  }
+
+  private assertSubmissionContract(version: { submissionContractDefinition?: unknown } | undefined): void {
+    if (version?.submissionContractDefinition !== undefined) this.submissionContracts.assertDefinition(version.submissionContractDefinition);
+  }
+
+  private withResolvedSubmissionContracts(challenge: Challenge): Challenge {
+    return {
+      ...challenge,
+      versions: challenge.versions.map((version) => {
+        if (version.submissionContractDefinition) return version;
+        const definition = this.submissionContracts.resolve(version);
+        return definition ? { ...version, submissionContractDefinition: definition } : version;
+      }),
+    };
   }
 
   private scheduleIfAutomatic(eventId: string, submissionId: string): void {
-    if (this.store.getEvent(eventId).trigger === 'AUTO') this.autoQueue.enqueue(submissionId);
+    if (this.store.getEvent(eventId).trigger !== 'AUTO') return;
+    const submission = this.store.getSubmission(submissionId);
+    if (!submission.gradingRunId) return;
+    // The in-process executor remains an explicit single-host compatibility
+    // switch. Normal deployments always create a pull-based Code Agent batch.
+    if (process.env.EMBEDDED_EVALUATION_WORKER === 'true') this.autoQueue.enqueue(submissionId);
+    else this.evaluationBatches.create([submission.gradingRunId], 'system');
   }
 
   @Get('/health')
@@ -208,31 +242,70 @@ export class PlatformController {
   @Post('/evaluation-tasks:lease')
   @HttpCode(200)
   leaseEvaluationTasks(@Body() body: { workerId?: string; limit?: number; executorIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
-    this.requireAdmin(employeeId);
-    const tasks = this.tasks.lease(String(body.workerId ?? '').trim(), Number(body.limit ?? 1), Array.isArray(body.executorIds) ? body.executorIds : []);
+    const actorId = this.requireAdmin(employeeId);
+    const tasks = this.tasks.lease(String(body.workerId ?? '').trim(), Number(body.limit ?? 1), Array.isArray(body.executorIds) ? body.executorIds : [], actorId);
     return { leasedAt: new Date().toISOString(), tasks };
   }
 
   @Post('/evaluation-tasks/:runId/heartbeat')
   @HttpCode(200)
   heartbeatEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    this.requireAdmin(employeeId);
-    return this.tasks.heartbeat(runId, String(body.leaseId ?? ''));
+    return this.tasks.heartbeat(runId, String(body.leaseId ?? ''), this.requireAdmin(employeeId));
   }
 
   @Post('/evaluation-tasks/:runId/complete')
   @HttpCode(201)
   completeEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string; result?: Record<string, unknown> }, @Headers('x-employee-id') employeeId?: string) {
-    this.requireAdmin(employeeId);
+    const actorId = this.requireAdmin(employeeId);
     if (!body.result || typeof body.result !== 'object') throw new BadRequestException({ code: 'RESULT_REQUIRED', message: '缺少评测结果' });
-    return { accepted: true, stored: this.tasks.complete(runId, String(body.leaseId ?? ''), body.result) };
+    return { accepted: true, stored: this.tasks.complete(runId, String(body.leaseId ?? ''), body.result, actorId) };
   }
 
   @Post('/evaluation-tasks/:runId/fail')
   @HttpCode(200)
   failEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string; reason?: string }, @Headers('x-employee-id') employeeId?: string) {
-    this.requireAdmin(employeeId);
-    return this.tasks.fail(runId, String(body.leaseId ?? ''), String(body.reason ?? ''));
+    return this.tasks.fail(runId, String(body.leaseId ?? ''), String(body.reason ?? ''), this.requireAdmin(employeeId));
+  }
+
+  @Get('/evaluation-batches')
+  evaluationBatchList(@Query('eventId') eventId?: string, @Headers('x-employee-id') employeeId?: string) {
+    return this.evaluationBatches.list(this.requireAdmin(employeeId), eventId);
+  }
+
+  @Get('/evaluation-batches/:batchId')
+  evaluationBatch(@Param('batchId') batchId: string, @Headers('x-employee-id') employeeId?: string) {
+    return this.evaluationBatches.get(batchId, this.requireAdmin(employeeId));
+  }
+
+  /** Lease complete same-challenge batches for a Code Agent worker. */
+  @Post('/evaluation-batches:lease')
+  @HttpCode(200)
+  leaseEvaluationBatches(@Body() body: { workerId?: string; limit?: number; executorIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireAdmin(employeeId);
+    const batches = this.evaluationBatches.lease(String(body.workerId ?? '').trim(), Number(body.limit ?? 1), Array.isArray(body.executorIds) ? body.executorIds : [], actorId);
+    return { leasedAt: new Date().toISOString(), batches };
+  }
+
+  @Post('/evaluation-batches/:batchId/heartbeat')
+  @HttpCode(200)
+  heartbeatEvaluationBatch(@Param('batchId') batchId: string, @Body() body: { leaseId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.evaluationBatches.heartbeat(batchId, String(body.leaseId ?? ''), this.requireAdmin(employeeId));
+  }
+
+  @Post('/evaluation-batches/:batchId/complete')
+  @HttpCode(201)
+  completeEvaluationBatch(
+    @Param('batchId') batchId: string,
+    @Body() body: { leaseId?: string; results?: Array<{ runId: string; result: Record<string, unknown> }>; failures?: Array<{ runId: string; reason: string }> },
+    @Headers('x-employee-id') employeeId?: string,
+  ) {
+    return this.evaluationBatches.complete(batchId, String(body.leaseId ?? ''), body.results ?? [], body.failures ?? [], this.requireAdmin(employeeId));
+  }
+
+  @Post('/evaluation-batches/:batchId/fail')
+  @HttpCode(200)
+  failEvaluationBatch(@Param('batchId') batchId: string, @Body() body: { leaseId?: string; reason?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.evaluationBatches.fail(batchId, String(body.leaseId ?? ''), String(body.reason ?? ''), this.requireAdmin(employeeId));
   }
 
   /** Engine package bytes, so a worker can materialise the engine locally. */
@@ -254,8 +327,26 @@ export class PlatformController {
 
   @Get('/admin/grading-queue')
   gradingQueue(@Headers('x-employee-id') employeeId?: string) {
-    this.requireAdmin(employeeId);
-    return this.autoQueue.getStats();
+    const actorId = this.requireAdmin(employeeId);
+    if (process.env.EMBEDDED_EVALUATION_WORKER === 'true') return this.autoQueue.getStats();
+    const batches = this.evaluationBatches.list(actorId);
+    return {
+      queued: batches.filter((batch) => batch.status === 'QUEUED').length,
+      running: batches.filter((batch) => batch.status === 'RUNNING').length,
+      maxConcurrency: Number(process.env.EVALUATION_BATCH_LEASE_MAX ?? 5),
+      scheduled: batches.filter((batch) => ['QUEUED', 'RUNNING'].includes(batch.status)).length,
+      embedded: process.env.EMBEDDED_EVALUATION_WORKER === 'true',
+    };
+  }
+
+  @Get('/admin/code-agent-runtime')
+  codeAgentRuntime(@Headers('x-employee-id') employeeId?: string) {
+    return this.store.getCodeAgentRuntimeConfig(this.requireGlobalAdmin(employeeId));
+  }
+
+  @Put('/admin/code-agent-runtime')
+  updateCodeAgentRuntime(@Body() body: CodeAgentRuntimeInput, @Headers('x-employee-id') employeeId?: string) {
+    return this.store.updateCodeAgentRuntimeConfig(body, this.requireGlobalAdmin(employeeId));
   }
 
   @Get('/admin/capabilities')
@@ -311,19 +402,22 @@ export class PlatformController {
 
   @Get('/challenges')
   challenges(@Headers('x-employee-id') employeeId?: string) {
-    return this.store.listChallenges(this.actor(employeeId));
+    return this.store.listChallenges(this.actor(employeeId)).map((challenge) => this.withResolvedSubmissionContracts(challenge));
   }
 
   @Get('/challenges/:challengeId')
   challenge(@Param('challengeId') challengeId: string, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.getChallenge(challengeId, this.actor(employeeId));
+    return this.withResolvedSubmissionContracts(this.store.getChallenge(challengeId, this.actor(employeeId)));
   }
 
   @Post('/challenges')
   createChallenge(@Body() body: Challenge & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...challenge } = body;
-    for (const version of challenge.versions ?? []) this.assertExecutorSelection(version);
+    for (const version of challenge.versions ?? []) {
+      this.assertExecutorSelection(version);
+      this.assertSubmissionContract(version);
+    }
     return this.store.createChallenge(challenge, actorId);
   }
 
@@ -359,6 +453,7 @@ export class PlatformController {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...version } = body;
     this.assertExecutorSelection(version);
+    this.assertSubmissionContract(version);
     return this.store.addChallengeVersion(challengeId, version, actorId);
   }
 
@@ -366,7 +461,8 @@ export class PlatformController {
   updateChallengeVersion(@Param('challengeId') challengeId: string, @Param('versionId') versionId: string, @Body() body: Partial<ChallengeVersion> & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...patch } = body;
-    if (patch.evaluationEngine) this.assertExecutorSelection(patch as { evaluationEngine?: { mode?: string; executor?: { id?: string; params?: Record<string, unknown> } } });
+    if (patch.evaluationEngine) this.assertExecutorSelection(patch as { evaluationEngine?: EvaluationEngineConfig });
+    this.assertSubmissionContract(patch);
     return this.store.updateChallengeVersion(challengeId, versionId, patch, actorId);
   }
 
@@ -460,10 +556,14 @@ export class PlatformController {
   }
 
   @Post('/submissions')
-  createSubmission(@Body() body: { eventId: string; subjectId: string; snapshot: SubmissionSnapshot }, @Headers('x-employee-id') employeeId?: string) {
+  async createSubmission(@Body() body: { eventId: string; subjectId: string; snapshot: SubmissionSnapshot }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.actor(employeeId);
     this.store.assertSelfOrAdmin(actorId, body.subjectId);
-    const submission = this.store.createSubmission(body.eventId, body.subjectId, this.normalizeSnapshot(body.snapshot));
+    const snapshot = this.normalizeSnapshot(body.snapshot);
+    const version = this.store.challengeVersionForEvent(body.eventId);
+    if (snapshot.artifactUri) await this.submissionContracts.validateArtifact(version, snapshot.artifactUri);
+    else if (snapshot.workspacePath) this.submissionContracts.validateWorkspace(version, snapshot.workspacePath);
+    const submission = this.store.createSubmission(body.eventId, body.subjectId, snapshot);
     this.scheduleIfAutomatic(body.eventId, submission.id);
     return submission;
   }
@@ -498,6 +598,7 @@ export class PlatformController {
         throw new BadRequestException('artifactHash does not match uploaded bytes');
       }
       await this.artifacts.validateArchive(stored.uri, event.deliveryConfig?.maxFiles ?? 2000);
+      await this.submissionContracts.validateArtifact(this.store.challengeVersionForEvent(eventId), stored.uri);
       const computedSnapshotHash = await this.artifacts.snapshotHash(stored.uri);
       if (snapshot.snapshotHash && snapshot.snapshotHash !== computedSnapshotHash) {
         throw new BadRequestException('snapshotHash does not match uploaded workspace contents');
@@ -517,6 +618,7 @@ export class PlatformController {
         throw new BadRequestException('artifactHash does not match stored artifact bytes');
       }
       await this.artifacts.validateArchive(snapshot.artifactUri, event.deliveryConfig?.maxFiles ?? 2000);
+      await this.submissionContracts.validateArtifact(this.store.challengeVersionForEvent(eventId), snapshot.artifactUri);
       const computedSnapshotHash = await this.artifacts.snapshotHash(snapshot.artifactUri);
       if (snapshot.snapshotHash && snapshot.snapshotHash !== computedSnapshotHash) {
         throw new BadRequestException('snapshotHash does not match stored artifact contents');
@@ -524,6 +626,8 @@ export class PlatformController {
       snapshot = { ...snapshot, artifactHash: actualArtifactHash, snapshotHash: computedSnapshotHash };
     } else if (!snapshot.workspacePath) {
       throw new BadRequestException('upload requires artifactBase64, artifactUri or a local workspacePath');
+    } else {
+      this.submissionContracts.validateWorkspace(this.store.challengeVersionForEvent(eventId), snapshot.workspacePath);
     }
     const submission = this.store.createSubmission(eventId, body.subjectId, this.normalizeSnapshot(snapshot));
     this.scheduleIfAutomatic(eventId, submission.id);
@@ -538,6 +642,7 @@ export class PlatformController {
     let snapshot = this.normalizeSnapshot({ ...body.snapshot, ...(this.localGit.enabled ? { workspacePath: undefined } : {}), sourceType: 'GIT_REF' });
     if (this.localGit.enabled && event.deliveryConfig?.pinAt !== 'DEADLINE' && snapshot.repository && snapshot.branch && snapshot.commitSha) {
       const local = await this.localGit.snapshot({ repository: snapshot.repository, branch: snapshot.branch, commitSha: snapshot.commitSha });
+      await this.submissionContracts.validateArtifact(this.store.challengeVersionForEvent(eventId), local.artifact.uri);
       snapshot = { ...snapshot, commitSha: local.commitSha, artifactUri: local.artifact.uri, artifactHash: local.artifact.sha256, snapshotHash: local.snapshotHash };
     }
     const submission = this.store.createSubmission(eventId, body.subjectId, snapshot);
@@ -547,25 +652,30 @@ export class PlatformController {
 
   @Post('/submissions/:submissionId/start-grading')
   startSubmission(@Param('submissionId') submissionId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.startGrading(submissionId, this.requireAdmin(employeeId));
+    const actorId = this.requireAdmin(employeeId);
+    const run = this.store.startGrading(submissionId, actorId);
+    this.evaluationBatches.create([run.id], actorId);
+    return run;
   }
 
   @Post('/submissions/:submissionId/regrade')
   regradeSubmission(@Param('submissionId') submissionId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const result = this.store.regradeSubmission(submissionId, this.requireAdmin(employeeId));
-    if (result.run?.triggerType === 'AUTO') this.autoQueue.enqueue(submissionId);
+    if (result.run?.triggerType === 'AUTO') this.scheduleIfAutomatic(result.submission.eventId, submissionId);
     return result;
   }
 
   @Post('/events/:eventId/start-grading')
   startEvent(@Param('eventId') eventId: string, @Body() body: { actorId?: string; submissionIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.startEventGrading(eventId, this.requireAdmin(employeeId), body.submissionIds);
+    const actorId = this.requireAdmin(employeeId);
+    const runs = this.store.startEventGrading(eventId, actorId, body.submissionIds);
+    return { runs, ...(runs.length ? { batch: this.evaluationBatches.create(runs.map((run) => run.id), actorId) } : {}) };
   }
 
   @Post('/events/:eventId/regrade')
   regradeEvent(@Param('eventId') eventId: string, @Body() body: { actorId?: string; submissionIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
     const result = this.store.regradeEvent(eventId, this.requireAdmin(employeeId), body.submissionIds);
-    for (const run of result.runs) if (run.triggerType === 'AUTO') this.autoQueue.enqueue(run.submissionId);
+    for (const run of result.runs) if (run.triggerType === 'AUTO') this.scheduleIfAutomatic(eventId, run.submissionId);
     return result;
   }
 
@@ -591,6 +701,9 @@ export class PlatformController {
 
   @Post('/events/:eventId/execute-local')
   async executeEventLocally(@Param('eventId') eventId: string, @Body() body: { submissionIds?: string[] } = {}, @Headers('x-employee-id') employeeId?: string) {
+    if (process.env.EMBEDDED_EVALUATION_WORKER !== 'true') {
+      throw new BadRequestException({ code: 'CODE_AGENT_WORKER_REQUIRED', message: '请由评测 Worker 领取批次并调用 Code Agent' });
+    }
     const actorId = this.requireAdmin(employeeId);
     const executions: Array<Record<string, unknown>> = [];
     const available = this.store.listSubmissions(eventId, actorId);
@@ -637,6 +750,7 @@ export class PlatformController {
         const branch = submission.snapshot.branch;
         if (!repository || !branch) throw new BadRequestException(`submission ${submission.id} has no Git repository or branch`);
         const local = await this.localGit.snapshot({ repository, branch });
+        await this.submissionContracts.validateArtifact(this.store.challengeVersionForEvent(eventId), local.artifact.uri);
         this.store.pinGitSnapshot(submission.id, { commitSha: local.commitSha, artifactUri: local.artifact.uri, artifactHash: local.artifact.sha256, snapshotHash: local.snapshotHash }, actorId);
       }
     }

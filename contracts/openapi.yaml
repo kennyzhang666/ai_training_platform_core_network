@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: AI 训战平台 API
   version: 0.5.0
-  description: 一期评测提交、触发和结果导入接口
+  description: 训战、交付目录校验、Code Agent 批次评测与结果录入接口
 servers:
   - url: http://localhost:3000
 security:
@@ -24,7 +24,6 @@ paths:
   /api/v1/auth/sso:
     post:
       operationId: syncSsoIdentity
-      security: []
       security: []
       requestBody:
         required: true
@@ -129,10 +128,10 @@ paths:
     post:
       operationId: leaseEvaluationTasks
       summary: 领取评测任务
+      deprecated: true
       description: >-
-        评测环境按此接口领取排队中的评测任务。平台只下发不可变的任务描述，
-        由评测环境自行执行引擎并回传结果；平台不在本请求内执行任何赛题或引擎代码。
-        租约到期未回传的任务会自动回到队列。
+        单份任务兼容接口。新的评测环境应使用 evaluation-batches:lease，确保管理员
+        精确选择的多份提交在同一个 Code Agent 工作目录中逐份处理。
       requestBody:
         required: true
         content:
@@ -191,6 +190,105 @@ paths:
       responses:
         '200': { description: 任务已标记失败 }
         '409': { description: 租约已失效 }
+  /api/v1/evaluation-batches:
+    get:
+      operationId: listEvaluationBatches
+      summary: 查询评测批次
+      parameters:
+        - name: eventId
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: 当前管理员范围内的评测批次 }
+        '403': { description: 需要管理员权限 }
+  /api/v1/evaluation-batches/{batchId}:
+    get:
+      operationId: getEvaluationBatch
+      parameters: [{ name: batchId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 评测批次状态 }
+        '403': { description: 需要管理员权限 }
+        '404': { description: 批次不存在 }
+  /api/v1/evaluation-batches:lease:
+    post:
+      operationId: leaseEvaluationBatches
+      summary: 领取 Code Agent 评测批次
+      description: >-
+        一个批次只包含同一训战、同一赛题版本和同一评测引擎下由管理员精确选中的提交。
+        Worker 将不可变交付件、完整评测引擎、instruction.md 和 skills 物化到一个隔离目录，
+        再调用 Code Agent bridge。部门管理员只能领取其管理范围内的批次。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerId]
+              properties:
+                workerId: { type: string }
+                limit: { type: integer, minimum: 1, maximum: 5, default: 1 }
+                executorIds: { type: array, items: { type: string } }
+      responses:
+        '200': { description: 已领取的完整批次任务 }
+        '403': { description: 需要管理员权限 }
+  /api/v1/evaluation-batches/{batchId}/heartbeat:
+    post:
+      operationId: heartbeatEvaluationBatch
+      parameters: [{ name: batchId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object, required: [leaseId], properties: { leaseId: { type: string } } } }
+      responses:
+        '200': { description: 批次租约已续期 }
+        '409': { description: 批次租约已失效 }
+  /api/v1/evaluation-batches/{batchId}/complete:
+    post:
+      operationId: completeEvaluationBatch
+      summary: 回传 Code Agent 批次结果
+      parameters: [{ name: batchId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leaseId, results]
+              properties:
+                leaseId: { type: string }
+                results:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [runId, result]
+                    properties:
+                      runId: { type: string }
+                      result: { $ref: '#/components/schemas/EvaluationResult' }
+                failures:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [runId, reason]
+                    properties:
+                      runId: { type: string }
+                      reason: { type: string, maxLength: 2000 }
+      responses:
+        '201': { description: 批次结果已逐份校验并录入 }
+        '400': { description: 结果不属于本批次或结果校验未通过 }
+        '409': { description: 批次租约已失效 }
+  /api/v1/evaluation-batches/{batchId}/fail:
+    post:
+      operationId: failEvaluationBatch
+      parameters: [{ name: batchId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object, required: [leaseId], properties: { leaseId: { type: string }, reason: { type: string } } } }
+      responses:
+        '200': { description: 批次及未完成运行已标记失败 }
+        '409': { description: 批次租约已失效 }
   /api/v1/evaluation-engines/{packageHash}/package:
     get:
       operationId: downloadEvaluationEnginePackage
@@ -210,7 +308,7 @@ paths:
       operationId: getAdminGradingQueue
       responses:
         '200':
-          description: 本地评测队列状态
+          description: Code Agent 评测批次队列状态
           content:
             application/json:
               schema:
@@ -221,6 +319,32 @@ paths:
                   running: { type: integer, minimum: 0 }
                   maxConcurrency: { type: integer, minimum: 1 }
                   scheduled: { type: integer, minimum: 0 }
+  /api/v1/admin/code-agent-runtime:
+    get:
+      operationId: getCodeAgentRuntime
+      summary: 查询 Code Agent 运行配置
+      description: 仅全局管理员可查询。命令会被解析为 executable 与 argv，Worker 不通过系统 Shell 执行。
+      responses:
+        '200':
+          description: 当前 Code Agent 运行配置
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/CodeAgentRuntimeConfig' } }
+        '403': { description: 需要全局管理员权限 }
+    put:
+      operationId: updateCodeAgentRuntime
+      summary: 更新 Code Agent 运行配置
+      description: 仅影响更新后创建的评测批次；已创建批次继续使用其冻结配置。
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/CodeAgentRuntimeInput' } }
+      responses:
+        '200':
+          description: 配置已保存
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/CodeAgentRuntimeConfig' } }
+        '400': { description: 命令或超时配置不合法 }
+        '403': { description: 需要全局管理员权限 }
   /api/v1/org-units:
     get:
       operationId: listOrgUnits
@@ -844,14 +968,15 @@ paths:
   /api/v1/grading-runs/{runId}/execute:
     post:
       operationId: executeLocalGrading
-      description: 本地开发执行器入口；生产环境由 GitLab 适配器替换。
+      deprecated: true
+      description: 仅在 EMBEDDED_EVALUATION_WORKER=true 时用于本地兼容测试；正式评测使用 Code Agent 批次 Worker。
       parameters:
         - name: runId
           in: path
           required: true
           schema: { type: string }
       responses:
-        '201': { description: 本地评测结果已写入 }
+        '201': { description: 本地兼容评测结果已写入 }
         '400': { description: 本地工作区或结果契约无效 }
   /api/v1/events/{eventId}/reveal:
     post:
@@ -871,10 +996,12 @@ paths:
   /api/v1/events/{eventId}/execute-local:
     post:
       operationId: executeEventLocally
+      deprecated: true
+      description: 仅在 EMBEDDED_EVALUATION_WORKER=true 时可用；正式评测由独立 Worker 领取批次。
       parameters:
         - $ref: '#/components/parameters/EventId'
       responses:
-        '201': { description: 场次内排队运行已在本地执行 }
+        '201': { description: 场次内排队运行已由内嵌兼容执行器处理 }
   /api/v1/audits:
     get:
       operationId: listAudits
@@ -915,6 +1042,30 @@ components:
       required: false
       schema: { type: string, minLength: 16, maxLength: 128 }
   schemas:
+    CodeAgentRuntimeInput:
+      type: object
+      additionalProperties: false
+      required: [enabled, commandLine, prompt, timeoutSeconds]
+      properties:
+        enabled: { type: boolean }
+        commandLine:
+          type: string
+          maxLength: 4096
+          description: 单行启动命令；支持 {{prompt}}、{{manifestPath}}、{{batchDir}} 占位符
+        prompt: { type: string, maxLength: 16000 }
+        timeoutSeconds: { type: integer, minimum: 60, maximum: 21600 }
+    CodeAgentRuntimeConfig:
+      allOf:
+        - $ref: '#/components/schemas/CodeAgentRuntimeInput'
+        - type: object
+          required: [schemaVersion, executable, args, configHash, updatedAt, updatedBy]
+          properties:
+            schemaVersion: { type: string, enum: ['1.0'] }
+            executable: { type: string }
+            args: { type: array, maxItems: 64, items: { type: string } }
+            configHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+            updatedAt: { type: string, format: date-time }
+            updatedBy: { type: string }
     OrgUnitInput:
       type: object
       required: [id, name]
@@ -1188,6 +1339,7 @@ components:
         deliveryPolicy: { type: object, additionalProperties: true }
         rubricVersion: { type: string }
         submissionContract: { type: string }
+        submissionContractDefinition: { $ref: '#/components/schemas/SubmissionContractDefinition' }
         evaluationEngine: { $ref: '#/components/schemas/EvaluationEngineConfig' }
         tests: { type: object, additionalProperties: true }
         resources: { type: object, additionalProperties: true }
@@ -1197,6 +1349,42 @@ components:
         bounty: { type: number, minimum: 0 }
         explore: { type: boolean }
         status: { type: string, enum: [DRAFT, PUBLISHED] }
+    SubmissionContractDefinition:
+      type: object
+      required: [schemaVersion, required, forbidden]
+      properties:
+        schemaVersion: { type: string, enum: ['1.0', '1.1'] }
+        root:
+          type: object
+          properties:
+            mode: { type: string, enum: [ARCHIVE_ROOT, SINGLE_DIRECTORY] }
+            directoryName: { type: string }
+        required:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/SubmissionContractItem' }
+        optional:
+          type: array
+          items: { $ref: '#/components/schemas/SubmissionContractItem' }
+        forbidden: { type: array, items: { type: string } }
+        languageEntry: { type: object, additionalProperties: { type: string } }
+        allowedPaths: { type: array, items: { type: string } }
+        allowAdditionalPaths: { type: boolean }
+        maxDepth: { type: integer, minimum: 1, maximum: 30 }
+        maxFiles: { type: integer, minimum: 1, maximum: 10000 }
+    SubmissionContractItem:
+      type: object
+      required: [path, type]
+      properties:
+        path: { type: string }
+        type: { type: string, enum: [markdown, source, directory, text, json, yaml] }
+        minSections: { type: integer, minimum: 1 }
+        minChars: { type: integer, minimum: 0 }
+        notTemplate: { type: boolean }
+        mustExport: { type: string }
+        signature: { type: string }
+        minFiles: { type: integer, minimum: 1 }
+        allowedExtensions: { type: array, items: { type: string } }
     EvaluationEngineConfig:
       type: object
       required: [id, version, mode, input, output]
@@ -1207,8 +1395,8 @@ components:
           type: string
           enum: [EXTERNAL_CLI, PLATFORM_LOCAL, PACKAGED]
           description: >-
-            PLATFORM_LOCAL 由平台内置执行器运行，必须提供 local；
-            PACKAGED 由平台在受控子进程中运行出题人上传的引擎包，必须提供 package；
+            PLATFORM_LOCAL 由评测 Worker 物化仓库内置执行器，必须提供 executor；
+            PACKAGED 由评测 Worker 下载并验证出题人上传的引擎包，必须提供 package；
             EXTERNAL_CLI 由管理员在平台外运行，禁止提供 local/package，
             且该赛题的训战只能使用 trigger=IMPORT。
         local:
@@ -1239,6 +1427,13 @@ components:
             fileName: { type: string }
             uploadedAt: { type: string, format: date-time }
             uploadedBy: { type: string }
+        agent:
+          type: object
+          description: 评测 Worker 交给 Code Agent 的赛题级指令和 skills，路径相对于评测引擎根目录。
+          required: [instructionPath, skillPaths]
+          properties:
+            instructionPath: { type: string }
+            skillPaths: { type: array, minItems: 1, items: { type: string } }
         input:
           type: object
           required: [format, schemaVersion, contractPath]

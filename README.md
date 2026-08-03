@@ -4,17 +4,18 @@
 
 ## 当前状态
 
-`v0.1.0` 已实现可本地验证的训战与评测闭环：
+`v0.6.0` 已实现可本地验证的训战、提交约束与 Code Agent 批次评测闭环：
 
-- 版本化的题目、提交契约和评测结果 JSON Schema；
+- 版本化的题目、评测结果 JSON Schema，以及赛题级交付目录规范；上传 ZIP 或固定 Git 版本时校验根目录、必需文件、目录、扩展名、禁止路径、白名单、文件数和目录深度；
 - Python `drill-grader validate/score/run` 基础命令；
 - NestJS/Fastify API 的提交、管理员触发、结果导入和报告查询接口；
 - AUTO / MANUAL / IMPORT 触发状态校验；
-- `LocalGradingExecutor` 受控调用 Python grader，支持隐藏测试、静态度量、结果契约校验和批量本地执行；
+- 管理员可精确选择同一赛题的一名或多名学员提交创建评测批次；独立 Worker 将不可变交付件、评测引擎、`instruction.md` 和 skills 冻结到一个隔离目录，再调用 Code Agent bridge 逐份评分并回传；
+- AUTO / MANUAL 均使用同一批次、租约和幂等结果录入协议；Worker 失败或租约过期时整个未完成批次重新排队，不能被单份任务拆开；
 - UPLOAD / GIT_REF 提交来源的快照元数据校验；
 - Git 仓库、分支模板和 commit SHA 的场次约束；
 - 本地 artifact store（开发期支持 base64 交付包保存与 SHA-256 校验）；
-- 上传的 zip 可由本地执行器安全解包到临时 workspace 后直接评分（路径穿越、软链接、文件数和膨胀大小均有限制）；
+- Worker 将上传的 ZIP 安全解包到批次 workspace 后再评分（路径穿越、软链接、文件数和膨胀大小均有限制）；
 - 文件持久化的组织树、角色、题目、审计、场次关闭/揭晓、赛季榜单和个人画像只读接口；
 - 本地认证适配器：服务端从 `X-Employee-Id` 读取工号并按角色/组织范围授权，写接口不再信任请求体中的 `actorId`；
 - 上传交付件由服务端计算内容快照哈希；配置 `LOCAL_GIT_ROOT` 后，Git 提交会在本地以 `git archive` 固化 commit、保存不可变归档并计算同口径快照哈希；
@@ -24,7 +25,7 @@
 - 赛题由发布者配置 `Challenge.category`：`TRAINING`（训战类）、`COMPETITION`（竞赛类）或 `HARD_PROBLEM`（难题类）；难题榜与赛题库共用题目记录，`Challenge.board.type=HARD_PROBLEM` 保存部门/员工发布、审核和解决状态，员工发布的难题默认进入 `PENDING_REVIEW`，管理员通过 `POST /api/v1/hard-problems/{problemId}/review` 审核后才进入难题榜；审核通过的难题自动生成独立上传交付入口，卡片进入详情页后可提交交付件；难题榜分为“待揭榜”和“揭榜成功”，管理员/发布者揭榜时可选定提交记录，揭榜成功展示揭榜人和交付件摘要；`solutionVisibility=HIDDEN` 时仅展示揭榜人，不向员工公开交付件；解决后的赛题版本仍保留在赛题库；
 - 赛题卡片先进入详情页，展示目标、要求、约束、交付件、评分版本和可选 Git 仓路径，再选择交付方式进入提交页；
 - 公告只读接口 `GET /api/v1/announcements`，与赛题、赛季、画像数据一起驱动员工首页；
-- 管理员工作台：运营总览、赛题草稿/版本/发布/归档、场次编排、评测队列与线下结果导入、公告运营、审计日志；
+- 管理员工作台：运营总览、赛题草稿/版本/发布/归档、交付目录规则表、赛题级评测引擎与 Code Agent 资产配置、场次编排、按人选择的评测中心、线下结果导入、公告运营和审计日志；
 - 管理员管理 API：`/api/v1/admin/overview`、赛题版本管理、场次更新、公告增删改，所有写操作均写入审计记录；
 - 本地文件适配器，便于没有 PostgreSQL、GitLab 或 K8s 时运行测试；GitLab 只保留最后接入的 `GradingExecutor` 适配接口。
 
@@ -58,11 +59,25 @@ pnpm dev:api
 
 默认监听 `http://127.0.0.1:3000`，健康检查地址为 `http://127.0.0.1:3000/api/v1/health`。开发期会创建一个带 `MANUAL + UPLOAD` 配置的示例场次。API 细节见 `contracts/openapi.yaml`。
 
-本地完整评分示例：提交时附带 `workspacePath: challenges/parking-fee-v1/starter`，管理员触发后调用 `POST /api/v1/grading-runs/{runId}/execute`；也可调用 `POST /api/v1/events/{eventId}/execute-local` 批量执行。报告通过 `GET /api/v1/reports/{submissionId}` 查询。
+管理员在评测中心勾选提交并发起评测后，平台会创建 `EvaluationBatch`。正式链路由独立评测 Worker 消费；`POST /grading-runs/{runId}/execute` 和 `/events/{eventId}/execute-local` 只在显式设置 `EMBEDDED_EVALUATION_WORKER=true` 时保留给兼容测试。
+
+全局管理员可在「管理后台 → 评测环境」配置 Code Agent 启动命令、任务指令和批次超时。配置会在创建批次时冻结；部门管理员不能修改。在线评测固定使用 `contracts/evaluation-agent-batch-v1.1.schema.json` 作为批次输入、`contracts/evaluation-result.schema.json` 作为单人结果，赛题页不再手工填写路径。
+
+本地端到端联调可使用仓库提供的 Code Agent 协议适配器。以下环境变量是 Worker 主机兜底，在平台未启用运行配置时生效：
+
+```powershell
+$env:EMBEDDED_EVALUATION_WORKER='false'
+$env:CODE_AGENT_COMMAND=(Get-Command node).Source
+$bridge=(Resolve-Path .\scripts\code-agent-local-bridge.mjs).Path
+$env:CODE_AGENT_ARGS_JSON=(ConvertTo-Json @($bridge) -Compress)
+node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee w00123 --worker local-eval-host
+```
+
+生产环境既可在管理端使用 `opencode -m <model> --prompt "{{prompt}}"` 直接启动，也可让 `CODE_AGENT_COMMAND` 指向真实 Code Agent bridge。Worker 始终使用 `shell: false`，凭据由主机环境提供；可用 `CODE_AGENT_ALLOWED_EXECUTABLES` 限制管理员可选择的程序。详细 ABI、路径基准、命令优先级、批次目录和结果索引见 `docs/evaluation-engine-protocol.md`；交付目录规则见 `docs/submission-contract.md`。
 
 本地开发认证使用请求头 `X-Employee-Id`（`w00123` 为本地管理员，`w00124`–`w00132` 为本地学员），缺少身份头时默认拒绝请求。仅在单机演示时可显式设置 `ALLOW_ANONYMOUS_LOCAL=true`，让无身份请求使用种子管理员。生产接入内部 SSO 时，调用 `POST /api/v1/auth/sso` 传入 SSO 返回的工号、姓名和部门；平台按工号幂等登记员工，部门名称、编号或路径能匹配组织树时自动归属，否则保留未配置部门状态，由管理员后续配置。内部 SSO 网关也可以在转发 API 请求时附带 `X-SSO-Employee-No`、`X-SSO-Name`、`X-SSO-Department`，平台会在首次请求时完成同样的同步；网关必须清理外部请求自行携带的这些头。管理员不能手工新增员工，也不能修改工号、姓名或账号状态，只能配置部门归属以及“新员工、导师、全局管理员、部门管理员”角色。生产环境不应让浏览器直接传工号。管理员可通过 `PUT /api/v1/events/{eventId}/participants` 或 `POST /api/v1/events/{eventId}/participants:import` 配置白名单；场次设为 `ALLOWLIST` 后，非名单提交会被拒绝。
 
-前端上传场次也可以不选文件，直接填写仓库内的 `workspacePath` 做本地开发评测；有交付包时则会保存到 `tmp/artifacts/`，并在本地执行器中安全解包。
+API 本地测试也可以提交仓库内的 `workspacePath`；浏览器正式交付只接收 ZIP 或配置的 Git 版本。有交付包时会保存到 `tmp/artifacts/`，由 Worker 在批次目录中安全解包并再次核对内容快照哈希。
 
 开发数据默认写入仓库 `tmp/platform-data.json` 和 `tmp/artifacts/`；可用 `PLATFORM_DATA_FILE`、`ARTIFACT_ROOT`、`LOCAL_WORKSPACE_ROOT` 覆盖路径。若要测试真实本地 Git 取件，把裸仓/工作仓放在 `LOCAL_GIT_ROOT` 下，并提交相对仓库路径、分支和 commit SHA；未配置该变量时，GitLab 仍只走后续生产适配接口，不会访问远程网络。
 
@@ -76,4 +91,4 @@ pnpm dev:web
 
 前端默认使用 `w00123`，可用 `VITE_EMPLOYEE_ID=w00124 pnpm dev:web` 模拟学员身份（PowerShell 可先 `$env:VITE_EMPLOYEE_ID='w00124'`）。
 
-管理员账号使用本地种子用户 `w00123` 登录后，点击顶栏“管理后台”进入管理工作台。管理员进入“AI 能力画像”后，全组织查看个人明细；选择部门或勾选部分员工时，展示的是该范围的平均能力画像，而不是逐人卡片。对应 API 为 `GET /api/v1/admin/capabilities`，支持 `orgPath`、逗号分隔的 `subjectIds` 和 `includeProfiles=false` 聚合模式。`pnpm acceptance:local` 会启动隔离内存 API，模拟 10 个学员同时提交 AUTO 场次并等待队列清空；可通过 `LOCAL_GRADING_CONCURRENCY` 调整本地有界并发。文件适配器重启时会恢复未完成的 AUTO 队列任务，不会自动执行 MANUAL/IMPORT。当前后台已经覆盖本地开发闭环；生产化阶段还需要把本地 header 认证替换为 SSO/JWT、把文件适配器替换为 PostgreSQL/Prisma，并接入 GitLab CI、K8s 沙箱、结构化指标和权限审批。
+管理员账号使用本地种子用户 `w00123` 登录后，点击顶栏“管理后台”进入管理工作台。管理员进入“AI 能力画像”后，全组织查看个人明细；选择部门或勾选部分员工时，展示的是该范围的平均能力画像，而不是逐人卡片。对应 API 为 `GET /api/v1/admin/capabilities`，支持 `orgPath`、逗号分隔的 `subjectIds` 和 `includeProfiles=false` 聚合模式。`pnpm acceptance:local` 仍使用显式内嵌执行器做并发回归；真实批次链路由 `evaluation-worker.test.ts` 启动 Worker 与 Code Agent 适配器验收。文件适配器重启时会保留未完成批次，租约超时后可重新领取。生产化阶段还需要把本地 header 认证替换为 SSO/JWT、把文件适配器替换为 PostgreSQL/Prisma，并接入实际 Code Agent 服务、GitLab CI 适配器、K8s 沙箱、结构化指标和权限审批。

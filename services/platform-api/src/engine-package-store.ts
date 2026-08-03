@@ -142,6 +142,12 @@ export class EnginePackageStore {
       throw new BadRequestException({ code: 'ENGINE_PACKAGE_MANIFEST_INVALID', message: 'engine.json 不符合引擎包契约', errors });
     }
     const typed = manifest as EnginePackageManifest;
+    if (Object.keys(typed.platformDependencies ?? {}).length) {
+      throw new BadRequestException({
+        code: 'ENGINE_PACKAGE_PLATFORM_DEPENDENCY_FORBIDDEN',
+        message: '上传的评测引擎包必须自包含，不能引用平台仓库目录',
+      });
+    }
     // A declared path that does not exist is an authoring mistake that must
     // surface at upload time, not on the first trainee submission.
     const declared: Array<[string, string | undefined]> = [
@@ -150,6 +156,8 @@ export class EnginePackageStore {
       ['assets.submissionContract', typed.assets?.submissionContract],
       ['assets.testsDir', typed.assets?.testsDir],
       ['assets.referenceDir', typed.assets?.referenceDir],
+      ['agent.instruction', typed.agent?.instruction],
+      ...((typed.agent?.skills ?? []).map((path, index) => [`agent.skills[${index}]`, path] as [string, string])),
     ];
     for (const [label, value] of declared) {
       if (!value) continue;

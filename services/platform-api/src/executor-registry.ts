@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import Ajv2020, { ValidateFunction } from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
@@ -63,10 +64,29 @@ export class ExecutorRegistry {
    * identity, so editing a built-in executor invalidates cached results the
    * same way uploading a new package does.
    */
-  private contentHash(executorId: string, directory: string): string {
+  private dependencyRecords(manifest: EnginePackageManifest): ResolvedEngine['platformDependencies'] {
+    return Object.entries(manifest.platformDependencies ?? {})
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([name, repositoryPath]) => {
+        const root = this.projectRoot();
+        const target = resolve(root, repositoryPath);
+        const child = relative(root, target);
+        if (!child || child === '..' || child.startsWith(`..${sep}`) || isAbsolute(child) || !existsSync(target) || !statSync(target).isDirectory()) {
+          throw new BadRequestException({ code: 'EXECUTOR_DEPENDENCY_INVALID', message: `内置执行器依赖目录不存在：${repositoryPath}` });
+        }
+        return { name, repositoryPath, contentHash: computeDirectorySnapshotHash(target) };
+      });
+  }
+
+  private contentHash(executorId: string, directory: string, manifest: EnginePackageManifest): string {
     const cached = this.hashes.get(executorId);
     if (cached) return cached;
-    const hash = computeDirectorySnapshotHash(directory);
+    const digest = createHash('sha256');
+    digest.update(`engine\0${computeDirectorySnapshotHash(directory)}\n`, 'utf8');
+    for (const dependency of this.dependencyRecords(manifest)) {
+      digest.update(`${dependency.name}\0${dependency.repositoryPath}\0${dependency.contentHash}\n`, 'utf8');
+    }
+    const hash = digest.digest('hex');
     this.hashes.set(executorId, hash);
     return hash;
   }
@@ -82,7 +102,7 @@ export class ExecutorRegistry {
           version: manifest.version,
           title: manifest.title ?? manifest.id,
           description: manifest.description,
-          contentHash: this.contentHash(manifest.id, root),
+          contentHash: this.contentHash(manifest.id, root, manifest),
           params: manifest.params ?? null,
           limits: manifest.limits ?? null,
         };
@@ -119,6 +139,42 @@ export class ExecutorRegistry {
     }
   }
 
+  /**
+   * Code Agent assets are part of the frozen engine, not arbitrary host paths.
+   * Validate them while the challenge version is edited so an invalid package
+   * can never enter the evaluation queue.
+   */
+  assertAgentConfiguration(engine: EvaluationEngineConfig): void {
+    if (!['PLATFORM_LOCAL', 'PACKAGED'].includes(engine.mode)) return;
+    const resolvedEngine = this.resolve(engine);
+    const agent = engine.agent ?? (resolvedEngine.manifest.agent
+      ? { instructionPath: resolvedEngine.manifest.agent.instruction, skillPaths: resolvedEngine.manifest.agent.skills }
+      : { instructionPath: 'instruction.md', skillPaths: ['skills/evaluation'] });
+    if (!agent.instructionPath.trim()) {
+      throw new BadRequestException({ code: 'CODE_AGENT_INSTRUCTION_REQUIRED', message: '请配置 Code Agent 评测指令' });
+    }
+    if (!agent.skillPaths.length || agent.skillPaths.some((path) => !path.trim())) {
+      throw new BadRequestException({ code: 'CODE_AGENT_SKILLS_REQUIRED', message: '请至少配置一个 Code Agent skill' });
+    }
+    for (const [kind, configuredPath] of [
+      ['instruction', agent.instructionPath],
+      ...agent.skillPaths.map((path) => ['skill', path]),
+    ] as Array<['instruction' | 'skill', string]>) {
+      const target = resolve(resolvedEngine.root, configuredPath);
+      const relativePath = relative(resolvedEngine.root, target);
+      if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath) || !existsSync(target)) {
+        throw new BadRequestException({ code: 'CODE_AGENT_ASSET_MISSING', message: `Code Agent ${kind} 不存在：${configuredPath}` });
+      }
+      if (kind === 'instruction' && !statSync(target).isFile()) {
+        throw new BadRequestException({ code: 'CODE_AGENT_ASSET_INVALID', message: `Code Agent instruction 必须是文件：${configuredPath}` });
+      }
+      const skillFile = statSync(target).isDirectory() ? join(target, 'SKILL.md') : target;
+      if (kind === 'skill' && (!existsSync(skillFile) || !statSync(skillFile).isFile())) {
+        throw new BadRequestException({ code: 'CODE_AGENT_ASSET_INVALID', message: `Code Agent skill 缺少 SKILL.md：${configuredPath}` });
+      }
+    }
+  }
+
   /** Resolve either kind of engine into the shape the runner and worker use. */
   resolve(engine: EvaluationEngineConfig): ResolvedEngine {
     if (engine.mode === 'PACKAGED') {
@@ -132,6 +188,7 @@ export class ExecutorRegistry {
         root: this.packages.packageRoot(packageHash),
         manifest: this.packages.readManifest(packageHash),
         params: {},
+        platformDependencies: [],
       };
     }
     if (engine.mode === 'PLATFORM_LOCAL') {
@@ -142,10 +199,11 @@ export class ExecutorRegistry {
         source: 'BUILT_IN',
         id: manifest.id,
         version: manifest.version,
-        packageHash: this.contentHash(manifest.id, root),
+        packageHash: this.contentHash(manifest.id, root, manifest),
         root,
         manifest,
         params: engine.executor?.params ?? {},
+        platformDependencies: this.dependencyRecords(manifest),
       };
     }
     throw new BadRequestException({ code: 'ENGINE_NOT_RUNNABLE', message: `${engine.mode} 引擎不在平台内执行` });

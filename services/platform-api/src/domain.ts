@@ -13,6 +13,29 @@ export type EventPurpose = 'TRAINING' | 'HARD_PROBLEM';
  *                   a controlled subprocess.
  */
 export type EvaluationEngineMode = 'EXTERNAL_CLI' | 'PLATFORM_LOCAL' | 'PACKAGED';
+
+export interface CodeAgentRuntimeInput {
+  enabled: boolean;
+  /** Administrator-facing single-line command. Parsed once and never run through a shell. */
+  commandLine: string;
+  /** Optional organization-level instruction prepended to the mandatory batch protocol. */
+  prompt: string;
+  timeoutSeconds: number;
+}
+
+export interface CodeAgentRuntimeConfig extends CodeAgentRuntimeInput {
+  schemaVersion: '1.0';
+  executable: string;
+  args: string[];
+  configHash: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export type CodeAgentRuntimeSnapshot = Pick<
+  CodeAgentRuntimeConfig,
+  'schemaVersion' | 'executable' | 'args' | 'prompt' | 'timeoutSeconds' | 'configHash'
+>;
 export type SubmissionState =
   | 'RECEIVED'
   | 'QUEUED'
@@ -129,6 +152,8 @@ export interface GradingRun {
   leaseId?: string;
   leasedBy?: string;
   leaseExpiresAt?: string;
+  /** Batch that currently owns this run. A run can belong to only one active batch. */
+  evaluationBatchId?: string;
 }
 
 /** One unit of work handed to an evaluation worker. */
@@ -149,6 +174,8 @@ export interface EvaluationTask {
     params: Record<string, unknown>;
     limits: { wallClockSeconds: number; memoryMB: number; outputBytes: number };
     assets: Record<string, string>;
+    /** Repository assets frozen beside a built-in engine by the Worker. */
+    platformDependencies?: Array<{ name: string; repositoryPath: string; contentHash: string }>;
   };
   challenge: { id: string; title: string; challengeVersion: string; rubricVersion: string; zone?: 'YELLOW' | 'BLUE' };
   subject: { id: string; name?: string; orgPath?: string };
@@ -165,6 +192,64 @@ export interface EvaluationTask {
     workspacePath?: string;
     submittedAt: string;
   };
+}
+
+export type EvaluationBatchStatus = 'QUEUED' | 'RUNNING' | 'PARTIAL' | 'COMPLETED' | 'FAILED';
+
+/**
+ * An immutable, same-challenge set of grading runs sent to one Code Agent.
+ * The exact run ids are frozen at creation so selecting one employee never
+ * accidentally expands into "all submissions" while a worker is running.
+ */
+export interface EvaluationBatch {
+  id: string;
+  eventId: string;
+  challengeVersion: string;
+  runIds: string[];
+  submissionIds: string[];
+  engineIdentity: string;
+  /** Global-admin runtime configuration frozen when this batch is created. */
+  codeAgentRuntime?: CodeAgentRuntimeSnapshot;
+  status: EvaluationBatchStatus;
+  createdBy: string;
+  createdAt: string;
+  leaseId?: string;
+  leasedBy?: string;
+  leaseExpiresAt?: string;
+  /** Lease token retained after completion only to make the callback idempotent. */
+  completionLeaseId?: string;
+  completedRunIds?: string[];
+  failedRunIds?: string[];
+  failureReason?: string;
+  finishedAt?: string;
+}
+
+/** One learner delivery inside a Code Agent evaluation batch. */
+export interface EvaluationBatchSubmission {
+  runId: string;
+  attempt: number;
+  triggerType: TriggerType;
+  idempotencyKey: string;
+  subject: { id: string; name?: string; orgPath?: string };
+  submission: EvaluationTask['submission'];
+}
+
+/** Work descriptor leased by an evaluation-host worker. */
+export interface EvaluationBatchTask {
+  batchId: string;
+  leaseId: string;
+  leaseExpiresAt: string;
+  engine: EvaluationTask['engine'] & {
+    agent: { instruction: string; skills: string[] };
+  };
+  /** Omitted when the Worker must use its host-level CODE_AGENT_COMMAND fallback. */
+  codeAgentRuntime?: CodeAgentRuntimeSnapshot;
+  contracts: {
+    input: EvaluationEngineConfig['input'];
+    output: EvaluationEngineConfig['output'];
+  };
+  challenge: EvaluationTask['challenge'];
+  submissions: EvaluationBatchSubmission[];
 }
 
 /**
@@ -186,7 +271,7 @@ export interface LocalEvaluationConfig {
 
 /** engine.json, frozen inside an uploaded engine package. */
 export interface EnginePackageManifest {
-  schemaVersion: '1.0';
+  schemaVersion: '1.0' | '1.1';
   id: string;
   version: string;
   /** Display name in the built-in executor picker. */
@@ -210,10 +295,17 @@ export interface EnginePackageManifest {
     testsDir?: string;
     referenceDir?: string;
   };
+  /** Code Agent orchestration assets. Required by manifest schema 1.1. */
+  agent?: {
+    instruction: string;
+    skills: string[];
+  };
   selfCheck?: {
     expectMinTotal?: number;
     expectStatus?: 'COMPLETE' | 'PARTIAL';
   };
+  /** Built-in executors only. Uploaded engine packages must be self-contained. */
+  platformDependencies?: Record<string, string>;
   metadata?: Record<string, unknown>;
 }
 
@@ -227,6 +319,7 @@ export interface ResolvedEngine {
   root: string;
   manifest: EnginePackageManifest;
   params: Record<string, unknown>;
+  platformDependencies: Array<{ name: string; repositoryPath: string; contentHash: string }>;
 }
 
 export interface EnginePackageRecord {
@@ -267,6 +360,11 @@ export interface EvaluationEngineConfig {
   local?: LocalEvaluationConfig;
   /** Required by PACKAGED, rejected for the other modes. */
   package?: EnginePackageReference;
+  /** Paths loaded by the evaluation-host Code Agent, relative to the engine root. */
+  agent?: {
+    instructionPath: string;
+    skillPaths: string[];
+  };
   input: {
     format: 'JSON';
     schemaVersion: string;
@@ -363,6 +461,39 @@ export interface AdminAccess {
   scopeOrgPaths: string[];
 }
 
+export type SubmissionContractItemType = 'markdown' | 'source' | 'directory' | 'text' | 'json' | 'yaml';
+
+export interface SubmissionContractItem {
+  path: string;
+  type?: SubmissionContractItemType;
+  minSections?: number;
+  minChars?: number;
+  notTemplate?: boolean;
+  mustExport?: string;
+  signature?: string;
+  /** Minimum number of files matched by a directory or glob rule. */
+  minFiles?: number;
+  /** Case-insensitive file extensions allowed for the matched files. */
+  allowedExtensions?: string[];
+}
+
+/**
+ * Per-challenge delivery layout. Version 1.0 mirrors the original grader
+ * contract; 1.1 adds archive-root and allow-list controls used at upload time.
+ */
+export interface SubmissionContractDefinition {
+  schemaVersion: '1.0' | '1.1';
+  root?: { mode: 'ARCHIVE_ROOT' | 'SINGLE_DIRECTORY'; directoryName?: string };
+  required: SubmissionContractItem[];
+  optional?: SubmissionContractItem[];
+  forbidden: string[];
+  languageEntry?: Partial<Record<'python' | 'java' | 'go', string>>;
+  allowedPaths?: string[];
+  allowAdditionalPaths?: boolean;
+  maxDepth?: number;
+  maxFiles?: number;
+}
+
 export interface ChallengeVersion {
   id: string;
   challengeId: string;
@@ -380,6 +511,8 @@ export interface ChallengeVersion {
   deliveryPolicy: Record<string, unknown>;
   rubricVersion: string;
   submissionContract: string;
+  /** Inline, version-frozen delivery layout configured in the challenge editor. */
+  submissionContractDefinition?: SubmissionContractDefinition;
   /** The engine contract used to evaluate this challenge version. */
   evaluationEngine?: EvaluationEngineConfig;
   tests?: { public?: string[]; hidden?: string[]; golden?: string[] };

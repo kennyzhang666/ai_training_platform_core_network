@@ -19,8 +19,8 @@
 为保证本地可测试性，当前开发采用“本地优先、外部适配最后”的顺序：
 
 1. 先完成文件持久化适配器、组织/角色、题目/场次、上传/Git 快照、离线评测、报告、赛季和画像；
-2. 本地评测使用受控子进程和本地 Git，不依赖 GitLab、K8s、SSO 或内部模型网关；
-3. GitLab 自动评测最后只实现 `GradingExecutor` 适配接口和结果回调契约，接入真实 GitLab CI 不阻塞本地验收。
+2. 平台将管理员精确选择的提交冻结成批次；独立 Worker 把交付件、赛题引擎、`instruction.md` 和 skills 物化到同一目录，再调用 Code Agent bridge 逐份评测；
+3. 本地用协议适配器完成端到端验收，不依赖 GitLab、K8s、SSO 或内部模型网关；真实 Code Agent 服务和 GitLab 自动评测适配最后接入。
 
 本地适配器和生产适配器必须共享同一领域服务、结果 Schema、幂等规则和状态机，不能因为最后接入 GitLab 而重写业务层。
 
@@ -37,13 +37,13 @@
 - 组织树与向下继承作用域；
 - 场次可配置 `UPLOAD / GIT_REF` 两种交付件来源；
 - 上传文件或 Git 分支均转换为不可变提交快照；
-- 提交契约校验；
-- 评测执行器抽象；开发期用受控本地子进程执行隐藏测试，生产再替换为 K8s 沙箱；
+- 每个赛题版本可定制交付目录规范；上传 ZIP 或固定 Git 版本时校验根目录、必需文件/目录、扩展名、禁止路径、白名单、文件数和目录深度；
+- 评测执行器抽象；开发期由独立 Worker 通过 Code Agent bridge 调用冻结的评测引擎，生产再替换 bridge 和 K8s 沙箱；
 - Verify 40 分与 Code 20 分规则引擎；
 - 场次可配置 `AUTO / MANUAL / IMPORT` 三种评测触发方式；
-- 管理员可批量触发评测，也可上传线下评测结果；
+- 管理员可精确选择一名或多名学员的提交创建批次，也可上传线下评测结果；
 - 统一结果 Schema、rubricVersion 和幂等键；
-- 自动或管理员触发时，由本地 `LocalGradingExecutor` 调用同一套评测引擎；
+- 自动或管理员触发时，使用同一套批次、租约、Code Agent 和结果回传协议；
 - 结果写入平台 API；
 - 员工端详细参赛报告：提交快照、维度拆解、评分项证据、诊断、问题定位、改进建议和运行时间线；
 - 员工端 AI 能力画像：保留 Verify/Spec/Code/Collab 四维评测总览与 V/S/C/P 16 个评分点矩阵，同时聚合 AI 认知与选型、任务理解与拆解、提示词与上下文工程、检索与事实核验、工具与 Agent 编排、输出评审与测试、工程交付与自动化、安全合规与风险 8 个能力域；提供历次趋势、分区计数、部门中位数对比、证据覆盖度、薄弱项和推荐练习；
@@ -452,8 +452,15 @@ POST   /api/v1/events/{id}/submissions:register-git
 GET    /api/v1/submissions/{id}
 POST   /api/v1/submissions/{id}/start-grading
 POST   /api/v1/events/{id}/start-grading
-POST   /api/v1/grading-runs/{id}/execute       # 本地 LocalGradingExecutor
-POST   /api/v1/events/{id}/execute-local       # 本地批量执行
+GET    /api/v1/evaluation-batches
+GET    /api/v1/admin/code-agent-runtime        # 仅全局管理员
+PUT    /api/v1/admin/code-agent-runtime        # 仅全局管理员，写审计
+POST   /api/v1/evaluation-batches:lease
+POST   /api/v1/evaluation-batches/{id}/heartbeat
+POST   /api/v1/evaluation-batches/{id}/complete
+POST   /api/v1/evaluation-batches/{id}/fail
+POST   /api/v1/grading-runs/{id}/execute       # 仅显式内嵌兼容测试
+POST   /api/v1/events/{id}/execute-local       # 仅显式内嵌兼容测试
 POST   /api/v1/grading-results:import
 POST   /api/v1/events/{id}/close
 POST   /api/v1/events/{id}/reveal
@@ -480,7 +487,10 @@ GET    /api/v1/profiles/{userId}
 - 客户端不得通过提交接口传入任意 Git URL；仓库路径必须来自管理员发布并校验过的场次配置；
 - 导入接口必须支持幂等重试；
 - `start-grading` 仅接受 `trigger=MANUAL` 的场次，支持单份和批量提交；
-- `trigger=AUTO` 的场次由提交事件自动创建运行记录，执行器通过 `GradingExecutor` 注入；本地用 `LocalGradingExecutor`，最后再接 GitLab；
+- `trigger=AUTO` 的场次由提交事件自动创建运行记录和评测批次；`trigger=MANUAL` 只冻结管理员传入的 `submissionIds`，不得扩为全场提交；
+- Worker 领取完整批次，校验交付件和引擎内容哈希，加载赛题级 instruction 与 skills，并用租约回传逐份结果；
+- 在线评测输入固定为 `evaluation-agent-batch-v1.1.schema.json`，单人结果固定为 `evaluation-result.schema.json`；Worker 将两份 Schema 物化到批次目录并记录哈希；
+- 全局管理员可以配置 Code Agent 单行启动命令、任务指令和超时；配置创建批次时冻结，Worker 使用 `shell: false` 启动，部门管理员无权修改；
 - `trigger=IMPORT` 的场次禁止启动 CI 评测，只能通过导入接口产生结果；
 - 批量导入支持逐条返回成功或失败，不能因为一条非法结果回滚整批合法结果；
 - 错误响应返回稳定错误码、字段路径和可读说明；
@@ -693,28 +703,30 @@ GET    /api/v1/profiles/{userId}
 ### Sprint 4：本地平台闭环与体验（5–7 天）
 
 - 文件持久化适配器、组织树、角色、题目版本、场次和审计记录；
-- `LocalGradingExecutor` 调用同一套 Python grader，支持单份和场次批量执行；
+- 独立评测 Worker 领取同赛题批次，将完整引擎与选中交付件物化到隔离目录，并通过本地 Code Agent 协议适配器逐份调用 Python grader；
+- 赛题版本配置交付目录规范、评测引擎、instruction 与 skills；提交前完成目录结构预检；
 - 报告查询、封存/揭晓、赛季榜单和个人画像只读 API；
 - 报告 API 返回评分项证据、findings、运行诊断和推荐动作；画像 API 返回四维归一化分数、8 个版本化 AI 能力域、16 个评分点历史档位、分区统计、部门中位数、证据覆盖度、薄弱项和趋势序列；能力域无证据时必须返回待评测，不得由平台推断分数；
 - 员工首页（开放赛题、公告、赛季积分、榜单、最近动态）、个人中心与赛题/提交工作台；
-- 管理员触发、本地执行和结果展示；
+- 管理员按人选择、批次发起评测、Worker 结果回传和结果展示；
 - 管理员工作台（运营总览、赛题版本发布、场次编排、评测队列、结果导入、公告和审计）；
 - 10 人并发演练的本地状态机测试。
 
 验收：UPLOAD 与 GIT_REF 均能形成只读快照；AUTO/MANUAL/IMPORT 的状态转换、结果幂等、详细报告和能力画像数据均可重复测试；GitLab/K8s 不在本轮本地验收依赖中。
 
-### 当前完成状态（2026-08-01）
+### 当前完成状态（2026-08-03）
 
-Sprint 1–4 的本地实现已完成并通过验收：Python grader 的黄金样本、重复快照哈希、超时与 findings；服务端统一快照、Git commit 固化、上传归档限制、结果二次计分校验、服务端补齐员工/组织快照并拒绝 `gradingRunId` 碰撞、AUTO 有界队列、MANUAL/IMPORT 状态机、权限/组织边界、详细报告与 8 域能力画像；员工端与管理员端的本地工作台（含 Git 提交时/截止时锁定配置）；管理员可按全组织查看个人明细，按部门或选定人员查看四维/8 域/16 点的群体平均画像与有效样本覆盖；SSO 工号首次登录幂等建档、部门自动匹配及管理员角色/部门配置；以及 10 个本地种子学员同时提交 AUTO 场次的并发演练。使用 `pnpm acceptance:local` 可单独重跑并发验收。
+Sprint 1–4 的本地实现已完成并通过验收：Python grader 的黄金样本、重复快照哈希、超时与 findings；服务端统一快照、Git commit 固化、上传归档限制、赛题级 1.1 交付目录规范、结果二次计分校验、服务端补齐员工/组织快照并拒绝 `gradingRunId` 碰撞、AUTO/MANUAL/IMPORT 状态机、权限/组织边界、详细报告与 8 域能力画像；管理员可精确选择提交创建不可拆分的 Code Agent 批次；Worker 校验并物化完整引擎、平台运行依赖和所有选中交付件，加载赛题 instruction/skills，逐份评分并幂等回传；员工端与管理员端已提供目录规则配置和提交要求展示。端到端测试会实际启动 API、Worker 和本地 Code Agent bridge，并验证两名选中员工完成评测、未选员工保持待处理。
 
-本地实现使用文件持久化和受控 Python 子进程，生产关系模型已同步到 `services/platform-api/prisma/` 的 schema 与首个 migration，但不会在本地测试时隐式连接数据库。真实 GitLab CI、K8s 沙箱、SSO 网关断言/JWT、PostgreSQL Repository 和生产观测按 Sprint 5/生产适配项处理；本地已经提供 SSO 身份同步接口和网关头适配。
+本地实现使用文件持久化、独立 Worker 和本地 Code Agent 协议适配器；生产关系模型已同步到 `services/platform-api/prisma/` 的 schema 与版本化 migrations（包括交付目录规范、评测引擎、批次租约和重复评测历史），但不会在本地测试时隐式连接数据库。真实 Code Agent bridge、GitLab CI、K8s 沙箱、SSO 网关断言/JWT、PostgreSQL Repository 和生产观测按 Sprint 5/生产适配项处理；本地已经提供 SSO 身份同步接口和网关头适配。
 
 ### Sprint 5：GitLab 适配接口与生产接入（最后进行，5–7 天）
 
+- 将 `CODE_AGENT_COMMAND` 切换为组织内实际 Code Agent bridge，并完成凭据、并发、超时和审计接入；
 - 实现 `GradingExecutor` 的 GitLab Pipeline 客户端；
 - GitLab Webhook/结果回调签名校验、流水线变量和失败重试；
 - 构建 grader 镜像、K8s Job 沙箱、产物留存和并发演练；
-- 用同一结果 Schema、幂等键和状态机替换本地执行器，不改领域层；
+- 复用现有批次、结果 Schema、幂等键和状态机，不改领域层；
 - SSO、部署文档、运维手册和生产故障演练。
 
 验收：一道题、10 名真实用户验证 UPLOAD/GIT_REF 与三种 trigger 的关键组合；本地与 GitLab 执行结果契约一致；同一 snapshot 重跑同分；每个扣分点可定位证据。
