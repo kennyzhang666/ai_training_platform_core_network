@@ -1319,10 +1319,43 @@ export class PlatformStore {
     const before = { ...unit };
     if (patch.name !== undefined && !patch.name.trim()) throw new BadRequestException('org unit name is required');
     if (patch.label !== undefined && !patch.label.trim()) throw new BadRequestException('org unit label is required');
+    const nextName = patch.name?.trim();
+    if (nextName && [...this.orgUnits.values()].some((candidate) => candidate.id !== unit.id && candidate.parentId === unit.parentId && candidate.name === nextName)) {
+      throw new ConflictException('同一上级部门下已存在同名部门');
+    }
     Object.assign(unit, { ...(patch.name !== undefined ? { name: patch.name.trim() } : {}), ...(patch.label !== undefined ? { label: patch.label.trim() } : {}) });
     this.audit(actorId, 'org-unit.update', `org-unit:${orgUnitId}`, before, unit);
     this.persist();
     return unit;
+  }
+
+  deleteOrgUnit(orgUnitId: string, actorId: string): void {
+    const unit = this.getOrgUnit(orgUnitId);
+    const access = this.assertAdminOrgScope(actorId, unit.path);
+    if (unit.level === 0 || unit.path === '/') throw new BadRequestException('根组织不可删除');
+    if (access.level === 'DEPARTMENT' && access.scopeOrgPaths.some((scope) => this.normalizeOrgPath(scope) === unit.path)) {
+      throw new ForbiddenException('部门管理员不能删除其管理范围的根部门');
+    }
+    if ([...this.orgUnits.values()].some((candidate) => candidate.parentId === unit.id)) {
+      throw new ConflictException('该部门仍有下级部门，请先调整组织结构');
+    }
+    if ([...this.users.values()].some((user) => user.orgUnitId === unit.id)) {
+      throw new ConflictException('该部门仍有员工，请先调整员工所属部门');
+    }
+    if ([...this.users.values()].some((user) => user.roleBindings?.some((binding) => this.normalizeOrgPath(binding.scopeOrgPath) === unit.path))) {
+      throw new ConflictException('该部门仍绑定管理员权限，请先调整权限范围');
+    }
+    if ([...this.events.values()].some((event) => event.accessPolicy?.departmentIds?.includes(unit.id))) {
+      throw new ConflictException('该部门仍用于训战面向对象，请先调整训战范围');
+    }
+    if ([...this.challenges.values()].some((challenge) => challenge.ownerOrgPath === unit.path || challenge.board?.orgPath === unit.path)
+      || [...this.hardProblems.values()].some((problem) => problem.orgPath === unit.path)
+      || [...this.announcements.values()].some((announcement) => announcement.orgPath === unit.path)) {
+      throw new ConflictException('该部门仍有关联业务数据，暂不能删除');
+    }
+    this.orgUnits.delete(unit.id);
+    this.audit(actorId, 'org-unit.delete', `org-unit:${orgUnitId}`, unit, undefined);
+    this.persist();
   }
 
   getOrgUnit(orgUnitId: string): OrgUnit {
@@ -1411,6 +1444,9 @@ export class PlatformStore {
   updateUser(userId: string, patch: { orgUnitId?: string; roles?: string[]; roleBindings?: Array<{ role: string; scopeOrgPath: string }> }, actorId: string): AppUser {
     const user = this.getUser(userId);
     const access = this.resolveAdminAccess(actorId, true);
+    const targetIsAdministrator = user.roles.some((role) => ['admin', 'global_admin', 'department_admin'].includes(role))
+      || Boolean(user.roleBindings?.some((binding) => ['admin', 'global_admin', 'department_admin'].includes(binding.role)));
+    if (access.level !== 'GLOBAL' && targetIsAdministrator) throw new ForbiddenException('管理员账号需由全局管理员配置');
     if (!user.orgPath && access.level !== 'GLOBAL') throw new ForbiddenException('未归属部门的员工需由全局管理员配置部门');
     if (user.orgPath) this.assertAdminOrgScope(actorId, user.orgPath, false);
     const before = { ...user };
@@ -1418,6 +1454,7 @@ export class PlatformStore {
     const targetUnit = departmentPatchProvided
       ? (patch.orgUnitId?.trim() ? this.getOrgUnit(patch.orgUnitId) : undefined)
       : user.orgUnitId ? this.getOrgUnit(user.orgUnitId) : undefined;
+    if (departmentPatchProvided && !targetUnit && access.level !== 'GLOBAL') throw new ForbiddenException('部门管理员只能将员工调整到其管理范围内的部门');
     if (targetUnit?.id === 'org-root') throw new BadRequestException('员工必须归属具体部门');
     if (targetUnit) this.assertAdminOrgScope(actorId, targetUnit.path);
     const nextRoles = patch.roles === undefined ? user.roles : [...new Set(patch.roles.map((role) => role.trim()).filter(Boolean))];

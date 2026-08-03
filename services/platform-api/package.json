@@ -1,6 +1,6 @@
 {
   "name": "@ai-training/platform-api",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.json",

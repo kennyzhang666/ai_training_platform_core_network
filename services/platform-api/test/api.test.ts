@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from '../src/app.module';
+import { createCorsOptions } from '../src/cors-config';
 
 // API tests must never delete or mutate the developer's persistent local data
 // file, especially when a dev server is running alongside the test process.
@@ -55,6 +56,7 @@ const ZIP_FIXTURES = {
 
 async function withApp(run: (baseUrl: string) => Promise<void>): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter());
+  app.enableCors(createCorsOptions(['http://127.0.0.1:5173']));
   await app.listen(0, '127.0.0.1');
   try {
     await run(await app.getUrl());
@@ -62,6 +64,56 @@ async function withApp(run: (baseUrl: string) => Promise<void>): Promise<void> {
     await app.close();
   }
 }
+
+test('browser preflight allows administration update and delete requests', async () => {
+  await withApp(async (baseUrl) => {
+    for (const method of ['PATCH', 'DELETE']) {
+      const response = await fetch(`${baseUrl}/api/v1/org-units/org-125`, {
+        method: 'OPTIONS',
+        headers: {
+          origin: 'http://127.0.0.1:5173',
+          'access-control-request-method': method,
+          'access-control-request-headers': 'content-type,x-employee-id',
+        },
+      });
+      assert.equal(response.status, 204);
+      assert.equal(response.headers.get('access-control-allow-origin'), 'http://127.0.0.1:5173');
+      const allowedMethods = (response.headers.get('access-control-allow-methods') ?? '').split(',').map((value) => value.trim());
+      assert.ok(allowedMethods.includes(method));
+      assert.match(response.headers.get('access-control-allow-headers') ?? '', /x-employee-id/i);
+    }
+  });
+});
+
+test('administrator can update and delete an empty department through the API', async () => {
+  await withApp(async (baseUrl) => {
+    const headers = { 'content-type': 'application/json', 'x-employee-id': 'w00123' };
+    const createdAtCollection = await fetch(`${baseUrl}/api/v1/org-units`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ id: 'org-api-empty', parentId: 'org-125', name: '接口协作组', label: '团队' }),
+    });
+    assert.equal(createdAtCollection.status, 201);
+
+    const updated = await fetch(`${baseUrl}/api/v1/org-units/org-api-empty`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ name: '接口交付组', label: '部门' }),
+    });
+    assert.equal(updated.status, 200);
+    assert.deepEqual(await updated.json(), {
+      id: 'org-api-empty', parentId: 'org-125', path: '/1/12/125/org-api-empty/', level: 4, label: '部门', name: '接口交付组',
+    });
+
+    const deleted = await fetch(`${baseUrl}/api/v1/org-units/org-api-empty`, {
+      method: 'DELETE',
+      headers: { 'x-employee-id': 'w00123' },
+    });
+    assert.equal(deleted.status, 204);
+    const missing = await fetch(`${baseUrl}/api/v1/org-units/org-api-empty`, { headers: { 'x-employee-id': 'w00123' } });
+    assert.equal(missing.status, 404);
+  });
+});
 
 test('manual upload can be triggered and imported results are idempotent', async () => {
   await withApp(async (baseUrl) => {

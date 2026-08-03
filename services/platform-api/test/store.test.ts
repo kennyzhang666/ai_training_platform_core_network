@@ -93,6 +93,38 @@ test('global administrator can maintain departments and mentors while scoped ope
   assert.equal(store.updateOrgUnit(unit.id, { name: '新业务组（调整）' }, 'w00123').name, '新业务组（调整）');
 });
 
+test('department deletion protects the organization tree and assigned employees', () => {
+  const store = new PlatformStore(':memory:');
+  const empty = store.createOrgUnit({ id: 'org-empty', parentId: 'org-125', name: '待撤销团队', label: '团队' }, 'w00123');
+  store.deleteOrgUnit(empty.id, 'w00123');
+  assert.throws(() => store.getOrgUnit(empty.id), /not found/);
+  assert.throws(() => store.deleteOrgUnit('org-root', 'w00123'), /根组织不可删除/);
+  assert.throws(() => store.deleteOrgUnit('org-125', 'w00123'), /仍有员工/);
+
+  const parent = store.createOrgUnit({ id: 'org-parent', parentId: 'org-125', name: '产品组', label: '部门' }, 'w00123');
+  const child = store.createOrgUnit({ id: 'org-child', parentId: parent.id, name: '交付团队', label: '团队' }, 'w00123');
+  assert.throws(() => store.deleteOrgUnit(parent.id, 'w00123'), /仍有下级部门/);
+  store.deleteOrgUnit(child.id, 'w00123');
+  store.deleteOrgUnit(parent.id, 'w00123');
+  assert.throws(() => store.getOrgUnit(parent.id), /not found/);
+});
+
+test('department administrators can remove empty descendants but not their scope root', () => {
+  const store = new PlatformStore(':memory:');
+  const child = store.createOrgUnit({ id: 'org-scoped-empty', parentId: 'org-125', name: '临时协作组', label: '团队' }, 'w00134');
+  store.deleteOrgUnit(child.id, 'w00134');
+  assert.throws(() => store.getOrgUnit(child.id), /not found/);
+  assert.throws(() => store.deleteOrgUnit('org-125', 'w00134'), /管理范围的根部门/);
+});
+
+test('department administrators can configure scoped employees but cannot unassign people or modify administrators', () => {
+  const store = new PlatformStore(':memory:');
+  const updated = store.updateUser('w00124', { orgUnitId: 'org-125', roles: ['learner', 'mentor'] }, 'w00134');
+  assert.deepEqual(updated.roles, ['learner', 'mentor']);
+  assert.throws(() => store.updateUser('w00124', { orgUnitId: '', roles: ['learner'] }, 'w00134'), /只能将员工调整到其管理范围内的部门/);
+  assert.throws(() => store.updateUser('w00134', { orgUnitId: 'org-125', roles: ['learner'] }, 'w00134'), /管理员账号需由全局管理员配置/);
+});
+
 test('SSO first login provisions a learner and keeps an unmatched department for administrator follow-up', () => {
   const store = new PlatformStore(':memory:');
   const first = store.syncSsoIdentity({ employeeNo: 'w01001', name: '待配置员工', department: '尚未建档部门' });

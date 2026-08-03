@@ -4,11 +4,12 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from './app.module';
 import { PlatformStore } from './store';
+import { createCorsOptions } from './cors-config';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ bodyLimit: 75 * 1024 * 1024 }));
   const configuredOrigins = (process.env.CORS_ORIGINS ?? 'http://127.0.0.1:5173,http://localhost:5173').split(',').map((origin) => origin.trim()).filter(Boolean);
-  app.enableCors({ origin: configuredOrigins });
+  app.enableCors(createCorsOptions(configuredOrigins));
   const store = app.get(PlatformStore);
   app.getHttpAdapter().getInstance().addHook('onRequest', (request: any, reply: any, done: (error?: Error) => void) => {
     const supplied = request.headers['x-request-id'];

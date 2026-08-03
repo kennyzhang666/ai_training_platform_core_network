@@ -377,6 +377,12 @@ export class PlatformController {
     return this.store.updateOrgUnit(orgUnitId, patch, actorId);
   }
 
+  @Delete('/org-units/:orgUnitId')
+  @HttpCode(204)
+  deleteOrgUnit(@Param('orgUnitId') orgUnitId: string, @Headers('x-employee-id') employeeId?: string): void {
+    this.store.deleteOrgUnit(orgUnitId, this.requireAdmin(employeeId));
+  }
+
   @Get('/org-units/:orgUnitId')
   orgUnit(@Param('orgUnitId') orgUnitId: string) {
     return this.store.getOrgUnit(orgUnitId);

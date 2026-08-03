@@ -181,7 +181,15 @@ function humanizeApiMessage(message: string): string {
     [/hard problem not found/i, '难题不存在或不可见'],
     [/challenge.*not found/i, '赛题不存在或不可见'],
     [/event.*not found/i, '训战不存在或不可见'],
+    [/global administrator role is required/i, '该操作仅限全局管理员'],
     [/administrator role is required/i, '当前账号无管理员权限'],
+    [/organization scope does not allow/i, '当前账号无权维护该部门'],
+    [/department administrators must create/i, '请选择权限范围内的上级部门'],
+    [/org unit id is invalid/i, '部门编号需使用字母、数字、下划线或连字符'],
+    [/org unit name is required/i, '请填写部门名称'],
+    [/org unit label is required/i, '请选择组织类型'],
+    [/org unit already exists/i, '该部门编号已存在'],
+    [/org unit not found/i, '部门不存在或已删除'],
     [/published challenge.*immutable/i, '已发布赛题不可直接修改，请创建新版本'],
     [/result .*invalid|schema is invalid/i, '评测结果格式不正确'],
   ];
@@ -190,7 +198,15 @@ function humanizeApiMessage(message: string): string {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const employeeId = typeof window === 'undefined' ? ADMIN_EMPLOYEE_ID : window.localStorage.getItem('ai-training.employeeId') ?? ADMIN_EMPLOYEE_ID;
-  const response = await fetch(`${API}${path}`, { ...init, headers: { 'content-type': 'application/json', 'x-employee-id': employeeId, ...(init?.headers ?? {}) } });
+  const headers = new Headers(init?.headers);
+  headers.set('x-employee-id', employeeId);
+  if (init?.body !== undefined && !headers.has('content-type')) headers.set('content-type', 'application/json');
+  let response: Response;
+  try {
+    response = await fetch(`${API}${path}`, { ...init, headers });
+  } catch {
+    throw new Error('暂时无法连接平台服务，请稍后重试');
+  }
   if (!response.ok) {
     const detail = await response.text();
     let message = '';
@@ -324,7 +340,7 @@ function auditActionLabel(action: string): string {
     'challenge.create': '创建赛题', 'challenge.update': '更新赛题', 'challenge.publish': '发布赛题', 'challenge.archive': '移入垃圾箱', 'challenge.restore': '恢复赛题',
     'challenge.version.create': '创建赛题版本', 'challenge.version.update': '更新赛题版本', 'challenge.version.publish': '发布赛题版本',
     'event.create': '创建训战', 'event.update': '更新训战', 'event.start-grading': '批量安排评测', 'event.execute-local': '执行线上评测', 'event.close': '结束训战', 'event.reveal': '公布评测结果',
-    'submission.start-grading': '安排评测', 'grading-result.import': '录入评测结果', 'grading.regrade': '重新评测', 'code-agent-runtime.update': '更新评测环境', 'org-unit.create': '创建部门', 'org-unit.update': '更新部门', 'user.create': '同步员工资料', 'user.update': '配置员工', 'user.roles.update': '配置员工权限', 'sso.user-provision': '登记员工资料', 'sso.user-sync': '同步员工资料', 'announcement.create': '发布公告', 'announcement.update': '更新公告', 'announcement.delete': '删除公告',
+    'submission.start-grading': '安排评测', 'grading-result.import': '录入评测结果', 'grading.regrade': '重新评测', 'code-agent-runtime.update': '更新评测环境', 'org-unit.create': '创建部门', 'org-unit.update': '更新部门', 'org-unit.delete': '删除部门', 'user.create': '同步员工资料', 'user.update': '配置员工', 'user.roles.update': '配置员工权限', 'sso.user-provision': '登记员工资料', 'sso.user-sync': '同步员工资料', 'announcement.create': '发布公告', 'announcement.update': '更新公告', 'announcement.delete': '删除公告',
   } as Record<string, string>)[action] ?? action;
 }
 
@@ -799,7 +815,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
       <section className="admin-main">
         {message && <div className="admin-message">{message}</div>}
         {section === 'overview' && <OverviewSection overview={overview} challenges={challenges} events={events} submissions={submissions} onSection={setSection} />}
-        {section === 'organization' && <OrganizationSection users={users} orgUnits={orgUnits} adminAccess={adminAccess} busy={busy} onSaved={() => void refresh()} onMessage={setMessage} />}
+        {section === 'organization' && <OrganizationSection users={users} orgUnits={orgUnits} adminAccess={adminAccess} busy={busy} onSaved={refresh} onMessage={setMessage} />}
         {section === 'challenges' && <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">赛题库</p><h2>赛题库</h2></div><button className="primary compact" onClick={() => { setChallengeView('active'); setChallengeForm(blankChallenge()); }}>＋ 新建赛题</button></div>{challengeForm && <ChallengeEditor form={challengeForm} setForm={setChallengeForm} onCancel={() => setChallengeForm(null)} onSave={() => void saveChallenge()} onUploadPackage={(file) => uploadEnginePackage(file, challengeForm, setChallengeForm)} executors={builtInExecutors} busy={busy} title="创建赛题草稿" />}{versionForm && selectedChallenge && <ChallengeEditor form={versionForm} setForm={setVersionForm} onCancel={() => { setVersionForm(null); setVersionEditId(''); }} onSave={() => void saveVersion()} onUploadPackage={(file) => uploadEnginePackage(file, versionForm, setVersionForm)} executors={builtInExecutors} busy={busy} title={versionEditId ? `编辑 ${selectedChallenge.id} 草稿` : `创建 ${selectedChallenge.id} 新版本`} />}{!challengeForm && !versionForm && <ChallengeList challenges={visibleChallenges} view={challengeView} activeCount={challenges.filter((challenge) => challenge.status !== 'ARCHIVED').length} trashCount={challenges.filter((challenge) => challenge.status === 'ARCHIVED').length} onViewChange={setChallengeView} selectedId={selectedChallengeId} onSelect={setSelectedChallengeId} onPublish={(id) => void runAction(() => request(`/challenges/${id}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已发布')} onTrash={(id) => void runAction(() => request(`/challenges/${id}/trash`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已移入垃圾箱')} onRestore={(id) => void runAction(() => request(`/challenges/${id}/restore`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已恢复')} />}{selectedChallenge && !challengeForm && !versionForm && <ChallengeDetail challenge={selectedChallenge} events={events} onNewVersion={() => { setVersionEditId(''); setVersionForm(draftFromVersion(selectedChallenge.versions[selectedChallenge.versions.length - 1])); }} onEditVersion={(version) => { setVersionEditId(version.id); setVersionForm(draftFromVersion(version)); }} onCategoryChange={(category) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ category, actorId: 'admin-local' }) }), '赛题类型已更新')} onSolutionVisibilityChange={(solutionVisibility) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ solutionVisibility, actorId: 'admin-local' }) }), '交付件展示策略已更新')} onPublish={(versionId) => void runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionId}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题版本已发布')} />}</section>}
         {section === 'events' && <EventsSection events={events} challenges={challenges} overview={overview} users={users} orgUnits={orgUnits} eventForm={eventForm} setEventForm={setEventForm} eventEditId={eventEditId} onNew={() => { setEventEditId(''); setEventForm(blankEvent(publishedVersions[0]?.id ?? '', challenges)); }} onEdit={(event) => { setEventEditId(event.id); setEventForm(draftFromEvent(event)); }} onCreate={() => void saveEvent()} onAction={(event, action) => void eventAction(event, action)} busy={busy} />}
         {section === 'participants' && <ParticipantSection events={events} eventId={participantEventId} setEventId={setParticipantEventId} text={participantText} setText={setParticipantText} onLoad={(id) => void loadParticipants(id)} onSave={() => void saveParticipants()} busy={busy} />}
@@ -1315,7 +1331,7 @@ function GradingSection({ submissions, events, challenges, users, queue, selecte
   </section>;
 }
 
-function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMessage }: { users: AdminUser[]; orgUnits: OrgUnit[]; adminAccess: AdminAccess; busy: boolean; onSaved: () => void; onMessage: (message: string) => void }) {
+function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMessage }: { users: AdminUser[]; orgUnits: OrgUnit[]; adminAccess: AdminAccess; busy: boolean; onSaved: () => Promise<void>; onMessage: (message: string) => void }) {
   const pageSize = 8;
   const rootUnit = orgUnits.find((unit) => unit.level === 0) ?? orgUnits[0];
   const rootUnitId = rootUnit?.id ?? 'org-root';
@@ -1325,6 +1341,9 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
   const [selectedOrgId, setSelectedOrgId] = useState(rootUnitId);
   const [collapsedOrgIds, setCollapsedOrgIds] = useState<Set<string>>(new Set());
   const [addingUnit, setAddingUnit] = useState(false);
+  const [editingUnitId, setEditingUnitId] = useState('');
+  const [unitEditForm, setUnitEditForm] = useState({ name: '', label: '部门' });
+  const [deletingUnitId, setDeletingUnitId] = useState('');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [saving, setSaving] = useState(false);
@@ -1353,7 +1372,9 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
   };
   for (const unit of childrenByParent.get('__root__') ?? []) appendVisible(unit);
   if (!visibleOrgUnits.length && rootUnit) appendVisible(rootUnit);
-  const manageableUnits = orgUnits.filter((unit) => unit.level !== 0 && (adminAccess.level === 'GLOBAL' || adminAccess.scopeOrgPaths.some((scope) => unit.path === scope || unit.path.startsWith(scope))));
+  const canManageUnit = (unit: OrgUnit) => adminAccess.level === 'GLOBAL' || adminAccess.scopeOrgPaths.some((scope) => unit.path === scope || unit.path.startsWith(scope));
+  const manageableUnits = orgUnits.filter((unit) => unit.level !== 0 && canManageUnit(unit));
+  const creatableParents = orgUnits.filter(canManageUnit);
   const selectedUnit = orgById.get(selectedOrgId);
   const unitContainsUser = (unit: OrgUnit, user: AdminUser) => {
     if (unit.level === 0) return true;
@@ -1375,11 +1396,25 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
   const pageStart = Math.max(1, Math.min(page - 2, totalPages - 4));
   const pageNumbers = Array.from({ length: Math.min(5, totalPages) }, (_, index) => pageStart + index);
   const unassignedCount = users.filter((user) => !orgById.has(user.orgUnitId)).length;
+  const selectedChildCount = selectedUnit ? (childrenByParent.get(selectedUnit.id)?.length ?? 0) : 0;
+  const selectedDirectUserCount = selectedUnit ? users.filter((user) => user.orgUnitId === selectedUnit.id).length : 0;
+  const selectedIsScopeRoot = Boolean(selectedUnit && adminAccess.level === 'DEPARTMENT' && adminAccess.scopeOrgPaths.some((scope) => scope === selectedUnit.path));
+  const selectedCanManage = Boolean(selectedUnit && canManageUnit(selectedUnit));
+  const deleteBlockReason = !selectedUnit || selectedUnit.level === 0
+    ? '根组织不可删除'
+    : selectedIsScopeRoot
+      ? '部门管理员不能删除管理范围的根部门'
+      : selectedChildCount
+        ? `请先调整 ${selectedChildCount} 个下级部门`
+        : selectedDirectUserCount
+          ? `请先调整 ${selectedDirectUserCount} 名直属员工的所属部门`
+          : '';
   const roleOptions = [
     { value: 'learner', label: '新员工' },
     { value: 'mentor', label: '导师' },
     ...(adminAccess.level === 'GLOBAL' ? [{ value: 'global_admin', label: '全局管理员' }, { value: 'department_admin', label: '部门管理员' }] : []),
   ];
+  const canConfigureUser = (user: AdminUser) => adminAccess.level === 'GLOBAL' || !editableRoles(user).some((role) => ['global_admin', 'department_admin'].includes(role));
 
   useEffect(() => { setPage((current) => Math.min(current, totalPages)); }, [totalPages]);
   useEffect(() => { setPage(1); }, [selectedOrgId, query]);
@@ -1387,10 +1422,14 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
 
   const save = async (action: () => Promise<unknown>, success: string): Promise<boolean> => {
     setSaving(true);
-    try { await action(); onMessage(success); onSaved(); return true; } catch (error) { onMessage(error instanceof Error ? error.message : '操作未完成'); return false; } finally { setSaving(false); }
+    try { await action(); await onSaved(); onMessage(success); return true; } catch (error) { onMessage(error instanceof Error ? error.message : '操作未完成'); return false; } finally { setSaving(false); }
   };
   const clearEdit = () => { setEditingId(''); setUserForm({ orgUnitId: '', roles: ['learner'] }); };
-  const edit = (user: AdminUser) => { setEditingId(user.id); setUserForm({ orgUnitId: user.orgUnitId, roles: editableRoles(user) }); };
+  const edit = (user: AdminUser) => {
+    if (!canConfigureUser(user)) { onMessage('管理员账号需由全局管理员配置'); return; }
+    setEditingId(user.id);
+    setUserForm({ orgUnitId: user.orgUnitId, roles: editableRoles(user) });
+  };
   const toggleRole = (role: string) => setUserForm((current) => ({ ...current, roles: current.roles.includes(role) ? current.roles.filter((item) => item !== role) : [...current.roles, role] }));
   const submitUser = () => {
     if (!editingId) { onMessage('员工首次登录后自动登记'); return; }
@@ -1410,8 +1449,38 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
     if (!unitForm.id.trim() || !unitForm.name.trim()) { onMessage('请填写部门编号和名称'); return; }
     const success = await save(() => request('/org-units', { method: 'POST', body: JSON.stringify(unitForm) }), '部门已创建');
     if (success) {
+      setSelectedOrgId(unitForm.id.trim());
       setUnitForm({ id: '', name: '', label: '部门', parentId: rootUnitId });
       setAddingUnit(false);
+    }
+  };
+  const startAddingUnit = (parentId?: string) => {
+    const preferredParent = parentId ? orgById.get(parentId) : selectedUnit;
+    const parent = preferredParent && canManageUnit(preferredParent) ? preferredParent : creatableParents[0];
+    if (!parent) { onMessage('当前权限范围内暂无可维护部门'); return; }
+    setUnitForm({ id: '', name: '', label: '部门', parentId: parent.id });
+    setAddingUnit(true);
+    setEditingUnitId('');
+    setDeletingUnitId('');
+  };
+  const startEditingUnit = (unit: OrgUnit) => {
+    setUnitEditForm({ name: unit.name, label: unit.label });
+    setEditingUnitId(unit.id);
+    setAddingUnit(false);
+    setDeletingUnitId('');
+  };
+  const updateUnit = async () => {
+    if (!editingUnitId || !unitEditForm.name.trim()) { onMessage('请填写部门名称'); return; }
+    const success = await save(() => request(`/org-units/${editingUnitId}`, { method: 'PATCH', body: JSON.stringify(unitEditForm) }), '部门信息已保存');
+    if (success) setEditingUnitId('');
+  };
+  const deleteUnit = async (unit: OrgUnit) => {
+    const nextSelection = unit.parentId ?? rootUnitId;
+    const success = await save(() => request(`/org-units/${unit.id}`, { method: 'DELETE' }), '部门已删除');
+    if (success) {
+      setSelectedOrgId(nextSelection);
+      setDeletingUnitId('');
+      setEditingUnitId('');
     }
   };
   const toggleOrg = (unit: OrgUnit) => setCollapsedOrgIds((current) => {
@@ -1419,28 +1488,30 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
     if (next.has(unit.id)) next.delete(unit.id); else next.add(unit.id);
     return next;
   });
-  const selectOrg = (unitId: string) => { setSelectedOrgId(unitId); clearEdit(); };
+  const selectOrg = (unitId: string) => { setSelectedOrgId(unitId); clearEdit(); setAddingUnit(false); setEditingUnitId(''); setDeletingUnitId(''); };
   const selectedLabel = selectedOrgId === '__unassigned__' ? '未配置部门' : selectedUnit?.level === 0 ? '全部员工' : selectedUnit?.name ?? '全部员工';
   return <section className="admin-section">
     <div className="admin-section-heading"><div><p className="kicker">组织与人员</p><h2>组织与人员</h2></div><span className="last-sync">{users.length} 名员工 · {Math.max(0, orgUnits.length - 1)} 个部门</span></div>
     <div className="organization-workspace">
       <section className="panel admin-card organization-users-card">
         <div className="admin-card-heading organization-users-heading"><div><p className="kicker">员工管理</p><h3>{editingId ? '配置员工' : '员工列表'}</h3></div><label className="employee-search"><span>搜索</span><input aria-label="搜索员工" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="姓名、工号或部门" /></label></div>
-        {editingId && <div className="employee-editor"><div className="edit-user-summary">{(() => { const user = users.find((item) => item.id === editingId); return user ? <><strong>{displayPersonName(user.name)}</strong><span>{user.employeeNo}</span></> : null; })()}</div><div className="form-grid"><label>所属部门<select value={userForm.orgUnitId} onChange={(event) => setUserForm({ ...userForm, orgUnitId: event.target.value })}><option value="">未配置部门</option>{manageableUnits.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><fieldset><legend>角色</legend><div className="checkbox-list">{roleOptions.map((role) => <label className="check-label" key={role.value}><input type="checkbox" checked={userForm.roles.includes(role.value)} onChange={() => toggleRole(role.value)} />{role.label}</label>)}</div></fieldset></div><div className="editor-actions"><button className="secondary-button" onClick={clearEdit}>取消</button><button className="primary compact" disabled={busy || saving} onClick={submitUser}>保存配置</button></div></div>}
+        {editingId && <div className="employee-editor"><div className="edit-user-summary">{(() => { const user = users.find((item) => item.id === editingId); return user ? <><strong>{displayPersonName(user.name)}</strong><span>{user.employeeNo}</span></> : null; })()}</div><div className="form-grid"><label>所属部门<select value={userForm.orgUnitId} onChange={(event) => setUserForm({ ...userForm, orgUnitId: event.target.value })}>{adminAccess.level === 'GLOBAL' && <option value="">未配置部门</option>}{manageableUnits.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><fieldset><legend>角色</legend><div className="checkbox-list">{roleOptions.map((role) => <label className="check-label" key={role.value}><input type="checkbox" checked={userForm.roles.includes(role.value)} onChange={() => toggleRole(role.value)} />{role.label}</label>)}</div></fieldset></div><div className="editor-actions"><button className="secondary-button" onClick={clearEdit}>取消</button><button className="primary compact" disabled={busy || saving} onClick={submitUser}>保存配置</button></div></div>}
         <div className="employee-list-toolbar"><div><strong>{selectedLabel}</strong><span>{filteredUsers.length} 人</span></div>{(selectedOrgId !== rootUnitId || query) && <button className="small" onClick={() => { setSelectedOrgId(rootUnitId); setQuery(''); }}>清除筛选</button>}</div>
-        <div className="admin-table-wrap organization-user-table"><table className="admin-table"><thead><tr><th>员工</th><th>部门</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>{pageUsers.map((user) => { const department = departmentFor(user); return <tr key={user.id}><td><strong>{displayPersonName(user.name)}</strong><small>{user.employeeNo}</small></td><td><div className="department-cell"><strong>{department.name}</strong><small>{department.meta}</small></div></td><td><div className="role-list">{roleLabels(user.roles).map((role) => <span className="role-tag" key={role}>{role}</span>)}</div></td><td><span className={`status-badge status-${user.status.toLowerCase()}`}>{user.status === 'ACTIVE' ? '在职' : '已停用'}</span></td><td><button className="small" onClick={() => edit(user)}>配置</button></td></tr>; })}</tbody></table>{!pageUsers.length && <div className="empty">暂无员工</div>}</div>
+        <div className="admin-table-wrap organization-user-table"><table className="admin-table"><thead><tr><th>员工</th><th>部门</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>{pageUsers.map((user) => { const department = departmentFor(user); const configurable = canConfigureUser(user); return <tr key={user.id}><td><strong>{displayPersonName(user.name)}</strong><small>{user.employeeNo}</small></td><td><div className="department-cell"><strong>{department.name}</strong><small>{department.meta}</small></div></td><td><div className="role-list">{roleLabels(user.roles).map((role) => <span className="role-tag" key={role}>{role}</span>)}</div></td><td><span className={`status-badge status-${user.status.toLowerCase()}`}>{user.status === 'ACTIVE' ? '在职' : '已停用'}</span></td><td>{configurable ? <button className="small" onClick={() => edit(user)}>配置</button> : <span className="organization-action-note">权限受限</span>}</td></tr>; })}</tbody></table>{!pageUsers.length && <div className="empty">暂无员工</div>}</div>
         <div className="table-pagination"><span>第 {page} / {totalPages} 页 · 共 {filteredUsers.length} 人</span><div><button className="small" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</button>{pageNumbers.map((number) => <button className={`small page-number${page === number ? ' active' : ''}`} key={number} onClick={() => setPage(number)}>{number}</button>)}<button className="small" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>下一页</button></div></div>
       </section>
       <aside className="organization-side">
         <section className="panel admin-card organization-departments-card">
-          <div className="admin-card-heading organization-tree-heading"><div><p className="kicker">组织结构</p><h3>部门</h3></div>{adminAccess.level === 'GLOBAL' && <button className="small" onClick={() => setAddingUnit((current) => !current)}>{addingUnit ? '取消' : '新增部门'}</button>}</div>
+          <div className="admin-card-heading organization-tree-heading"><div><p className="kicker">组织结构</p><h3>部门</h3></div>{creatableParents.length > 0 && <button className="small" onClick={() => addingUnit ? setAddingUnit(false) : startAddingUnit()}>{addingUnit ? '取消' : '新增部门'}</button>}</div>
           <div className="organization-tree" role="tree" aria-label="组织结构">{visibleOrgUnits.map((unit) => {
             const children = childrenByParent.get(unit.id) ?? [];
             const count = users.filter((user) => unitContainsUser(unit, user)).length;
             const collapsed = collapsedOrgIds.has(unit.id);
             return <div className={`organization-tree-row${selectedOrgId === unit.id ? ' selected' : ''}`} style={{ paddingLeft: `${6 + Math.max(0, unit.level) * 16}px` }} role="treeitem" aria-expanded={children.length ? !collapsed : undefined} key={unit.id}>{children.length ? <button type="button" className="organization-tree-toggle" aria-label={`${collapsed ? '展开' : '收起'}${unit.name}`} onClick={() => toggleOrg(unit)}>{collapsed ? '+' : '−'}</button> : <span className="organization-tree-spacer" />}<button type="button" className="organization-tree-select" onClick={() => selectOrg(unit.id)}><span className={`organization-tree-mark${unit.level === 0 ? ' root' : ''}`} aria-hidden="true" /><strong>{unit.name}</strong><span>{count} 人</span></button></div>;
           })}{unassignedCount > 0 && <div className={`organization-tree-row organization-unassigned${selectedOrgId === '__unassigned__' ? ' selected' : ''}`} role="treeitem"><span className="organization-tree-spacer" /><button type="button" className="organization-tree-select" onClick={() => selectOrg('__unassigned__')}><span className="organization-tree-mark unassigned" aria-hidden="true" /><strong>未配置部门</strong><span>{unassignedCount} 人</span></button></div>}</div>
-          {addingUnit && <div className="department-create-form"><strong>新增部门</strong><label>部门名称<input value={unitForm.name} onChange={(event) => setUnitForm({ ...unitForm, name: event.target.value })} /></label><label>部门编号<input value={unitForm.id} onChange={(event) => setUnitForm({ ...unitForm, id: event.target.value })} /></label><label>上级部门<select value={unitForm.parentId} onChange={(event) => setUnitForm({ ...unitForm, parentId: event.target.value })}>{orgUnits.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level))}{unit.name}</option>)}</select></label><label>组织类型<select value={unitForm.label} onChange={(event) => setUnitForm({ ...unitForm, label: event.target.value })}><option value="事业群">事业群</option><option value="部门">部门</option><option value="团队">团队</option></select></label><button className="primary compact" disabled={busy || saving} onClick={() => void createUnit()}>保存部门</button></div>}
+          {selectedUnit && <div className="department-summary"><div className="department-summary-heading"><div><strong>{selectedUnit.name}</strong><span>{unitTrail(selectedUnit, false).map((unit) => unit.name).join(' / ') || '组织根节点'}</span></div><span className="role-tag">{selectedUnit.label}</span></div><dl><div><dt>部门编号</dt><dd>{selectedUnit.id}</dd></div><div><dt>直属员工</dt><dd>{selectedDirectUserCount} 人</dd></div><div><dt>下级部门</dt><dd>{selectedChildCount} 个</dd></div></dl>{selectedCanManage && <div className="department-summary-actions"><button className="small" type="button" onClick={() => startEditingUnit(selectedUnit)}>编辑</button>{selectedUnit.level > 0 && <button className="small danger" type="button" disabled={Boolean(deleteBlockReason)} onClick={() => setDeletingUnitId(selectedUnit.id)}>删除</button>}</div>}{selectedCanManage && selectedUnit.level > 0 && deleteBlockReason && <small className="department-delete-block">{deleteBlockReason}</small>}{deletingUnitId === selectedUnit.id && <div className="department-delete-confirm"><strong>删除“{selectedUnit.name}”？</strong><span>删除后无法恢复。</span><div><button className="small" type="button" onClick={() => setDeletingUnitId('')}>取消</button><button className="small danger" type="button" disabled={busy || saving} onClick={() => void deleteUnit(selectedUnit)}>确认删除</button></div></div>}</div>}
+          {editingUnitId && <div className="department-create-form department-edit-form"><strong>编辑部门</strong><label>部门名称<input value={unitEditForm.name} onChange={(event) => setUnitEditForm({ ...unitEditForm, name: event.target.value })} /></label><label>组织类型<select value={unitEditForm.label} onChange={(event) => setUnitEditForm({ ...unitEditForm, label: event.target.value })}><option value="集团">集团</option><option value="事业群">事业群</option><option value="一级组织">一级组织</option><option value="二级组织">二级组织</option><option value="部门">部门</option><option value="团队">团队</option></select></label><div className="department-form-actions"><button className="small" type="button" onClick={() => setEditingUnitId('')}>取消</button><button className="primary compact" disabled={busy || saving} onClick={() => void updateUnit()}>保存修改</button></div></div>}
+          {addingUnit && <div className="department-create-form"><strong>新增部门</strong><label>部门名称<input value={unitForm.name} onChange={(event) => setUnitForm({ ...unitForm, name: event.target.value })} /></label><label>部门编号<input value={unitForm.id} onChange={(event) => setUnitForm({ ...unitForm, id: event.target.value })} /></label><label>上级部门<select value={unitForm.parentId} onChange={(event) => setUnitForm({ ...unitForm, parentId: event.target.value })}>{creatableParents.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level))}{unit.name}</option>)}</select></label><label>组织类型<select value={unitForm.label} onChange={(event) => setUnitForm({ ...unitForm, label: event.target.value })}><option value="事业群">事业群</option><option value="一级组织">一级组织</option><option value="二级组织">二级组织</option><option value="部门">部门</option><option value="团队">团队</option></select></label><button className="primary compact" disabled={busy || saving} onClick={() => void createUnit()}>保存部门</button></div>}
         </section>
       </aside>
     </div>

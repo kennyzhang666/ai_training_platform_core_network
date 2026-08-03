@@ -1,925 +1,401 @@
-# AI 训战平台开发方案
+# AI 能力训战平台开发总览
 
-> 基于《新员工 AI 能力训战平台 · 设计方案 v1.0》整理
-> 目标：把产品设计转换为可执行、可验收、适合使用 Codex 持续开发的工程计划。
+> 当前版本：`v0.6.1`
+> 更新日期：2026-08-03
+> 当前阶段：核心业务闭环已可在本地验收，尚未达到生产部署标准
+> 文档职责：项目架构、整体设计、版本沿革、当前边界、后续路线和 Codex 交接入口
 
-## 1. 开发目标与原则
+## 1. 如何使用和维护本文档
 
-平台最终要形成一个“出题—作答—评测—报告—画像—运营”的闭环。工程建设优先保证以下四件事：
+本文档是后续开发者和 Codex 接手项目时的第一入口。开始修改代码前，必须先阅读根目录 `AGENTS.md` 和本文档。
 
-1. **评测可复现**：同一提交、同一判据版本重复运行必须得到相同结果。
-2. **契约稳定**：蓝区、黄区、前端、CI 只通过版本化 Schema 交互。
-3. **证据可追溯**：每个得分点必须能追溯到测试结果、代码位置或已校验的原文引用。
-4. **先垂直闭环再扩功能**：先用一道题完成一次端到端评测，再扩赛制、团队、蓝区和众包。
+事实来源按以下优先级处理：
 
-首期不追求微服务化。平台后端采用**模块化单体**，评测引擎保持独立可执行；等业务量和团队边界稳定后再决定是否拆分服务。
+1. `contracts/openapi.yaml` 与 `contracts/*.schema.json`：API 和跨进程数据契约的事实来源；
+2. 已提交的代码与自动化测试：当前真实行为；
+3. 本文档：架构、当前状态和下一步计划；
+4. `CHANGELOG.md`：每个发布版本的详细变更记录；
+5. `AI训战平台设计方案.html`：原始业务设计基线，不代表所有功能都已实现。
 
-### 当前实施顺序调整
+每次形成可发布版本时，提交者必须同时完成：
 
-为保证本地可测试性，当前开发采用“本地优先、外部适配最后”的顺序：
+- 更新根目录、Web、API 三个 `package.json` 的版本号；
+- 更新本文档顶部版本、当前状态、版本沿革和后续计划；
+- 在 `CHANGELOG.md` 顶部增加该版本的事实记录；
+- API 变更同步 OpenAPI，跨语言数据变更同步 JSON Schema 和 TypeScript/Python 契约测试；
+- 运行第 11 节的验证命令并记录尚未解决的风险；
+- 不保留已经失效、会误导接手者的阶段性盘点文档。
 
-1. 先完成文件持久化适配器、组织/角色、题目/场次、上传/Git 快照、离线评测、报告、赛季和画像；
-2. 平台将管理员精确选择的提交冻结成批次；独立 Worker 把交付件、赛题引擎、`instruction.md` 和 skills 物化到同一目录，再调用 Code Agent bridge 逐份评测；
-3. 本地用协议适配器完成端到端验收，不依赖 GitLab、K8s、SSO 或内部模型网关；真实 Code Agent 服务和 GitLab 自动评测适配最后接入。
+## 2. 产品目标与业务边界
 
-本地适配器和生产适配器必须共享同一领域服务、结果 Schema、幂等规则和状态机，不能因为最后接入 GitLab 而重写业务层。
+平台服务企业内部新员工、导师、出题人和管理员，用统一的训战、交付、评测和复盘链路，把员工使用 AI 完成真实工程任务的能力变成可追溯的数据。
 
-## 2. 范围划分
+核心业务对象：
 
-### 2.1 一期必须交付
+- **赛题**：可复用的题目资产，分为训战类、竞赛类和难题类；具有不可变版本、交付契约、评测引擎和评分规则版本。
+- **训战**：赛题版本的一次运行安排，配置开放时间、分区、赛制、交付方式、评测方式、参与范围和揭晓策略。
+- **提交**：员工通过 ZIP 或受控 Git 分支提交的交付件；平台在接收时固化为不可变快照。
+- **评测运行**：某份提交的一次评分尝试；重新评测会新增运行记录，不覆盖历史结果。
+- **评测批次**：管理员从同一训战中选择一名或多名员工后创建的完整 Worker 工作单元。
+- **评测结果**：由平台校验、重算并绑定可信员工快照后的结构化结果。
+- **报告与能力画像**：从单场证据、四维能力、16 个评分点和八个 AI 能力域逐层聚合。
+- **难题榜**：复用赛题库中的难题类题目，经过审核、交付和揭榜形成闭环。
 
-一期对应“能跑起来”，建议控制在 4–6 周：
+本项目明确不在平台 API 进程中直接执行不可信学员代码。API 负责状态、契约、权限和结果可信性；独立评测 Worker、Code Agent 与沙箱负责实际评测。
 
-- 黄区单区；
-- 个人项目；
-- 开放窗口；
-- 一道固定语言样题；
-- 组织树与向下继承作用域；
-- 场次可配置 `UPLOAD / GIT_REF` 两种交付件来源；
-- 上传文件或 Git 分支均转换为不可变提交快照；
-- 每个赛题版本可定制交付目录规范；上传 ZIP 或固定 Git 版本时校验根目录、必需文件/目录、扩展名、禁止路径、白名单、文件数和目录深度；
-- 评测执行器抽象；开发期由独立 Worker 通过 Code Agent bridge 调用冻结的评测引擎，生产再替换 bridge 和 K8s 沙箱；
-- Verify 40 分与 Code 20 分规则引擎；
-- 场次可配置 `AUTO / MANUAL / IMPORT` 三种评测触发方式；
-- 管理员可精确选择一名或多名学员的提交创建批次，也可上传线下评测结果；
-- 统一结果 Schema、rubricVersion 和幂等键；
-- 自动或管理员触发时，使用同一套批次、租约、Code Agent 和结果回传协议；
-- 结果写入平台 API；
-- 员工端详细参赛报告：提交快照、维度拆解、评分项证据、诊断、问题定位、改进建议和运行时间线；
-- 员工端 AI 能力画像：保留 Verify/Spec/Code/Collab 四维评测总览与 V/S/C/P 16 个评分点矩阵，同时聚合 AI 认知与选型、任务理解与拆解、提示词与上下文工程、检索与事实核验、工具与 Agent 编排、输出评审与测试、工程交付与自动化、安全合规与风险 8 个能力域；提供历次趋势、分区计数、部门中位数对比、证据覆盖度、薄弱项和推荐练习；
-- 10 人并发验证。
-
-### 2.2 一期明确不做
-
-- 蓝区结果导入；
-- Spec、Collab 的模型抽取评分；
-- 团队项目；
-- 集中场次和封存揭晓；
-- 生产级赛季积分与能力画像（开发期已提供文件适配器和只读 API 骨架）；
-- 多语言；
-- 众包题、悬赏题和探索题；
-- 完整管理后台；
-- 真实 GitLab CI、K8s、SSO 和内部模型网关；
-- Redis、消息队列、微服务等非必要基础设施。
-
-这些能力在数据模型和接口中预留，但不进入一期 UI 和验收范围。
-
-## 3. 推荐技术架构
-
-### 3.1 技术栈
-
-具体小版本应以黄区内部制品库可获得版本为准，并在项目初始化时锁定。
-
-| 层次 | 推荐方案 | 说明 |
-|---|---|---|
-| JavaScript 运行时 | 内部批准的 Node.js LTS | 前后端统一运行时基线；开发、CI、生产锁定同一主版本 |
-| 包管理与工作区 | pnpm workspace | 管理 Web、API、共享类型与工具包，根目录统一执行构建和测试 |
-| Web | React + TypeScript + Vite | 学员端与管理端共用一个前端工程，按路由和权限分区 |
-| UI/图表 | 企业允许的组件库 + ECharts | 组件库在启动前确认内部合规版本 |
-| API | TypeScript + NestJS + Fastify Adapter | 模块化单体；用模块、Guard、Interceptor 和 OpenAPI 管理复杂后台能力 |
-| 数据库 | PostgreSQL | 核心关系数据；评测原始结果使用 JSONB 保存 |
-| 交付件存储 | S3 兼容对象存储，开发期可用受限本地存储 | 保存上传包、不可变提交快照和原始导入文件 |
-| 数据访问 | Prisma Client | 类型化访问 PostgreSQL；复杂报表和物化路径查询允许使用受审查的参数化 SQL |
-| 数据迁移 | Prisma Migrate + 显式 SQL migration | 所有表、索引和约束变更必须版本化；已执行迁移不可原地修改 |
-| 评测引擎 | Python 3.11+ CLI | Schema 校验、测试汇总、代码度量、定档和报告生成 |
-| 代码解析 | tree-sitter | Python、Java、Go 指标查询统一实现 |
-| 契约 | JSON Schema + OpenAPI | 结果、题目、提交契约均可机器校验 |
-| CI | GitLab CI | 验证、沙箱测试、度量、评分、发布 |
-| 沙箱 | K8s Job | 禁网、非 root、只读根、资源限制、硬超时 |
-| 端到端测试 | Playwright | 验证发布题目、提交、出分和查看报告 |
-| TypeScript 测试 | Vitest + NestJS/Fastify 测试工具 | API 单元、模块集成和权限测试 |
-| 可观测性 | 结构化日志 + Prometheus 指标 | 一期先覆盖评测耗时、失败率和队列时间 |
-
-### 3.2 逻辑架构
+## 3. 总体架构
 
 ```text
-浏览器
-  │
-  ├── Web（学员端 / 管理端）
-  │       │ REST API
-  │       ▼
-  └── Platform API（模块化单体）
-          ├── identity        SSO、用户、角色
-          ├── organization    组织树、作用域
-          ├── challenge       题目、版本、提交契约
-          ├── event           场次、参与人、时间窗
-          ├── submission      上传/Git 取件、快照固化、提交契约
-          ├── grading         评测运行、结果导入、幂等
-          ├── report          报告查询
-          ├── leaderboard     榜单与积分（二/三期）
-          └── audit           操作审计
-                  │
-                  ├── PostgreSQL
-                  ├── 交付件存储
-                  └── GitLab API / Webhook
-                          ├── AUTO：收到提交后立即触发评测流水线
-                          └── MANUAL：管理员操作后批量触发评测流水线
-
-GitLab CI
-  └── drill-grader CLI
-          ├── validate        校验提交契约
-          ├── verify          调度/读取 K8s Job 测试结果
-          ├── measure         tree-sitter 代码度量
-          ├── extract         二期接入模型抽取
-          ├── score           按 rubric profile 确定性定档
-          └── publish         向 Platform API 发布结果 JSON
-
-管理员线下评测
-  └── IMPORT：上传统一 Schema 结果 JSON
-          └── Platform API 校验身份、提交归属、Schema、分值和幂等键
+员工 / 导师 / 管理员
+        |
+        v
+React + Vite Web
+        |
+        | REST / JSON（开发期 X-Employee-Id，生产期 SSO 网关）
+        v
+NestJS + Fastify Platform API
+  |-- 身份、角色与组织范围
+  |-- 赛题、训战、名单、提交状态机
+  |-- 交付契约与结果契约校验
+  |-- 评测批次租约与结果幂等录入
+  |-- 报告、画像、公告与审计
+  |
+  |-- PlatformStore ------> 当前：JSON 文件；目标：PostgreSQL/Prisma
+  |-- ArtifactStore ------> 当前：本地目录；目标：对象存储
+  |-- GitSnapshotter -----> 当前：受控本地 Git；目标：GitLab 适配器
+  |
+  v
+独立 Evaluation Worker
+  |-- 领取完整批次并续租
+  |-- 校验和解包不可变交付件
+  |-- 物化引擎、instruction、Skills 与 Schema
+  |-- 创建隔离批次目录
+  v
+Code Agent Bridge / Agent CLI
+  |-- 按清单逐份调用赛题评测引擎
+  |-- 写出单人结果和批次结果索引
+  v
+Platform API 校验、重算、幂等保存
 ```
 
-### 3.3 部署单元
+### 3.1 代码目录
 
-一期只保留以下部署单元：
+| 路径 | 职责 |
+| --- | --- |
+| `apps/web/` | React 员工端和管理端；当前为单应用、客户端视图切换 |
+| `services/platform-api/` | NestJS/Fastify API、领域状态机、本地持久化与适配器 |
+| `contracts/` | OpenAPI、题目、提交、引擎调用、批次和结果 JSON Schema |
+| `grader/` | Python CLI、评分计算、快照与交付校验、Python 契约测试 |
+| `scripts/evaluation-worker.mjs` | 独立拉取式评测 Worker |
+| `scripts/code-agent-local-bridge.mjs` | 本地 Code Agent 批次协议适配器，仅用于联调和验收 |
+| `executors/` | 随平台发布的内置评测执行器 |
+| `challenges/` | 示例赛题、版本化引擎包、instruction 和 Skills |
+| `services/platform-api/prisma/` | 生产关系模型和版本化迁移契约；当前运行时尚未接入 |
+| `docs/` | 稳定的专项协议、架构决策和能力模型说明 |
+| `tmp/` | 本地运行数据、交付件和临时工作区，不进入版本库 |
 
-1. `platform-web`：前端静态资源；
-2. `platform-api`：后端模块化单体；
-3. `postgresql`：优先使用现有托管实例；
-4. `artifact-store`：优先使用已有 S3 兼容对象存储；一期无现成服务时可使用受限 PVC；
-5. `grader-runner`：GitLab Runner 调用的评测镜像；
-6. `submission-sandbox`：按提交临时创建的 K8s Job。
+### 3.2 API 内部边界
 
-评测模型网关、Redis、消息队列在一期均不是强依赖。交付件上传模式需要一个持久化 artifact store，不能把大文件直接存入 PostgreSQL。
+- `PlatformController`：HTTP 入口、认证上下文和请求响应映射；
+- `PlatformStore`：当前领域状态、授权校验、审计和文件持久化实现；
+- `ArtifactStore`：上传包的不可变保存、哈希与读取；
+- `SubmissionContractService`：ZIP/Git 目录契约校验；
+- `LocalGitSnapshotter`：只允许从配置根目录固化指定仓库、分支和 commit；
+- `EvaluationBatchService`：批次创建、领取、心跳、完成、失败和租约恢复；
+- `EvaluationTaskService`：兼容旧的单份拉取协议；新流程优先使用批次协议；
+- `EnginePackageStore` / `ExecutorRegistry`：上传引擎包和内置执行器的不可变版本；
+- `ScoreValidator`：结果 Schema、归属、幂等键和分数重算可信边界；
+- `AutoGradingQueue` / 内嵌执行器：只用于显式开启的兼容测试，不是生产评测路径。
 
-## 4. 建议仓库结构
+## 4. 关键领域设计
 
-首期建议使用 monorepo，便于契约、样例和端到端测试一起演进：
+### 4.1 角色、SSO 与组织权限
+
+内部 SSO 只提供工号、姓名和部门。首次登录时平台按工号幂等登记：
+
+- 部门名称、编号或路径能匹配组织树时自动归属；
+- 无法匹配时保留未配置部门，等待全局管理员处理；
+- 管理员不能手工新增员工，也不能修改 SSO 主数据；
+- 管理员只配置员工的所属部门及新员工、导师、部门管理员、全局管理员角色。
+
+权限层级：
+
+- **全局管理员**：可维护全组织、所有管理员角色、全局 Code Agent 运行配置和跨部门数据；
+- **部门管理员**：只能访问授权组织路径及子组织，不能配置其他管理员，也不能删除其权限范围根部门；
+- **导师**：进入面向自己的训战并查看后续明确授权的数据；
+- **新员工**：进入面向自己的训战、提交交付件、查看已揭晓结果和个人画像。
+
+组织删除只允许空的非根部门。存在下级部门、直属员工、管理员范围、训战面向对象或其他业务引用时必须拒绝。
+
+开发期请求使用 `X-Employee-Id`；生产环境必须由可信网关验证 SSO/OIDC/JWT，并清除外部请求伪造的身份头。
+
+### 4.2 赛题、训战与难题榜
+
+赛题和训战必须分开：
+
+- 赛题库管理题目资产、类别、富文本详情、版本、交付契约和评测引擎；
+- 训战管理时间、分区、赛制、交付方式、评测方式、参与对象、关闭和揭晓；
+- 训战始终引用一个已发布赛题版本，发布后的 Schema、rubric 和引擎包不可原地修改；
+- `TRAINING`、`COMPETITION`、`HARD_PROBLEM` 是后台资产分类，员工卡片只显示对参与决策有价值的信息；
+- 难题榜只展示审核通过的难题类赛题，分为待揭榜和揭榜成功；揭榜成功可按配置公开解决者和交付摘要。
+
+### 4.3 交付件状态机
 
 ```text
-AI-Training-Platform/
-├── AGENTS.md                       # Codex 项目级约束
-├── README.md                       # 本地启动与开发入口
-├── DEVELOPMENT_PLAN.md
-├── package.json                    # 根命令：lint / test / build / contract-test
-├── pnpm-workspace.yaml
-├── tsconfig.base.json
-├── docs/
-│   ├── architecture/
-│   │   ├── context.md
-│   │   ├── grading-flow.md
-│   │   └── security-boundary.md
-│   ├── adr/                        # 架构决策记录
-│   └── api/
-├── contracts/
-│   ├── evaluation-result.schema.json
-│   ├── challenge.schema.json
-│   ├── submission-contract.schema.json
-│   ├── examples/
-│   └── openapi.yaml
-├── apps/
-│   └── web/
-├── services/
-│   └── platform-api/               # NestJS 模块化单体
-│       ├── prisma/
-│       │   ├── schema.prisma
-│       │   └── migrations/
-│       └── src/modules/
-├── packages/
-│   ├── contract-types/             # 由 Schema/OpenAPI 生成的 TypeScript 类型
-│   ├── api-client/                 # 前端调用 API 的生成客户端
-│   └── shared-config/
-├── grader/
-│   ├── SKILL.md                    # 蓝黄共用的七步评测说明
-│   ├── references/
-│   │   ├── rubric.md
-│   │   ├── extraction.md
-│   │   └── schema.md
-│   ├── src/drill_grader/
-│   ├── profiles/
-│   │   ├── blue.yaml
-│   │   └── yellow.yaml
-│   ├── queries/                    # tree-sitter 查询
-│   └── tests/
-├── challenges/
-│   └── parking-fee-v1/             # 一期黄金样题
-│       ├── challenge.yaml
-│       ├── README.md
-│       ├── starter/
-│       ├── hidden-tests/
-│       ├── reference/
-│       └── fixtures/
-├── deploy/
-│   ├── docker/
-│   ├── helm/
-│   └── gitlab-ci/
-├── e2e/
-└── scripts/
+选择 ZIP / 受控 Git 版本
+  -> 校验训战开放、参与权限和交付方式
+  -> 校验大小、路径、目录结构和赛题交付契约
+  -> 固化 artifactHash + snapshotHash + 提交人/组织快照
+  -> 保存不可变提交
+  -> QUEUED / 等待管理员发起 / 等待导入
+  -> GRADING
+  -> GRADED 或 FAILED
 ```
 
-隐藏测试是否能与平台代码放在同一仓库，需按 GitLab 权限策略确认。若不能，应保留相同目录契约，但放入独立受限仓库，由 CI 只读拉取。
+安全不变量：
 
-## 5. 核心领域模型
+- Git 地址只能来自已发布训战配置，客户端不能提交任意 URL；
+- ZIP 拒绝路径穿越、符号链接逃逸、过多文件和解压炸弹；
+- 同一份提交创建新评测运行时不得覆盖旧结果；
+- 快照哈希覆盖排序后的相对路径、文件内容哈希和执行权限位；
+- 重新评测产生新运行，结果幂等只消除同一运行的重复回传。
 
-### 5.1 建模修正
+交付目录规范详见 `docs/submission-contract.md`。
 
-设计方案中“集中场次 / 开放窗口 / 赛季”被放在同一个赛制维度中，但赛季本质上是场次容器。开发时建议拆开：
+### 4.4 Code Agent 批次评测
 
-- `event.mode`：`LIVE` 或 `WINDOW`；
-- `event.submission_source`：`UPLOAD` 或 `GIT_REF`；
-- `event.trigger`：`AUTO`、`MANUAL` 或 `IMPORT`；
-- `event.reveal`：`IMMEDIATE` 或 `ON_RELEASE`，与 trigger 完全独立；
-- `season`：独立聚合根；
-- `season_event`：把正式场次编排进赛季；
-- 蓝区通过 `zone=BLUE + trigger=IMPORT + reveal=ON_RELEASE` 表达。
+管理员在评测中心进入某一训战，查看每名员工的不可变提交，并精确勾选一人或多人发起评测。当前主流程为：
 
-这样不会出现一个 `mode=SEASON` 的项目既像题目又像容器的歧义。
+1. API 为选中提交创建 `GradingRun`，再创建一个不可拆分的 `EvaluationBatch`；
+2. 批次冻结赛题版本、引擎版本、运行配置、输入/输出契约和提交快照；
+3. Worker 通过租约领取完整批次，定期心跳；租约过期后未完成批次重新排队；
+4. Worker 在隔离目录物化引擎、`instruction.md`、Skills、Schema 和所有交付件；
+5. Worker 使用 `shell: false` 调用管理员配置或主机兜底的 Code Agent 命令；
+6. Code Agent 读取批次清单，逐份评分，生成单人结果和结果索引；
+7. Worker 回传成功项与失败项；平台逐项验证 Schema、提交归属、运行 ID、幂等键并重算总分；
+8. 平台保存不可变结果，更新提交状态、报告、画像和审计记录。
 
-### 5.2 核心表
+`AUTO`、`MANUAL`、`IMPORT` 只是训战的触发策略，不复制评分逻辑：
 
-| 表 | 关键字段 | 说明 |
-|---|---|---|
-| `org_unit` | `id, parent_id, path, level, name` | 物化路径；`path` 建前缀查询索引 |
-| `app_user` | `id, employee_no, name, org_unit_id, status` | SSO 用户映射 |
-| `role_binding` | `user_id, role, scope_org_id` | 角色及作用域 |
-| `challenge` | `id, owner_org_id, origin, status` | 题目稳定身份 |
-| `challenge_version` | `challenge_id, version, zone, language_policy, contract_json, rubric_version` | 已发布版本不可修改 |
-| `rubric` | `version, schema_version, status` | 判据骨架版本 |
-| `rubric_profile` | `rubric_version, zone, org_scope, config_json` | 分区和组织覆盖阈值 |
-| `event` | `id, challenge_version_id, mode, submission_source, delivery_config_json, trigger, reveal, starts_at, ends_at, status` | 一次正式或众包活动；交付来源与评测触发分别配置 |
-| `season` | `id, name, starts_at, ends_at, status` | 赛季容器 |
-| `season_event` | `season_id, event_id, weight` | 只有官方活动可加入 |
-| `team` / `team_member` | `event_id, user_id, role` | 二期启用 |
-| `participation` | `event_id, subject_kind, subject_id, org_path_snapshot` | 固化参赛时组织归属 |
-| `submission` | `event_id, subject_id, source_type, snapshot_hash, repo, branch, commit_sha, artifact_uri, artifact_hash, submitted_at` | Git 或上传交付件最终都固化为不可变快照 |
-| `grading_run` | `submission_id, trigger_type, triggered_by, rubric_version, grader_version, status, idempotency_key` | 一次评测运行；保留自动、管理员触发或导入来源 |
-| `evaluation_result` | `grading_run_id, total, dimensions_json, result_json, revealed_at` | 原始结果完整保留 |
-| `criterion_result` | `grading_run_id, criterion_key, level, score, source, evidence` | 为报表查询适度归一化 |
-| `finding` | `criterion_result_id, file, line, severity, detail, fix` | 扣分证据链 |
-| `audit_log` | `actor, action, target, before_json, after_json, created_at` | 发布、揭晓、改判必须审计 |
+- `AUTO`：提交后自动创建待领取任务；
+- `MANUAL`：管理员精确选择提交并发起批次；
+- `IMPORT`：管理员在线下完成评测后导入同一输出契约；
+- 三者最终都经过同一个可信结果录入边界。
 
-### 5.3 数据约束
+完整 ABI、目录布局、命令占位符和结果索引见 `docs/evaluation-engine-protocol.md`。
 
-- `org_unit.path` 一旦创建只允许通过受控迁移修改；
-- 成绩记录保存 `org_path_snapshot`，组织调整不重写历史；
-- `challenge_version` 发布后冻结；
-- `rubric` 发布后冻结，变更必须产生新版本；
-- `submission` 以 `(event_id, subject_id, snapshot_hash)` 唯一；`snapshot_hash` 统一按“排序后的相对路径 + 文件内容哈希 + 必要执行权限”计算，不使用压缩包字节或 Git commit ID，因此同一内容从上传和 Git 进入时得到同一哈希；
-- `GIT_REF` 类型必须同时保存 `repo + branch + commit_sha`，评测只能读取 commit SHA，不能在运行时重新读取移动中的分支头；
-- `UPLOAD` 类型必须同时保存 `artifact_uri + artifact_hash`，对象内容只读且不可覆盖；
-- `delivery_config_json` 只保存仓库、分支规则和文件限制，不保存 Git token 或对象存储密钥，只引用平台 Secret；
-- `grading_run.idempotency_key` 建议为：
-  `sha256(commit_sha + rubric_version + grader_version + challenge_version)`；
-- `evaluation_result.result_json` 必须先通过对应 `schemaVersion` 校验；
-- 平台不能信任客户端上报的 `total`，必须重新计算 criteria 与 dimensions 加总。
+### 4.5 结果、报告与能力画像
 
-### 5.4 评测触发模型
+评测结果不能只返回一个总分。平台当前模型保留：
 
-评测触发方式是 `event` 的配置，不由分区或赛制写死：
+- 总分、排名、部门对比和结果状态；
+- Verify、Schema、Code Quality、Prompting 四维能力；
+- 16 个评分点的 A/B/C/D 档位；
+- 判据、判定来源、文件、行号、代码片段、问题说明和修改建议；
+- 客观指标、提交和 commit 时间线；
+- 八个 AI 能力域及证据覆盖度；
+- 个人趋势、蓝区/黄区分布、部门中位数和百分位；
+- 管理员按部门或指定员工集合查看聚合平均画像，而不是逐人卡片。
 
-| trigger | 提交后的行为 | 评测执行位置 | 典型场景 |
-|---|---|---|---|
-| `AUTO` | 平台记录提交后立即触发 GitLab 评测流水线 | GitLab CI + K8s Job | 开放窗口、即时练习 |
-| `MANUAL` | 只记录提交并进入待评测状态；管理员选择一份或一批提交后触发 | GitLab CI + K8s Job | 集中场次、统一收卷后评分 |
-| `IMPORT` | 不创建 CI 评测任务；等待管理员上传线下结果 | 管理员线下工具、Codex、Claude 或人工 | 蓝区导入、线下评审、特殊场次 |
+员工只能看到按训战揭晓策略开放的结果；管理员在权限范围内可进行运营和复核。
 
-三种入口最终都写入同一套 `grading_run` 和 `evaluation_result`，并通过同一个结果导入服务完成 Schema、加总和幂等校验。
+## 5. 当前实现状态（v0.6.1）
 
-`trigger` 只决定何时及由谁启动评测，`reveal` 只决定结果何时对学员可见。例如：
+### 5.1 已可本地验收
 
-- `MANUAL + ON_RELEASE`：集中收卷，管理员批量评完后统一揭晓；
-- `AUTO + ON_RELEASE`：push 后后台立即评，但结果暂不展示；
-- `IMPORT + IMMEDIATE`：线下结果上传并校验成功后立即可见；
-- `IMPORT + ON_RELEASE`：结果先导入封存，管理员之后统一揭晓。
+- 员工首页、训战广场、赛题详情、提交、报告、个人中心和能力画像；
+- 赛题草稿、版本、发布、归档、垃圾箱、恢复和富文本详情；
+- 训战时间、分区、赛制、交付方式、评测方式、参与部门/人员和导师范围；
+- ZIP 与 Git 固定版本提交、不可变快照和赛题级目录结构校验；
+- 管理员按训战和员工精确选择提交，创建 Code Agent 评测批次；
+- Worker 租约、心跳、批次恢复、交付件下载、引擎和 Agent 资产物化；
+- 结构化结果导入、Schema 校验、分数重算、可信身份覆盖和幂等保存；
+- 单场详细报告、四维/16 点/八能力域画像及组织聚合画像；
+- 部门、员工角色、训战名单、公告和审计管理；
+- 全局管理员与部门管理员的组织范围隔离；
+- 组织新增、编辑和安全删除；员工配置分页、固定页面高度和可读部门路径；
+- 难题发布审核、待揭榜/揭榜成功、解决方案提交和展示控制；
+- OpenAPI、TypeScript 契约测试、Python 契约测试和本地端到端批次测试。
 
-状态建议为：
+### 5.2 当前适配器和限制
 
-```text
-RECEIVED
-  ├── AUTO   → QUEUED → RUNNING → GRADED
-  ├── MANUAL → WAITING_TRIGGER → QUEUED → RUNNING → GRADED
-  └── IMPORT → WAITING_IMPORT → IMPORT_VALIDATING → GRADED
+当前版本是“无需外部依赖即可验收”的开发实现，不应直接暴露到生产网络：
 
-GRADED
-  ├── reveal=IMMEDIATE  → REVEALED
-  └── reveal=ON_RELEASE → SEALED → REVEALED
+- 数据运行时仍由 `PlatformStore` 写入 `tmp/platform-data.json`，Prisma 仅作为生产模型契约；
+- 交付包和引擎包仍保存在本地文件系统；浏览器上传使用 JSON base64；
+- 身份认证仍以开发请求头为主，SSO 同步接口不等于完整的生产登录会话；
+- 本地 Git 适配器只访问 `LOCAL_GIT_ROOT`，尚未接入真实 GitLab；
+- Code Agent 本地 bridge 用确定性评测器验证协议，真实 Agent、沙箱和凭据治理由部署环境提供；
+- Web 仍集中在两个较大的 TSX 文件中，尚未进行路由、模块和设计组件拆分；
+- 员工、画像等分页主要在前端完成，生产数据量需要服务端分页；
+- 日志、指标、告警、备份、灾备、数据保留和容量压测尚未生产化。
+
+## 6. 版本沿革
+
+详细变更和修复见 `CHANGELOG.md`，这里仅保留交接所需的架构演进。
+
+| 版本 | 日期 | 主要成果 |
+| --- | --- | --- |
+| `v0.1.0` | 2026-08-02 | 建立 pnpm workspace、React Web、NestJS API、Python grader、JSON Schema、本地存储，以及训战/提交/报告/画像/管理后台的首个纵切面。 |
+| `v0.2.0` | 2026-08-02 | 加固 ZIP、路径和快照安全；统一服务端哈希；补齐错误响应、并发和契约回归。 |
+| `v0.2.1` | 2026-08-02 | 将每次评测结果改为不可变历史，重新评测不覆盖旧运行。 |
+| `v0.3.0` | 2026-08-02 | 赛题评测引擎成为评分事实来源，版本、幂等键和结果验证统一。 |
+| `v0.4.0` | 2026-08-02 | 支持出题人上传不可变评测引擎包，增加沙箱启动层和引擎调用契约。 |
+| `v0.5.0` | 2026-08-02 | 评测改为独立 Worker 拉取任务；内置执行器可选择；AUTO/MANUAL/IMPORT 共用契约。 |
+| `v0.6.0` | 2026-08-03 | 完成多员工 Code Agent 批次协议、赛题级交付目录契约、评测环境配置和评测中心详情流程。 |
+| `v0.6.1` | 2026-08-03 | 修复浏览器人员配置失败和 CORS 方法限制；补齐组织编辑、安全删除、权限边界与回归测试；重建持续维护的开发交接文档。 |
+
+## 7. 后续开发路线
+
+路线以“先完成可部署的核心平台，再接最后的 GitLab 自动评测接口”为原则。每次只实现一个有契约、有测试、可演示的纵切面。
+
+### 7.1 v0.7.0：生产数据与身份底座（最高优先级）
+
+目标：移除单机文件和浏览器身份头对正式环境的依赖。
+
+- 实现 `PlatformRepository` 边界，将 `PlatformStore` 的持久化职责迁移到 Prisma/PostgreSQL；
+- 为提交、评测运行、批次租约、结果导入和审计增加数据库事务与唯一约束；
+- 接入真实内部 SSO 网关会话或 OIDC/JWT Guard，保留按工号首次建档逻辑；
+- 对员工、提交、审计、画像实现服务端分页、筛选和稳定排序；
+- 将 ArtifactStore 替换为对象存储，上传改为流式/预签名方式；
+- 建立迁移、备份、恢复和种子数据隔离流程。
+
+验收证据：PostgreSQL 集成测试、并发唯一性测试、SSO 越权矩阵、对象存储集成测试、迁移回滚演练记录。
+
+### 7.2 v0.8.0：正式评测运行环境
+
+目标：让 Worker 和 Code Agent 在可控、可观测、可审计的执行环境中运行。
+
+- Worker 使用服务身份和短期令牌，不再借用员工身份头；
+- Code Agent 命令改为受控模板/注册表，禁止任意可执行文件和参数逃逸；
+- 接入 K8s Job 或等价沙箱，落实禁网、非 root、只读根文件系统、CPU/内存/磁盘/时限；
+- 凭据只由运行环境注入，平台和日志不保存 token、Cookie 或完整源码；
+- 增加批次队列指标、心跳、失败原因、重试策略、告警和管理端运行详情；
+- 对大包、恶意 ZIP、超时 Agent、部分失败、重复回传和租约争抢做故障注入。
+
+验收证据：沙箱安全测试、Worker 身份测试、故障恢复测试、批次观测面板和容量基线。
+
+### 7.3 v0.9.0：业务完整性与可运营性
+
+目标：满足真实部门试点的日常配置、复核和复盘需求。
+
+- 拆分前端路由、领域模块和通用表格/表单/状态组件，保留既定 UI 与文案规范；
+- 完成导师工作台、出题人权限、报告复核和结果申诉流程；
+- 完善富文本存储、白名单清洗、附件和版本差异；
+- 增加公告定向范围、站内通知和关键截止提醒；
+- 完善赛季、榜单、部门下钻、画像导出和结果可见性策略；
+- 为组织调整、员工转部门、管理员权限回收建立历史快照和审批规则；
+- 建立员工端与管理端关键路径的浏览器端到端测试。
+
+验收证据：角色化 UAT 脚本、可访问性检查、XSS 安全测试、跨部门隔离测试、浏览器 E2E。
+
+### 7.4 v1.0.0：试点发布与生产验收
+
+目标：完成一个部门到多部门试点的生产发布准备。
+
+- 性能和容量压测、依赖和镜像安全扫描、审计留存与数据脱敏；
+- 灰度、回滚、备份恢复、故障应急和运维手册；
+- 产品指标、SLA/SLO、告警阈值和版本发布清单；
+- 用真实但脱敏的训战完成从建题到能力画像的全链路验收。
+
+### 7.5 后置接口：GitLab CI 自动评测
+
+根据当前产品决策，GitLab CI 自动评测接口放在核心平台完成之后。它应作为新的 `GradingExecutor`/Worker 适配器接入，不得复制一套评分或结果入库逻辑。接口仍必须输出同一 `evaluation-result` 契约，并经过平台的 Schema、归属、幂等和重算校验。
+
+## 8. 下一位 Codex 的推荐起点
+
+若没有新的用户优先级，下一纵切面从 **v0.7.0 的 PostgreSQL Repository 与服务端员工分页** 开始：
+
+1. 先为 `PlatformStore` 提取最小 Repository 接口，不一次重写全部领域逻辑；
+2. 选择“组织与人员”作为首个纵切面：组织读取、员工分页、角色更新、审计同事务；
+3. 先补 OpenAPI 分页参数、返回契约和 PostgreSQL 集成测试；
+4. 保留文件适配器供快速本地测试，通过配置选择实现；
+5. 验收后再迁移赛题/训战和提交/评测，不并行制造两套状态机。
+
+开始任务前还应检查：
+
+```powershell
+git status --short --branch
+git log -5 --oneline --decorate
+pnpm install
+pnpm contract:test
+pnpm grader:test
+pnpm test
 ```
 
-### 5.5 交付件来源模型
+不要仅凭本文档断言某功能存在；先从 OpenAPI、实现和测试三处交叉验证。
 
-交付件来源和评测触发是两个正交配置。`UPLOAD / GIT_REF` 均可与 `AUTO / MANUAL / IMPORT` 组合：
+## 9. 环境和运行方式
 
-| submission_source | 场次配置 | 提交时的处理 |
-|---|---|---|
-| `UPLOAD` | 允许格式、单包上限、文件数量上限、是否允许覆盖提交 | 学员把交付包上传到平台；平台扫描、解包、规范化并计算 `snapshotHash` |
-| `GIT_REF` | Git provider、仓库路径、分支或分支模板、凭据引用、截止策略 | 平台校验仓库和分支，在提交或收卷时解析并锁定 commit SHA，再生成 `snapshotHash` |
+要求 Node.js 20+、pnpm 11 和 Python 3.11+。
 
-建议的场次配置：
-
-```yaml
-delivery:
-  source: GIT_REF                 # UPLOAD | GIT_REF
-  git:
-    provider: GITLAB
-    repository: group/project
-    branchTemplate: drill/{subjectId}
-    pinAt: SUBMIT                 # SUBMIT | DEADLINE
-    credentialRef: gitlab-grader-readonly
-
-# 上传模式示例
-delivery:
-  source: UPLOAD
-  upload:
-    formats: [zip]
-    maxBytes: 52428800
-    maxFiles: 2000
-    allowResubmit: true
+```powershell
+pnpm install
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r grader/requirements.txt
 ```
 
-指定固定 Git 路径和固定分支时，直接使用 `repository + branch`；个人或团队各自分支时使用 `branchTemplate`。模板只允许平台定义的占位符，例如 `{subjectId}`、`{teamId}`，不能执行任意表达式。
+启动 API 和 Web：
 
-配置校验要求：`trigger=AUTO` 时 Git 的 `pinAt` 必须为 `SUBMIT`；`pinAt=DEADLINE` 只适用于统一收卷后处理的 `MANUAL` 或 `IMPORT`，否则自动评测时无法确定该评哪个版本。
-
-两种来源在进入评测前都转换为统一结构：
-
-```text
-SubmissionSnapshot
-  ├── submissionId
-  ├── sourceType: UPLOAD | GIT_REF
-  ├── snapshotHash
-  ├── sourceMetadata（repo/branch/commit 或 artifact/hash）
-  └── workspace/                  # 只读、已规范化的评测目录
+```powershell
+pnpm dev:api
+pnpm dev:web
 ```
 
-从 `validate` 开始，评测引擎只读取 `workspace/`，不再区分交付件来自平台上传还是 Git。这保证两种提交方式使用完全相同的规则和分数口径。
+- API：`http://127.0.0.1:3000/api/v1`
+- 健康检查：`http://127.0.0.1:3000/api/v1/health`
+- Web：`http://127.0.0.1:5173`
+- 本地管理员：`w00123`
+- 本地学员：`w00124`–`w00132`
 
-## 6. 契约优先设计
+环境变量和 Worker 示例见 `.env.example` 与 `README.md`。开发数据默认写入 `tmp/`。
 
-在编写业务代码之前先冻结以下三个契约的 v1：
+## 10. 工程约束
 
-### 6.1 题目契约 `challenge.schema.json`
+- 契约先行：新增 API 先改 OpenAPI，跨进程结构先改版本化 JSON Schema；
+- 测试先行：先写合法/非法样例和失败测试，再实现业务逻辑；
+- 不可信代码隔离：不在 Node API 进程内执行学员代码；
+- 不可变性：提交快照、引擎包、已发布 Schema/rubric、历史评测结果不可原地修改；
+- 权限在服务端执行：前端隐藏按钮不是授权；所有管理写操作必须审计；
+- 组织范围统一使用规范化路径，部门管理员只能作用于授权路径及子路径；
+- 不信任评测器自报的员工、组织和总分；平台以提交快照覆盖并重算；
+- 不将真实员工、客户、仓库凭据、生产源码或 SSO 断言写入测试、日志和 fixture；
+- 失败要显式返回稳定错误，不吞异常、不放宽校验、不通过删除测试修复失败。
 
-至少包括：
+## 11. 验证与发布清单
 
-- 题目身份、版本和来源；
-- 分区、语言策略；
-- 允许的交付来源及上传/Git 配置约束；
-- 交付物和入口签名；
-- required / optional / forbidden 文件；
-- 隐藏测试分档和权重；
-- 判据版本；
-- K8s 资源上限；
-- 可见组织作用域；
-- 变更包元数据。
+受影响模块至少运行对应测试；发布版本运行完整检查：
 
-### 6.2 提交契约 `submission-contract.schema.json`
-
-用于本地 `drill check` 和 CI `validate` 共用，要求：
-
-- 同一份实现代码在本地预检和 CI 产生相同诊断；
-- 所有诊断具有稳定的 `code`，不能只返回自然语言；
-- 诊断分为 `BLOCKER / WARNING / INFO`；
-- 格式问题不重复扣分。
-
-### 6.3 评测结果契约 `evaluation-result.schema.json`
-
-在原设计基础上补充：
-
-- `resultId` 和 `gradingRunId`；
-- `challengeVersion`、`graderVersion`；
-- `idempotencyKey`；
-- `submission.sourceType`、`submission.snapshotHash` 及对应来源元数据；
-- `triggerType: AUTO | MANUAL | IMPORT`；
-- `triggeredBy` 与 `importedBy` 审计信息；
-- `status: COMPLETE | PARTIAL | FAILED`；
-- `validationDiagnostics`；
-- `startedAt / finishedAt / durationMs`；
-- `artifacts` 的哈希与位置；
-- `criteria[].evidenceType`；
-- `criteria[].ruleVersion`；
-- `recalculatedTotal` 或服务端校验结果。
-
-Schema v1 冻结门槛：至少准备 5 份合法样例、10 份非法样例，并在 TypeScript 与 Python 两侧执行契约测试。TypeScript DTO 和前端类型从 Schema/OpenAPI 生成，不手写第二套结构。
-
-## 7. 评测引擎设计
-
-### 7.1 CLI 接口
-
-```text
-drill-grader validate   --challenge challenge.yaml --submission ./work
-drill-grader verify     --challenge challenge.yaml --submission ./work --out verify.json
-drill-grader measure    --challenge challenge.yaml --submission ./work --out metrics.json
-drill-grader extract    --profile yellow --transcript transcript.md --out extraction.json
-drill-grader score      --inputs ./run --out result.json
-drill-grader run        --challenge challenge.yaml --submission ./work --out ./result
-drill-grader check      --challenge challenge.yaml --submission .
+```powershell
+pnpm contract:test
+pnpm grader:test
+pnpm test
+pnpm build
+pnpm acceptance:local
+git diff --check
 ```
 
-`run` 只是顺序编排，所有阶段都必须可以独立执行和重试。
-
-### 7.2 确定性边界
-
-脚本负责：
-
-- 目录和文件契约校验；
-- 隐藏测试执行与分档汇总；
-- AST/tree-sitter 度量；
-- 引用精确匹配；
-- 档位映射和分数计算；
-- Schema 校验；
-- 结果哈希。
-
-模型只负责把对话记录抽取为 `yes / no / unclear + quote`。模型不得直接产生分数、档位或总评。
-
-### 7.3 黄金样本
-
-评测引擎必须建立 `golden fixtures`：
-
-- 参考实现：预期 Verify 40、Code 20；
-- 基础实现：基础档通过、边界和澄清档失败；
-- 魔法数字实现：能稳定命中 C1 findings；
-- 入口缺失实现：产生阻断诊断但仍能输出 PARTIAL 结果；
-- 恶意/超时实现：被沙箱终止；
-- 同一实现重复运行 20 次：结果 JSON 在排除运行时间字段后哈希一致。
-
-## 8. API 初稿
-
-一期优先实现以下接口：
-
-```text
-GET    /api/v1/me
-GET    /api/v1/org-units/{id}
-GET    /api/v1/challenges
-POST   /api/v1/challenges
-POST   /api/v1/challenges/{id}/versions
-POST   /api/v1/challenge-versions/{id}/publish
-POST   /api/v1/events
-POST   /api/v1/events/{id}/participants:import
-GET    /api/v1/events/{id}
-POST   /api/v1/submissions
-POST   /api/v1/events/{id}/submissions:upload
-POST   /api/v1/events/{id}/submissions:register-git
-GET    /api/v1/submissions/{id}
-POST   /api/v1/submissions/{id}/start-grading
-POST   /api/v1/events/{id}/start-grading
-GET    /api/v1/evaluation-batches
-GET    /api/v1/admin/code-agent-runtime        # 仅全局管理员
-PUT    /api/v1/admin/code-agent-runtime        # 仅全局管理员，写审计
-POST   /api/v1/evaluation-batches:lease
-POST   /api/v1/evaluation-batches/{id}/heartbeat
-POST   /api/v1/evaluation-batches/{id}/complete
-POST   /api/v1/evaluation-batches/{id}/fail
-POST   /api/v1/grading-runs/{id}/execute       # 仅显式内嵌兼容测试
-POST   /api/v1/events/{id}/execute-local       # 仅显式内嵌兼容测试
-POST   /api/v1/grading-results:import
-POST   /api/v1/events/{id}/close
-POST   /api/v1/events/{id}/reveal
-GET    /api/v1/grading-runs/{id}
-GET    /api/v1/reports/{submissionId}
-GET    /api/v1/seasons/{id}/leaderboard
-GET    /api/v1/profiles/{userId}
-GET    /api/v1/audits
-```
-
-二期再加入：
-
-```text
-POST   /api/v1/grading-runs/{id}:review
-GET    /api/v1/leaderboards/events/{id}
-GET    /api/v1/profiles/{userId}
-```
-
-接口规则：
-
-- 所有写接口支持请求 ID；
-- `submissions:upload` 只接受 `submission_source=UPLOAD` 的场次；
-- `submissions:register-git` 只接受 `submission_source=GIT_REF` 的场次，并由服务端校验场次配置的仓库、分支模板和已锁定 commit；
-- 客户端不得通过提交接口传入任意 Git URL；仓库路径必须来自管理员发布并校验过的场次配置；
-- 导入接口必须支持幂等重试；
-- `start-grading` 仅接受 `trigger=MANUAL` 的场次，支持单份和批量提交；
-- `trigger=AUTO` 的场次由提交事件自动创建运行记录和评测批次；`trigger=MANUAL` 只冻结管理员传入的 `submissionIds`，不得扩为全场提交；
-- Worker 领取完整批次，校验交付件和引擎内容哈希，加载赛题级 instruction 与 skills，并用租约回传逐份结果；
-- 在线评测输入固定为 `evaluation-agent-batch-v1.1.schema.json`，单人结果固定为 `evaluation-result.schema.json`；Worker 将两份 Schema 物化到批次目录并记录哈希；
-- 全局管理员可以配置 Code Agent 单行启动命令、任务指令和超时；配置创建批次时冻结，Worker 使用 `shell: false` 启动，部门管理员无权修改；
-- `trigger=IMPORT` 的场次禁止启动 CI 评测，只能通过导入接口产生结果；
-- 批量导入支持逐条返回成功或失败，不能因为一条非法结果回滚整批合法结果；
-- 错误响应返回稳定错误码、字段路径和可读说明；
-- 管理操作校验组织作用域；
-- 发布、揭晓、重评和人工改判写入审计日志；
-- OpenAPI 是接口事实来源，前端类型由契约生成。
-
-## 9. 一期关键流程
-
-### 9.1 题目发布
-
-1. 管理员创建题目草稿；
-2. 上传或选择 `challenge.yaml`；
-3. 平台校验题目 Schema；
-4. 运行参考实现自检；
-5. 创建不可变 `challenge_version`；
-6. 创建开放窗口 event，并配置 `trigger` 与 `reveal`；
-7. 按组织作用域生成可参与列表；
-8. 发布后记录审计事件。
-
-一期可以先通过种子数据或管理 API 发布题目，不必先实现完整工作台。
-
-### 9.2 黄区提交与评测
-
-先按场次的 `submission_source` 接收交付件：
-
-#### UPLOAD：上传到评测平台
-
-1. 学员上传交付包；
-2. 平台校验大小、格式和文件数量，执行安全扫描和安全解包；
-3. 平台按提交契约规范化目录，计算 artifact hash 与 snapshot hash；
-4. 不可变交付包写入 artifact store，形成 `SubmissionSnapshot`。
-
-#### GIT_REF：指定 Git 路径和分支
-
-1. 学员 push 到场次预先配置的仓库和分支；
-2. GitLab Webhook 通知平台，或学员在平台点击“提交”；
-3. 平台从场次配置解析仓库与分支并校验参与人归属；
-4. 按 `pinAt=SUBMIT` 或 `pinAt=DEADLINE` 解析准确 commit SHA；
-5. 平台用只读凭据获取该 commit，生成不可变归档和 snapshot hash，形成 `SubmissionSnapshot`。
-
-形成快照后，再按场次的 `trigger` 进入以下流程：
-
-#### AUTO：自动评测
-
-1. 上传完成或 Git 快照固化后，平台立即调用 GitLab Pipeline API，并传入 submission ID 与 snapshot hash；
-2. GitLab CI 获取只读快照，运行 `validate → verify → measure → score`；
-3. CI 使用受限服务账号回传结果；
-4. API 校验 Schema、提交归属、snapshot hash、幂等键和分数加总；
-5. 按 `reveal` 设置立即展示或封存。
-
-#### MANUAL：管理员触发
-
-1. 快照进入 `WAITING_TRIGGER`，提交或 push 不执行评分；
-2. 管理员在平台选择一份或一批提交快照；
-3. 若 Git 场次配置为 `pinAt=DEADLINE`，平台先统一锁定各分支的截止 commit；
-4. 平台批量调用与 AUTO 完全相同的 GitLab 评测流水线；
-5. 后续校验、保存和揭晓逻辑与 AUTO 相同。
-
-#### IMPORT：管理员上传线下结果
-
-1. 快照进入 `WAITING_IMPORT`，平台不触发 GitLab 评测；
-2. 管理员使用线下工具、Codex、Claude 或人工流程完成评分；
-3. 管理员上传一份或一批统一 Schema 结果 JSON；
-4. 平台校验管理员权限、event/subject/snapshot 关联、rubricVersion、Schema、证据字段和分值加总；
-5. 合法结果写入统一成绩表，原始上传文件计算哈希并保留审计记录；
-6. 按 `reveal` 设置立即展示或封存。
-
-线下上传不能绕过平台校验，也不能直接修改总分。需要人工调整时，应产生新的评测版本或复核记录，保留原始结果。
-
-### 9.3 失败策略
-
-| 失败点 | 处理方式 |
-|---|---|
-| 契约阻断 | Verify 为 0，其余可评项继续，输出 PARTIAL |
-| K8s Job 超时 | 记录统一错误码，Verify 为 0，不自动无限重试 |
-| tree-sitter 解析失败 | Code 维度标记不可用，整体 PARTIAL |
-| 结果 Schema 非法 | API 拒绝导入，CI 失败并保存原始产物 |
-| API 暂时不可达 | CI 按幂等键有限重试，结果文件保留为 artifact |
-| 同一结果重复上传 | 返回原结果，不新建第二条成绩 |
-| 批量人工触发部分失败 | 成功项继续执行，失败项逐条返回原因并允许幂等重试 |
-| 导入结果与提交不匹配 | 拒绝该条结果，记录导入人和失败原因 |
-
-## 10. 安全设计
-
-### 10.1 沙箱基线
-
-每次提交独立 K8s Job，至少满足：
-
-- `runAsNonRoot: true`；
-- root filesystem 只读；
-- 禁止 privilege escalation；
-- 删除全部 Linux capabilities；
-- 默认拒绝网络；
-- CPU、内存、临时磁盘限额；
-- active deadline；
-- 提交目录只读挂载，输出目录单独可写；
-- 使用专用 service account，不挂载平台凭据；
-- Job 完成后自动清理。
-
-### 10.2 平台安全
-
-- SSO 只负责身份认证，平台维护角色与组织作用域；
-- 管理接口实施资源级授权，不能只依赖前端隐藏按钮；
-- GitLab CI 使用短期或受限 token；
-- Git 仓库地址只能由管理员在场次中配置，并限制在允许的 Git host/group，防止利用任意 URL 发起 SSRF；
-- Git 凭据只授予目标仓库只读权限，评测运行读取固定 commit SHA；
-- 上传包限制总大小、解压后大小、文件数和路径深度，拒绝绝对路径、`..`、符号链接逃逸和解压炸弹；
-- 上传原包、Git 归档和评测 workspace 均做哈希校验，评测过程中只读；
-- 评测结果导入验证 event、subject、snapshot 的关联；Git 来源额外核对 commit SHA；
-- transcript、代码片段和 findings 按内部数据处理；
-- 日志中不得记录源码全文、token、Cookie 和 SSO 断言；
-- 所有外部输入限制大小并做内容类型校验。
-
-## 11. 测试与质量门禁
-
-### 11.1 测试分层
-
-| 层次 | 重点 |
-|---|---|
-| 单元测试 | 定档计算、作用域判断、幂等键、路径/签名校验 |
-| 契约测试 | JSON Schema、OpenAPI、TypeScript/Python 双端兼容 |
-| 集成测试 | PostgreSQL、artifact store、GitLab 回调、Git 快照、K8s Job 状态转换 |
-| 黄金测试 | grader 固定输入对应固定结果；上传与 Git 的同内容快照必须同分 |
-| 端到端测试 | 建题—上传或 Git 提交—触发—出分—查看报告 |
-| 安全测试 | 超时、内存耗尽、禁网、越权、恶意文件路径、解压炸弹、Git URL SSRF |
-| 性能测试 | 30 人集中 push、API 导入和报告查询 |
-
-### 11.2 合并门禁
-
-每个合并请求至少通过：
-
-- 格式化与静态检查；
-- 单元测试；
-- Schema 契约测试；
-- 数据迁移校验；
-- grader 黄金样本；
-- 受影响模块的集成测试；
-- 无新增高危依赖问题；
-- 文档与 OpenAPI 同步。
-
-## 12. 可观测性
-
-一期至少记录以下指标：
-
-- `grading_runs_total{status,stage}`；
-- `grading_duration_seconds{stage}`；
-- `grading_queue_seconds`；
-- `sandbox_terminated_total{reason}`；
-- `result_import_total{status}`；
-- `idempotency_hit_total`；
-- `schema_validation_failed_total{schemaVersion}`；
-- 单场同时评测数量和峰值资源使用。
-
-日志统一携带：`requestId, eventId, submissionId, snapshotHash, gradingRunId, commitSha, rubricVersion`。不得用员工姓名作为主检索键。
-
-## 13. 迭代计划
-
-### Sprint 0：工程与契约地基（3–5 天）
-
-- 初始化 Git 仓库；
-- 创建 monorepo 目录；
-- 编写根 `AGENTS.md`；
-- 建立 pnpm workspace、NestJS API、React Web 和 Python grader 基础构建；
-- 建立 CI 基础流水线；
-- 产出三份 JSON Schema v1 草案；
-- 产出 5 份合法、10 份非法结果样例；
-- 建立 ADR 模板；
-- 锁定一期样题和语言。
-
-验收：本地一条命令跑完格式检查与契约测试，CI 同样通过。
-
-### Sprint 1：评测引擎最小闭环（5–7 天）
-
-- 实现 `validate / verify / score / run`；
-- 完成一期样题、参考实现和隐藏测试；
-- 用本地容器模拟沙箱；
-- 生成统一结果 JSON；
-- 建立黄金样本和重复运行一致性测试。
-
-验收：参考实现满分；缺陷实现按预期扣分；同一输入重复 20 次结果一致。
-
-### Sprint 2：代码度量与证据链（5–7 天）
-
-- 接入 tree-sitter；
-- 实现一期语言的魔法数字、复杂度、异常处理等指标；
-- findings 精确到文件和行号；
-- 补齐 Code 20 分；
-- 将度量规则写入 rubric 文档和 profile。
-
-验收：Verify + Code 共 60 分全部自动评；黄金实现、典型缺陷实现均命中预期档位。
-
-### Sprint 3：平台 API 与数据库（5–7 天）
-
-- 组织、用户、题目版本、event、submission、grading run 表；
-- Prisma schema 与版本化 migration；
-- artifact store 适配器；
-- 上传交付件的安全解包、哈希与不可变快照；
-- Git 仓库/分支解析、commit 固化与只读快照；
-- 结果导入 API；
-- `AUTO / MANUAL / IMPORT` 触发策略与状态机；
-- 单份、批量管理员触发 API；
-- Schema 和加总二次校验；
-- 幂等导入；
-- 报告查询 API；
-- 最小权限校验与审计。
-
-验收：同一份交付件通过上传和 Git 提交时得到相同 snapshot 内容；移动分支不会改变已提交快照；三种 trigger 的非法状态转换会被拒绝；CI 或管理员上传的结果可重复提交而不产生重复成绩；错误 Schema 被明确拒绝。
-
-### Sprint 4：本地平台闭环与体验（5–7 天）
-
-- 文件持久化适配器、组织树、角色、题目版本、场次和审计记录；
-- 独立评测 Worker 领取同赛题批次，将完整引擎与选中交付件物化到隔离目录，并通过本地 Code Agent 协议适配器逐份调用 Python grader；
-- 赛题版本配置交付目录规范、评测引擎、instruction 与 skills；提交前完成目录结构预检；
-- 报告查询、封存/揭晓、赛季榜单和个人画像只读 API；
-- 报告 API 返回评分项证据、findings、运行诊断和推荐动作；画像 API 返回四维归一化分数、8 个版本化 AI 能力域、16 个评分点历史档位、分区统计、部门中位数、证据覆盖度、薄弱项和趋势序列；能力域无证据时必须返回待评测，不得由平台推断分数；
-- 员工首页（开放赛题、公告、赛季积分、榜单、最近动态）、个人中心与赛题/提交工作台；
-- 管理员按人选择、批次发起评测、Worker 结果回传和结果展示；
-- 管理员工作台（运营总览、赛题版本发布、场次编排、评测队列、结果导入、公告和审计）；
-- 10 人并发演练的本地状态机测试。
-
-验收：UPLOAD 与 GIT_REF 均能形成只读快照；AUTO/MANUAL/IMPORT 的状态转换、结果幂等、详细报告和能力画像数据均可重复测试；GitLab/K8s 不在本轮本地验收依赖中。
-
-### 当前完成状态（2026-08-03）
-
-Sprint 1–4 的本地实现已完成并通过验收：Python grader 的黄金样本、重复快照哈希、超时与 findings；服务端统一快照、Git commit 固化、上传归档限制、赛题级 1.1 交付目录规范、结果二次计分校验、服务端补齐员工/组织快照并拒绝 `gradingRunId` 碰撞、AUTO/MANUAL/IMPORT 状态机、权限/组织边界、详细报告与 8 域能力画像；管理员可精确选择提交创建不可拆分的 Code Agent 批次；Worker 校验并物化完整引擎、平台运行依赖和所有选中交付件，加载赛题 instruction/skills，逐份评分并幂等回传；员工端与管理员端已提供目录规则配置和提交要求展示。端到端测试会实际启动 API、Worker 和本地 Code Agent bridge，并验证两名选中员工完成评测、未选员工保持待处理。
-
-本地实现使用文件持久化、独立 Worker 和本地 Code Agent 协议适配器；生产关系模型已同步到 `services/platform-api/prisma/` 的 schema 与版本化 migrations（包括交付目录规范、评测引擎、批次租约和重复评测历史），但不会在本地测试时隐式连接数据库。真实 Code Agent bridge、GitLab CI、K8s 沙箱、SSO 网关断言/JWT、PostgreSQL Repository 和生产观测按 Sprint 5/生产适配项处理；本地已经提供 SSO 身份同步接口和网关头适配。
-
-### Sprint 5：GitLab 适配接口与生产接入（最后进行，5–7 天）
-
-- 将 `CODE_AGENT_COMMAND` 切换为组织内实际 Code Agent bridge，并完成凭据、并发、超时和审计接入；
-- 实现 `GradingExecutor` 的 GitLab Pipeline 客户端；
-- GitLab Webhook/结果回调签名校验、流水线变量和失败重试；
-- 构建 grader 镜像、K8s Job 沙箱、产物留存和并发演练；
-- 复用现有批次、结果 Schema、幂等键和状态机，不改领域层；
-- SSO、部署文档、运维手册和生产故障演练。
-
-验收：一道题、10 名真实用户验证 UPLOAD/GIT_REF 与三种 trigger 的关键组合；本地与 GitLab 执行结果契约一致；同一 snapshot 重跑同分；每个扣分点可定位证据。
-
-## 14. 二期与三期路线
-
-### 二期：评得准（6–8 周）
-
-- SPEC.md 七节结构扫描；
-- transcript 结构化抽取；
-- 引用精确匹配；
-- 20 份人工标注校准集；
-- 人工复核台；
-- Spec 25 + Collab 15；
-- 集中场次、封存、一键揭晓；
-- 完整学员端和管理端；
-- 30 人集中训战。
-
-进入自动抽取的门槛不是“模型能返回 JSON”，而是与人工金标准的一致率达到既定阈值。
-
-### 三期：比得出（6–8 周）
-
-- 蓝区批量评分工具和结果导入；
-- 团队项目；
-- season、百分位积分和能力画像；
-- 多语言与按参考实现归一化；
-- 模型基准库；
-- 众包出题、自动体检、终审；
-- bounty / explore Verify 插槽；
-- 挑战榜和部门报表。
-
-## 15. Codex 开发方式
-
-### 15.1 任务切分规则
-
-Codex 每次接收一个可独立验收的任务，理想大小为半天到两天。任务必须包含：
-
-- 背景；
-- 明确范围；
-- 不做什么；
-- 输入与输出契约；
-- 允许修改的目录；
-- 验收命令；
-- 兼容性或安全约束。
-
-避免一次让 Codex “实现整个平台”。大任务应按“契约—领域—接口—UI—端到端”拆开。
-
-### 15.2 推荐开发顺序
-
-```text
-契约样例
-  → Schema 校验器
-  → grader 黄金测试
-  → grader 实现
-  → 数据库迁移
-  → API 契约与服务实现
-  → GitLab/K8s 集成
-  → UI
-  → 端到端测试
-```
-
-先写样例与验收测试，再让 Codex 实现，可以显著降低其对模糊规则的自由解释。
-
-### 15.3 每轮 Codex 工作模板
-
-```text
-目标：实现 drill-grader validate 子命令。
-
-上下文：
-- 读取 contracts/submission-contract.schema.json
-- 读取 challenges/parking-fee-v1/challenge.yaml
-- 遵守根目录 AGENTS.md
-
-范围：
-- 只修改 grader/ 和相关 tests/
-- 实现 required、optional、forbidden、入口文件检查
-- 输出稳定 JSON 诊断码
-
-不做：
-- 不执行隐藏测试
-- 不接数据库或网络
-- 不实现其他语言
-
-验收：
-- 运行指定测试命令全部通过
-- 合法 fixture 返回 0
-- blocker fixture 返回非 0 且 JSON 符合 Schema
-- 更新必要文档
-
-完成后：
-- 汇总改动文件
-- 报告测试结果
-- 列出仍存在的风险，不要自行扩大范围
-```
-
-### 15.4 根 `AGENTS.md` 应包含的规则
-
-- 先读本目录及父目录的约束；
-- 契约文件是事实来源；
-- 已发布 Schema 和数据库迁移不可原地修改；
-- 所有评分逻辑必须有黄金测试；
-- 禁止模型直接生成分数；
-- 禁止在日志和 fixture 中放真实员工或生产数据；
-- 新依赖需说明用途并通过内部制品可用性检查；
-- 不绕过测试，不以删除测试修复失败；
-- 修改 API 必须同步 OpenAPI；
-- 修改结果结构必须同步 TypeScript/Python 契约测试；
-- 完成任务后运行最小充分验证并报告结果。
-
-## 16. 首批可直接交给 Codex 的任务
-
-按顺序执行，前一项验收通过后再做下一项：
-
-1. 初始化 Git 仓库、monorepo 目录和根 `AGENTS.md`；
-2. 编写 `evaluation-result.schema.json` v1 与合法/非法样例；
-3. 编写 `challenge.schema.json` 和一期样题 `challenge.yaml`；
-4. 编写 `submission-contract.schema.json`；
-5. 搭建 Python grader 包和测试框架；
-6. 实现 `drill-grader validate`；
-7. 准备一期样题参考实现及四档隐藏测试；
-8. 实现 `verify` 与测试结果标准化；
-9. 实现 `score` 和结果 JSON 汇总；
-10. 建立重复运行一致性测试；
-11. 接入 tree-sitter 并只实现一种语言的 C1；
-12. 补齐该语言 Code 维度；
-13. 搭建 NestJS + Fastify API、Prisma schema 和首个 migration；
-14. 实现 artifact store 接口与本地/S3 适配器；
-15. 实现 UPLOAD 安全解包和不可变快照；
-16. 实现 GIT_REF 仓库/分支解析和 commit 快照；
-17. 实现 grading result 幂等导入；
-18. 实现 `AUTO / MANUAL / IMPORT` 状态机和非法转换测试；
-19. 实现单份、批量管理员触发接口；
-20. 实现报告查询和统一揭晓接口；
-21. 编写可由平台调用的 GitLab CI 模板；
-22. 接入 K8s Job 沙箱；
-23. 完成上传/Git 提交、报告页、待评测列表和结果上传页；
-24. 完成交付来源与 trigger 组合的端到端测试及 10 人并发测试；
-25. 输出一期验收报告。
-
-## 17. 开工前必须确认的决策
-
-下列问题不会阻碍 Sprint 0 建契约和 grader 骨架，但必须在进入真实环境集成前确认：
-
-1. 一期样题固定使用 Java、Go 还是 Python（与平台 Node.js 后端技术栈无关）；
-2. 黄区内部允许的前端组件库及具体依赖版本；
-3. 黄区内部批准的 Node.js LTS、pnpm、NestJS、Prisma 等依赖版本；
-4. PostgreSQL 是否已有托管实例；
-5. 是否已有 S3 兼容对象存储；若没有，一期 artifact PVC 的容量、备份和清理策略；
-6. GitLab 是否允许项目级 Runner 创建 K8s Job；
-7. 可读取的 Git host/group 范围以及只读凭据发放方式；
-8. Git 场次使用固定分支还是按个人/团队生成分支；
-9. 隐藏测试独立仓库的权限与拉取方式；
-10. SSO 采用 OIDC 还是 SAML；
-11. 内部镜像仓和制品库地址；
-12. 组织数据由 SSO 字段提供还是另有 HR/组织接口；
-13. 一期样题最终选择及验收负责人。
-
-在这些信息未确认前，采用可替换适配器：开发期本地认证、模拟 GitLab 回调、本地容器沙箱和内存组织数据，避免阻塞核心评测闭环。
-
-## 18. 一期 Definition of Done
-
-一期只有同时满足以下条件才算完成：
-
-- 一个新用户可以看到自己组织范围内的题；
-- 场次可以配置 `UPLOAD` 或 `GIT_REF` 交付来源；
-- UPLOAD 模式可以安全接收交付包并形成不可变快照；
-- GIT_REF 模式可以从指定仓库和指定分支锁定 commit，并形成不可变快照；
-- Git 分支后续移动不会改变已提交、已评测的快照；
-- 同内容通过上传和 Git 提交时，评测引擎得到等价 workspace；
-- 场次可以配置 `AUTO / MANUAL / IMPORT`，并可独立配置揭晓方式；
-- AUTO 模式下上传完成或有效 Git 提交能自动触发评测；
-- MANUAL 模式下提交只形成快照，管理员可以单份或批量触发评测；
-- IMPORT 模式下不会启动 CI，管理员可以上传单份或批量线下结果；
-- 提交代码在隔离沙箱内运行；
-- 5 分钟内得到 Verify + Code 报告；
-- 每项扣分都有机器证据；
-- 同一 snapshot、同一判据版本重复运行结果一致；
-- 非法结果不能导入；
-- 导入结果与 event、subject 或 commit 不匹配时必须拒绝；
-- 重复导入不会生成重复成绩；
-- 10 人同时提交时服务稳定；
-- 超时、禁网、越权和资源耗尽测试通过；
-- 数据库迁移、部署、回滚和故障排查有文档；
-- 一期真实演练完成并形成验收记录。
-
-## 19. 建议的第一步
-
-第一轮开发不要从页面开始。应先完成：
-
-1. 初始化 Git 和 monorepo；
-2. 建立根 `AGENTS.md`；
-3. 冻结三个 Schema v1 草案；
-4. 选定一期样题和单一语言；
-5. 用黄金 fixture 跑通 `drill-grader run` 的本地最小闭环。
-
-完成这五项后，平台 API、GitLab CI 和 K8s 都有稳定契约可以对接，Codex 后续的任务边界也会非常清楚。
+涉及真实批次协议时还要运行 `services/platform-api/test/evaluation-worker.test.ts` 所覆盖的 Worker/Code Agent 端到端场景。涉及 UI 时应在浏览器中以全局管理员、部门管理员和学员身份分别验证关键路径。
+
+提交前确认：
+
+- 工作区没有误提交 `tmp/`、凭据、构建产物或个人文件；
+- 根目录、Web、API 版本一致；
+- 本文档、`CHANGELOG.md` 和实际行为一致；
+- OpenAPI、JSON Schema、样例和实现一致；
+- 新增迁移没有修改已发布迁移；
+- 明确记录未解决风险，不用“已完成”掩盖本地适配器限制。
+
+## 12. 专项文档索引
+
+- `CHANGELOG.md`：逐版本详细变更；
+- `contracts/openapi.yaml`：HTTP API 事实来源；
+- `docs/evaluation-engine-protocol.md`：评测引擎、Worker 与 Code Agent ABI；
+- `docs/submission-contract.md`：赛题交付目录规范；
+- `docs/capability-model.md`：四维、16 点与八能力域计算模型；
+- `docs/architecture/grading-flow.md`：当前评测数据流；
+- `docs/architecture/data-adapter.md`：本地/生产适配器边界；
+- `docs/architecture/security-boundary.md`：身份、文件、Worker 和网络安全边界；
+- `docs/adr/0001-local-first-adapters.md`：本地优先适配器的架构决策；
+- `AI训战平台设计方案.html`：原始业务设计参考。

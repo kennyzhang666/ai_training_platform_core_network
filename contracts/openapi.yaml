@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: AI 训战平台 API
-  version: 0.5.0
+  version: 0.6.1
   description: 训战、交付目录校验、Code Agent 批次评测与结果录入接口
 servers:
   - url: http://localhost:3000
@@ -385,6 +385,20 @@ paths:
           application/json: { schema: { $ref: '#/components/schemas/OrgUnitPatch' } }
       responses:
         '200': { description: 组织节点已更新 }
+    delete:
+      operationId: deleteOrgUnit
+      summary: 删除空部门
+      description: 根组织、含下级部门、仍有员工或仍被业务配置引用的部门不可删除。
+      parameters:
+        - name: orgUnitId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: 部门已删除 }
+        '400': { description: 根组织不可删除 }
+        '403': { description: 超出管理员组织范围 }
+        '409': { description: 部门仍有下级部门、员工或业务引用 }
   /api/v1/users:
     get:
       operationId: listUsers
