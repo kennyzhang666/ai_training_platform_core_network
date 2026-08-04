@@ -4,7 +4,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { basename, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { ArtifactStore, StoredArtifact } from './artifact-store';
 
 const execFileAsync = promisify(execFile);
@@ -31,7 +31,7 @@ export class LocalGitSnapshotter {
   private readonly gitRoot = process.env.LOCAL_GIT_ROOT ? resolve(process.env.LOCAL_GIT_ROOT) : undefined;
   private readonly timeout = Number(process.env.GIT_COMMAND_TIMEOUT_MS ?? 30_000);
 
-  constructor(private readonly artifacts: ArtifactStore) {}
+  constructor(@Inject(ArtifactStore) private readonly artifacts: ArtifactStore) {}
 
   get enabled(): boolean {
     return Boolean(this.gitRoot);

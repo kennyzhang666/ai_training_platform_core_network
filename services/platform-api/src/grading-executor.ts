@@ -4,7 +4,7 @@ import { isAbsolute, join, relative as relativePath, resolve, sep } from 'node:p
 import { promisify } from 'node:util';
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { EvaluationEngineConfig, EventConfig, GradingRun, SubmissionRecord } from './domain';
-import { ArtifactStore } from './artifact-store';
+import { OBJECT_STORAGE, ObjectStorage } from './object-storage';
 import { computeDirectorySnapshotHash } from './snapshot-hash';
 
 const execFileAsync = promisify(execFile);
@@ -77,7 +77,7 @@ export class LocalGradingExecutor implements GradingExecutor {
   private readonly workspaceRoot = resolve(process.env.LOCAL_WORKSPACE_ROOT ?? this.projectRoot);
   private readonly graderScript = resolve(process.env.GRADER_SCRIPT ?? join(this.projectRoot, 'grader', 'run_grader.py'));
 
-  constructor(@Inject(ArtifactStore) private readonly artifacts: ArtifactStore) {}
+  constructor(@Inject(OBJECT_STORAGE) private readonly objects: ObjectStorage) {}
 
   private async assertImmutableSnapshot(snapshot: SubmissionRecord['snapshot'], workspace?: string): Promise<void> {
     if (workspace) {
@@ -88,11 +88,11 @@ export class LocalGradingExecutor implements GradingExecutor {
       return;
     }
     if (!snapshot.artifactUri) return;
-    const actualArtifactHash = await this.artifacts.contentHash(snapshot.artifactUri);
+    const actualArtifactHash = await this.objects.contentHash(snapshot.artifactUri);
     if (snapshot.artifactHash && actualArtifactHash !== snapshot.artifactHash) {
       throw new BadRequestException({ code: 'ARTIFACT_CHANGED', message: 'stored artifact bytes changed after submission; artifactHash no longer matches' });
     }
-    const actualSnapshotHash = await this.artifacts.snapshotHash(snapshot.artifactUri);
+    const actualSnapshotHash = await this.objects.snapshotHash(snapshot.artifactUri);
     if (actualSnapshotHash !== snapshot.snapshotHash) {
       throw new BadRequestException({ code: 'SNAPSHOT_CHANGED', message: 'stored artifact contents changed after submission; snapshotHash no longer matches' });
     }
@@ -110,11 +110,12 @@ export class LocalGradingExecutor implements GradingExecutor {
     if (!config) throw new BadRequestException({ code: 'ENGINE_LOCAL_CONFIG_MISSING', message: '赛题的本地评测引擎缺少执行配置' });
     const workspacePath = input.submission.snapshot.workspacePath;
     let temporaryWorkspace: string | undefined;
+    let materializedArtifact: Awaited<ReturnType<ObjectStorage['materialize']>> | undefined;
     let workspace: string;
     if (workspacePath) {
       workspace = resolveInside(this.workspaceRoot, workspacePath, 'workspacePath');
     } else if (input.submission.snapshot.artifactUri) {
-      const archive = this.artifacts.localPath(input.submission.snapshot.artifactUri);
+      materializedArtifact = await this.objects.materialize(input.submission.snapshot.artifactUri, input.submission.snapshot.artifactName);
       mkdirSync(join(this.projectRoot, 'tmp'), { recursive: true });
       temporaryWorkspace = mkdtempSync(join(this.projectRoot, 'tmp', 'local-workspace-'));
       workspace = temporaryWorkspace;
@@ -130,9 +131,8 @@ export class LocalGradingExecutor implements GradingExecutor {
       await this.assertImmutableSnapshot(input.submission.snapshot, workspacePath ? workspace : undefined);
       const python = process.env.PYTHON ?? (existsSync(join(this.projectRoot, '.venv', 'Scripts', 'python.exe')) ? join(this.projectRoot, '.venv', 'Scripts', 'python.exe') : 'python');
       if (temporaryWorkspace) {
-        const archive = this.artifacts.localPath(input.submission.snapshot.artifactUri!);
         try {
-          await execFileAsync(python, ['-c', ZIP_EXTRACTOR, archive, temporaryWorkspace], {
+          await execFileAsync(python, ['-c', ZIP_EXTRACTOR, materializedArtifact!.path, temporaryWorkspace], {
             cwd: this.projectRoot,
             maxBuffer: 2 * 1024 * 1024,
             timeout: EXTRACT_TIMEOUT_MS,
@@ -184,6 +184,7 @@ export class LocalGradingExecutor implements GradingExecutor {
       }
     } finally {
       if (temporaryWorkspace) rmSync(temporaryWorkspace, { recursive: true, force: true });
+      if (materializedArtifact) await materializedArtifact.cleanup();
     }
   }
 }

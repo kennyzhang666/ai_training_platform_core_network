@@ -1,5 +1,53 @@
 # 更新记录
 
+## 0.7.0 - 2026-08-04
+
+完成生产数据与身份底座代码纵切面，并发布 v0.7.0：
+
+- 增加 Prisma/PostgreSQL 组织、人员、角色绑定和审计 Repository，含服务端分页、稳定排序、同事务更新和 SSO 首次建档重试；
+- 增加 OIDC/JWT、可信网关签名和本地开发身份模式，并由 Nest 全局 Guard 统一注入可信操作者；
+- 增加 v0.7 数据库迁移、JSON 导入、规范化 PostgreSQL Repository/Unit of Work、运行/批次租约 CAS、结果幂等、备份/恢复命令和生产环境适配器边界；
+- 增加本地/S3-compatible 两阶段对象上传、校验、确认、读取、过期清理和临时文件物化，并将 ZIP 提交与 Worker 评测接入对象存储确认结果；PostgreSQL 模式新增 `UploadSession` 持久化，支持重启恢复和跨实例 CAS；
+- 新增 `PlatformSnapshot` revision CAS、请求级持久化 flush，以及 W1 组织/人员/审计同事务写入；新增同级组织名称唯一迁移 `0011_org_unit_name_scope`/`0012_org_unit_root_name_scope`，覆盖根组织的 PostgreSQL `NULL` 并发语义；
+- 将提交、审计和管理端人员列表改为分页契约，Web 管理端接入人员服务端分页。
+- 修复管理员写操作成功后刷新提交/审计列表触发未注入依赖而误报失败的问题；补齐 `PlatformReadService` 与本地 Git 快照器的显式 Nest 注入，并增加管理员刷新接口回归测试。
+- W6 分页补齐个人画像历史与管理端能力聚合：新增 `GET /profiles/:subjectId/history`，画像支持 `includeHistory=false`，`/admin/capabilities` 对候选人员、画像和趋势统一返回分页信息；Web 端改用服务端候选人员/画像分页并防止旧请求覆盖新结果。
+- 将赛题、训战、难题榜、公告、提交、评测运行/批次、结果导入和 Code Agent 回调写路径统一接入请求级 PostgreSQL Unit of Work；补充批次租约/结果回调的持久化边界和截止 Git 快照关闭前的事务复核。
+- 新增 `0013_submission_current_pointers`，把提交当前运行/结果指针与历史 runs/results 关系分离，避免重新评测后的 API 重启恢复旧结果；JSON 导入和备份版本同步到该迁移。
+- 新增 `0014_capacity_query_indexes`；提交列表改为先按复合索引读取排序键，再按页回表保留评测历史映射，避免高基数深分页直接排序/加载全部 JSON 列。
+- 规范化同步会按不可变结果 JSON 重建 criteria/finding 投影，并保留历史结果证据；S3 确认先提交完成事实再清理 staging 对象，降低 API 崩溃或重复确认造成的丢失窗口。
+- PostgreSQL 模式的提交和审计读取增加规范化表分页与组织范围过滤，文件模式继续复用既有适配器语义。
+- OpenAPI 补齐 OIDC Bearer 与可信网关身份方案；OIDC 畸形签名统一返回认证失败，JSON 导入按组织层级写入以满足自引用外键，管理员下载交付件再次核对内容哈希。
+- 新增 Git 版本化评测输入/输出约束目录：管理员按评测方式从下拉选择固定约束，可点击查看 Schema、示例和编写说明，并一键复制 AI 出题提示；服务端启动时校验 Schema 与示例并拒绝任意 `contractPath`；补充外部评测、Code Agent 和打包引擎示例，以及约束详情 OpenAPI 接口。
+- AI 能力画像新增训战维度：`GET /api/v1/admin/capabilities?eventId=...` 经过管理员范围校验后，只聚合该训战的提交与 AI 评测结果；管理端增加训战下拉、训战群体聚合和个人 AI 评测卡片。
+- 管理端补齐赛题/训战编辑与删除：赛题删除采用可恢复的回收站语义，已发布赛题编辑会创建新版本；训战支持 PATCH 编辑和 DELETE 安全删除，已公布、系统管理或已有提交的训战会被拒绝并记录审计。
+- 修正上传会话 OpenAPI：声明控制器返回的 `subjectId`，并用契约回归防止上传响应与公开 schema 漂移。
+- 备份脚本改为在 PostgreSQL repeatable-read 快照中读取全部规范化表；同步更新数据适配器架构说明，记录临时 PostgreSQL 16.4 的迁移、集成、导入和恢复验收证据。
+- Fastify 启动入口注册 `application/octet-stream`/ZIP 原始二进制解析器；临时 MinIO 生产配置 HTTP 验收覆盖上传、确认幂等、staging 篡改拒绝和 API 重启后的 `UploadSession` 恢复。
+- 修复本地评测完成时把内部 `artifactName`/`workspacePath` 泄漏进 `evaluation-result.submission` 的契约错误；增加带真实二进制 ZIP 的 PostgreSQL HTTP 闭环回归，上传、启动评测和结果入库均进入 `GRADED`。
+- 收紧已废弃的单运行评测入口：`EMBEDDED_EVALUATION_WORKER` 未显式开启时，`/grading-runs/:runId/execute` 立即返回 `CODE_AGENT_WORKER_REQUIRED`，防止 API 进程绕过外部 Worker 执行评测引擎。
+- 增加仅全局管理员可读取的进程级聚合 `/api/v1/metrics`，记录请求错误率、延迟分位数和受限路由计数，不保留令牌、员工号、源码或对象存储凭据。
+- 修正指标拦截器的异常状态归类：保留异常过滤器设置的 4xx 客户端错误，仅将错误路径上未设置状态的响应归为 5xx，并补充已知路由 400 回归断言，避免错误率失真。
+- 收紧生产 OIDC 启动校验：`OIDC_ISSUER` 必须是有效 HTTPS URL，与 JWKS endpoint 一起在配置阶段失败关闭，并补充明文/畸形 issuer 回归测试。
+- OIDC 启动校验现在也把畸形 `OIDC_JWKS_URL` 映射为稳定配置错误，避免把原生 URL 解析异常泄露为未分类启动失败。
+- 加强 JSON→PostgreSQL dry-run：在连接数据库前校验组织/人员/赛题/训战/提交/运行/批次/结果的引用、唯一键、日期和快照哈希，并新增坏图谱回归，避免把可预见的导入错误留给事务阶段。
+- 导入 dry-run 进一步校验批次的 run/submission 配对、完成/失败集合、结果与运行归属，以及提交当前/历史结果指针归属，拒绝跨提交图谱污染。
+- 增加过期上传 staging 对象的周期性幂等清理；数据库状态、对象存储删除和生命周期策略共同形成重试友好的清理边界。
+- 修正本地 Repository + S3-compatible 组合的上传会话装配：未启用 Prisma 持久化时使用内存会话，只有 PostgreSQL provider 真正启用时才宣称 durable upload-session persistence。
+- 异常日志改为结构化失败事件，只保留请求 ID、HTTP 状态、稳定错误码和异常类型，不再写入堆栈、评测 stderr、对象存储 URL 或数据库连接细节。
+- 在 14 个迁移已部署的 PostgreSQL 实例上完成 v2 备份、故意修改用户后的恢复回滚演练，并用官方 npm registry 执行 `pnpm audit --audit-level=high`（无已知高危漏洞）。
+- W3/W4 低卡读取、上传授权和提交主体校验改为从请求内最新事务图读取，避免跨实例缓存过期导致越权或错误批次视图；生产环境显式拒绝启用内嵌评测执行器。
+- 备份恢复脚本在写入 Prisma DateTime 字段前执行类型复原，JSON 导入同步重建 criteria/finding 投影，保证恢复后的报告证据与不可变结果一致。
+- PostgreSQL v2 恢复在连接数据库和删除目标数据前预检备份图谱（主键、外键、批次配对、结果归属及日期），坏备份直接以非零退出码拒绝。
+- PostgreSQL Domain Unit of Work、兼容状态持久化和窄 Repository transaction 统一使用 repeatable-read 快照，再由 revision CAS 报告跨实例写冲突，避免多查询图谱读到混合版本。
+- GitLab CI 增加隔离 PostgreSQL 16 service，显式等待数据库就绪后运行正式迁移路径的 `test:integration:postgres`，避免 CI 只验证文件适配器。
+- PostgreSQL 集成测试补齐并发验收：同一 SSO 工号首次建档、同级组织名称、运行幂等键、批次/运行租约 CAS，以及 10 次重复结果回调均在隔离后缀数据上验证并清理。
+- SSO 首次建档重试同时覆盖 PostgreSQL 唯一冲突和 repeatable-read 写冲突（`P2002`/`P2034`），避免并发首登把可恢复竞争暴露为未分类失败。
+
+验证记录：`pnpm test`（API 107 项，106 通过、1 项显式跳过，Web 类型测试通过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm build`、`pnpm lint`、`pnpm acceptance:local`（1/1）、Prisma schema 校验、JSON 导入 dry-run 和 `git diff --check` 均通过。
+补充真实 PostgreSQL 验证（临时隔离 PostgreSQL 16.4 实例）：14 个迁移从空库部署成功，`POSTGRES_INTEGRATION=true pnpm --filter @ai-training/platform-api test:integration:postgres` 通过（1/1）；JSON 正式导入（组织 4、用户 12、赛题 6、训战 5、赛季 1、公告 3）、v2 备份、故意修改后恢复和 PostgreSQL 模式 API HTTP 分页/事务审计验收均通过。带真实 ZIP 二进制的 PostgreSQL HTTP 闭环（上传、启动评测、结果 Schema 校验、结果入库）已进入 `GRADED`。临时 MinIO S3-compatible endpoint 以生产配置完成原始二进制上传、确认幂等、篡改拒绝和 API 重启恢复验收。使用 10 万员工、10 万提交和 100 万审计合成数据复核查询计划，30 次 count+page 样本 P50/P95 分别为员工 13.54/18.19ms、提交 83.81/92.94ms、审计 149.30/172.82ms。该 PostgreSQL 记录形成于本轮新增并发断言之前；并发扩展已进入 CI 集成入口，当前工作区没有可用数据库可重新执行。
+部署门禁（不阻止代码版本发布）：目标环境仍需提供生产 S3-compatible endpoint 策略、OIDC/JWKS 网关、Worker 身份和生产回滚记录；10 万/100 万规模容量、查询计划和依赖安全扫描已在临时环境完成本地基线。W3/W4 的 HTTP 写路径已接入请求级 Unit of Work，但仍保留部分直接 Repository/兼容门面和高基数读取的后续收口；`PlatformSnapshot` 仅保留迁移/回滚兼容用途。
+
 ## 0.6.1 - 2026-08-03
 
 修复组织与人员管理的实际可用性问题，并建立后续 Codex 可以持续维护的开发交接基线。

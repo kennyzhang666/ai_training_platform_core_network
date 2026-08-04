@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import { validateEvaluationResult } from '../src/contract-validator';
+import { EvaluationContractCatalogService } from '../src/evaluation-contract-catalog';
+import { EvaluationEngineConfig } from '../src/domain';
 import { PlatformStore } from '../src/store';
 
 const root = join(__dirname, '..', '..', '..');
@@ -38,6 +40,29 @@ test('OpenAPI documents every controller route and method', () => {
   }
 
   assert.deepEqual([...new Set(documented)].sort(), [...new Set(implemented)].sort());
+});
+
+test('OpenAPI fixes the users pagination envelope and query whitelist', () => {
+  const openapi = readFileSync(join(root, 'contracts', 'openapi.yaml'), 'utf8');
+  const usersPath = openapi.slice(openapi.indexOf('  /api/v1/users:\n'), openapi.indexOf('  /api/v1/users/{userId}:'));
+  assert.match(usersPath, /name: page\s+in: query/);
+  assert.match(usersPath, /name: pageSize[\s\S]*maximum: 100/);
+  assert.match(usersPath, /name: role[\s\S]*explode: false/);
+  assert.match(usersPath, /enum: \[employeeNo, name, orgPath, status, id\]/);
+  assert.match(usersPath, /schema: \{ \$ref: '#\/components\/schemas\/UserPage' \}/);
+  const userPageSchema = openapi.slice(openapi.indexOf('    UserPage:\n'), openapi.indexOf('    ListPageInfo:\n'));
+  assert.match(userPageSchema, /        pageInfo: \{ \$ref: '#\/components\/schemas\/UserPageInfo' \}/);
+  assert.match(openapi, /    UserPageInfo:\n[\s\S]*hasPrevious: \{ type: boolean \}/);
+  const uploadSessionSchema = openapi.slice(openapi.indexOf('    UploadSession:\n'), openapi.indexOf('    UploadMetadata:\n'));
+  assert.match(uploadSessionSchema, /required: \[uploadId, uploadToken, objectKey, actorId, eventId, subjectId, fileName, declaredSize, expiresAt\]/);
+  assert.match(uploadSessionSchema, /        subjectId: \{ type: string \}/);
+  const profileHistoryPath = openapi.slice(openapi.indexOf('  /api/v1/profiles/{subjectId}/history:\n'), openapi.indexOf('  /api/v1/profiles/{subjectId}/capabilities:\n'));
+  assert.match(profileHistoryPath, /name: pageSize[\s\S]*maximum: 100/);
+  assert.match(profileHistoryPath, /ProfileHistoryPage/);
+  const adminCapabilityPath = openapi.slice(openapi.indexOf('  /api/v1/admin/capabilities:\n'), openapi.indexOf('  /api/v1/events:\n'));
+  assert.match(adminCapabilityPath, /name: eventId[\s\S]*name: page[\s\S]*name: pageSize/);
+  assert.match(adminCapabilityPath, /AdminCapabilityBundle/);
+  assert.match(openapi, /AdminCapabilityBundle:[\s\S]*eventId: \{ type: \[string, 'null'\] \}/);
 });
 
 // The external-evaluation manifest is declared as a versioned contract but was
@@ -101,4 +126,37 @@ test('the Code Agent batch manifest and result index satisfy their public schema
 
   assert.equal(manifestValidator(manifest), true, JSON.stringify(manifestValidator.errors));
   assert.equal(indexValidator(resultIndex), true, JSON.stringify(indexValidator.errors));
+});
+
+test('the Git evaluation contract catalog exposes public choices and rejects arbitrary paths', () => {
+  const catalog = new EvaluationContractCatalogService();
+  const choices = catalog.list();
+  assert.equal(choices.length, 3);
+  assert.ok(choices.every((item) => item.visibility === 'PUBLIC'));
+  assert.ok(choices.some((item) => item.id === 'external-evaluation-input-v1'));
+  assert.ok(choices.some((item) => item.id === 'code-agent-batch-input-v1.1'));
+  assert.ok(choices.some((item) => item.id === 'platform-evaluation-result-v1'));
+  assert.ok(choices.every((item) => /输入约束|输出约束/.test(item.label)));
+  const detail = catalog.get('platform-evaluation-result-v1');
+  assert.equal(detail.kind, 'OUTPUT');
+  assert.match(detail.label, /输出约束/);
+  assert.equal(typeof detail.schema, 'object');
+  assert.equal(typeof detail.example, 'object');
+  assert.match(detail.guide, /复制给 AI/);
+  assert.throws(() => catalog.get('engine-invocation-input-v1'), /EVALUATION_CONTRACT_NOT_FOUND|评测约束不存在/);
+
+  const external: EvaluationEngineConfig = {
+    id: 'catalog-test-engine', version: '1.0.0', mode: 'EXTERNAL_CLI',
+    input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
+    output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
+  };
+  assert.doesNotThrow(() => catalog.assertSelection(external));
+  assert.throws(() => catalog.assertSelection({
+    ...external,
+    input: { ...external.input, contractPath: 'contracts/not-approved.schema.json' },
+  }), /EVALUATION_CONTRACT_NOT_ALLOWED|输入契约/);
+  assert.throws(() => catalog.assertSelection({
+    ...external,
+    input: { format: 'JSON', schemaVersion: '1.1', contractPath: 'contracts/evaluation-agent-batch-v1.1.schema.json' },
+  }), /EVALUATION_CONTRACT_NOT_ALLOWED|输入契约/);
 });

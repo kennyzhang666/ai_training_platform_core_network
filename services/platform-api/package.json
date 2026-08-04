@@ -1,6 +1,6 @@
 {
   "name": "@ai-training/platform-api",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -8,12 +8,21 @@
     "start": "node dist/main.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test test/**/*.test.ts",
-    "contract:test": "tsx --test test/contract.test.ts"
+    "contract:test": "tsx --test test/contract.test.ts",
+    "test:integration:postgres": "tsx --test test/prisma-repository.integration.test.ts",
+    "prisma:validate": "prisma validate",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "migrate:json": "node scripts/migrate-json-to-postgres.mjs",
+    "backup:postgres": "node scripts/backup-postgres.mjs",
+    "restore:postgres": "node scripts/restore-postgres.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1101.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-fastify": "^11.0.0",
+    "@prisma/client": "6.19.3",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "fastify": "^5.4.0",
@@ -22,6 +31,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "prisma": "6.19.3",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

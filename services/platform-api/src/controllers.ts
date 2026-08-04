@@ -4,6 +4,8 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { PlatformStore } from './store';
+import type { UserListQuery, UserListSortBy, UserListSortOrder } from './store';
+import type { SubmissionListQuery } from './repository';
 import { Announcement, Challenge, ChallengeCategory, ChallengeVersion, CodeAgentRuntimeInput, EvaluationEngineConfig, EventConfig, HardProblem, HardProblemReviewStatus, HardProblemSolutionVisibility, Season, SubmissionSnapshot, SsoIdentity } from './domain';
 import { validateEvaluationResult } from './contract-validator';
 import { ArtifactStore } from './artifact-store';
@@ -16,6 +18,75 @@ import { ExecutorRegistry } from './executor-registry';
 import { EvaluationTaskService } from './evaluation-task-service';
 import { SubmissionContractService } from './submission-contract-service';
 import { EvaluationBatchService } from './evaluation-batch-service';
+import { UserDirectoryService } from './user-directory';
+import { OBJECT_STORAGE, ObjectStorage } from './object-storage';
+import { PlatformReadService } from './platform-read-service';
+import { PostgresDomainUnitOfWork } from './postgres-domain-unit-of-work';
+import { PlatformMetrics } from './metrics';
+import { EvaluationContractCatalogService } from './evaluation-contract-catalog';
+
+type UserQueryValue = string | string[] | undefined;
+type UserListRequestQuery = Record<string, UserQueryValue>;
+
+const USER_SORT_FIELDS = new Set<UserListSortBy>(['employeeNo', 'name', 'orgPath', 'status', 'id']);
+
+function invalidUserQuery(message: string): BadRequestException {
+  return new BadRequestException({ code: 'INVALID_USER_QUERY', message });
+}
+
+function queryString(value: UserQueryValue, name: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) {
+    if (value.length !== 1) throw invalidUserQuery(`${name} must be provided once`);
+    return value[0];
+  }
+  return value;
+}
+
+function queryInteger(value: UserQueryValue, name: string, fallback: number, maximum?: number): number {
+  const raw = queryString(value, name);
+  if (raw === undefined) return fallback;
+  if (!/^[1-9]\d*$/.test(raw)) throw invalidUserQuery(`${name} must be a positive integer`);
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || (maximum !== undefined && parsed > maximum)) {
+    throw invalidUserQuery(maximum === undefined ? `${name} is out of range` : `${name} must be at most ${maximum}`);
+  }
+  return parsed;
+}
+
+function parseUserListQuery(input: UserListRequestQuery): UserListQuery {
+  const sortBy = queryString(input.sortBy, 'sortBy');
+  if (sortBy !== undefined && !USER_SORT_FIELDS.has(sortBy as UserListSortBy)) {
+    throw invalidUserQuery('sortBy is not supported');
+  }
+  const sortOrder = queryString(input.sortOrder, 'sortOrder')?.toLowerCase();
+  if (sortOrder !== undefined && sortOrder !== 'asc' && sortOrder !== 'desc') {
+    throw invalidUserQuery('sortOrder must be asc or desc');
+  }
+  const status = queryString(input.status, 'status');
+  if (status !== undefined && status !== 'ACTIVE' && status !== 'DISABLED') {
+    throw invalidUserQuery('status must be ACTIVE or DISABLED');
+  }
+  const rawRoles = input.role === undefined ? [] : (Array.isArray(input.role) ? input.role : [input.role]);
+  const roles = rawRoles.flatMap((value) => value.split(',').map((role) => role.trim()).filter(Boolean));
+  if (roles.some((role) => !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(role))) {
+    throw invalidUserQuery('role contains an invalid value');
+  }
+  const query = queryString(input.query, 'query')?.trim();
+  if (query && query.length > 200) throw invalidUserQuery('query must be at most 200 characters');
+  const orgPath = queryString(input.orgPath, 'orgPath')?.trim();
+  if (orgPath && orgPath.length > 512) throw invalidUserQuery('orgPath must be at most 512 characters');
+  return {
+    page: queryInteger(input.page, 'page', 1),
+    pageSize: queryInteger(input.pageSize, 'pageSize', 20, 100),
+    ...(orgPath ? { orgPath } : {}),
+    ...(query ? { query } : {}),
+    ...(roles.length ? { roles: [...new Set(roles)] } : {}),
+    ...(status ? { status: status as 'ACTIVE' | 'DISABLED' } : {}),
+    ...(sortBy ? { sortBy: sortBy as UserListSortBy } : {}),
+    ...(sortOrder ? { sortOrder: sortOrder as UserListSortOrder } : {}),
+  };
+}
 
 @Controller('/api/v1')
 export class PlatformController {
@@ -30,6 +101,12 @@ export class PlatformController {
     @Inject(EvaluationTaskService) private readonly tasks: EvaluationTaskService,
     @Inject(SubmissionContractService) private readonly submissionContracts: SubmissionContractService,
     @Inject(EvaluationBatchService) private readonly evaluationBatches: EvaluationBatchService,
+    @Inject(UserDirectoryService) private readonly userDirectory: UserDirectoryService,
+    @Inject(PlatformReadService) private readonly platformRead: PlatformReadService,
+    @Inject(PostgresDomainUnitOfWork) private readonly domainUnitOfWork: PostgresDomainUnitOfWork,
+    @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorage,
+    @Inject(PlatformMetrics) private readonly metrics: PlatformMetrics,
+    @Inject(EvaluationContractCatalogService) private readonly contractCatalog: EvaluationContractCatalogService,
   ) {}
 
   private localWorkspaceHash(workspacePath: string): string {
@@ -113,19 +190,43 @@ export class PlatformController {
     };
   }
 
-  private scheduleIfAutomatic(eventId: string, submissionId: string): void {
-    if (this.store.getEvent(eventId).trigger !== 'AUTO') return;
-    const submission = this.store.getSubmission(submissionId);
-    if (!submission.gradingRunId) return;
+  private async scheduleIfAutomatic(eventId: string, submissionId: string): Promise<void> {
+    const current = await this.domainUnitOfWork.read((store) => {
+      const event = store.getEvent(eventId);
+      const submission = store.getSubmission(submissionId);
+      return { trigger: event.trigger, gradingRunId: submission.gradingRunId };
+    });
+    if (current.trigger !== 'AUTO' || !current.gradingRunId) return;
     // The in-process executor remains an explicit single-host compatibility
-    // switch. Normal deployments always create a pull-based Code Agent batch.
+    // switch. Normal deployments create the pull-based Code Agent batch in
+    // the same UoW as submission/regrade creation; this helper must not create
+    // it a second time after the transaction has committed.
     if (process.env.EMBEDDED_EVALUATION_WORKER === 'true') this.autoQueue.enqueue(submissionId);
-    else this.evaluationBatches.create([submission.gradingRunId], 'system');
+  }
+
+  /**
+   * An artifact URI is an internal reference, not an upload credential.  A
+   * caller may only reuse one that the platform previously registered for the
+   * same event and subject; knowing a local hash or an S3 key is insufficient.
+   */
+  private assertRegisteredArtifactInStore(store: PlatformStore, eventId: string, subjectId: string, artifactUri: string, uploadOnly = false): void {
+    const registered = store.systemSubmissions(eventId).some((submission) => (
+      submission.subjectId === subjectId
+      && submission.snapshot.artifactUri === artifactUri
+      && (!uploadOnly || submission.snapshot.sourceType === 'UPLOAD')
+    ));
+    if (!registered) throw new BadRequestException('artifactUri must reference an artifact already registered for this event and subject');
   }
 
   @Get('/health')
   health() {
     return { status: 'ok', service: 'platform-api', time: new Date().toISOString() };
+  }
+
+  @Get('/metrics')
+  metricsSnapshot(@Headers('x-employee-id') employeeId?: string) {
+    this.requireGlobalAdmin(employeeId);
+    return this.metrics.snapshot();
   }
 
   @Get('/me')
@@ -139,64 +240,72 @@ export class PlatformController {
    * employee on first login and keeps later logins idempotent.
    */
   @Post('/auth/sso')
-  ssoLogin(@Body() body: SsoIdentity) {
-    return this.store.syncSsoIdentity(body);
+  ssoLogin(@Body() body: SsoIdentity, @Headers('x-employee-id') employeeId?: string) {
+    // In production the global identity guard has already verified the
+    // gateway/OIDC assertion and synchronized the trusted claims.  Never
+    // apply a request-body name or department to that account; the body is
+    // retained only for the explicit LOCAL development adapter.
+    if (process.env.NODE_ENV === 'production') return this.store.getUser(this.actor(employeeId));
+    return this.userDirectory.syncSsoIdentity(body);
   }
 
   @Get('/announcements')
-  announcements(@Headers('x-employee-id') employeeId?: string) {
-    return this.store.listAnnouncements(this.actor(employeeId));
+  async announcements(@Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => store.listAnnouncements(actorId));
   }
 
   @Post('/announcements')
-  createAnnouncement(@Body() body: Omit<Announcement, 'id'> & { id?: string; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async createAnnouncement(@Body() body: Omit<Announcement, 'id'> & { id?: string; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...announcement } = body;
-    return this.store.createAnnouncement(announcement, actorId);
+    return this.domainUnitOfWork.run((store) => store.createAnnouncement(announcement, actorId));
   }
 
   @Patch('/announcements/:announcementId')
-  updateAnnouncement(@Param('announcementId') announcementId: string, @Body() body: Partial<Omit<Announcement, 'id'>> & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async updateAnnouncement(@Param('announcementId') announcementId: string, @Body() body: Partial<Omit<Announcement, 'id'>> & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...patch } = body;
-    return this.store.updateAnnouncement(announcementId, patch, actorId);
+    return this.domainUnitOfWork.run((store) => store.updateAnnouncement(announcementId, patch, actorId));
   }
 
   @Delete('/announcements/:announcementId')
   @HttpCode(204)
-  deleteAnnouncement(@Param('announcementId') announcementId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    this.store.deleteAnnouncement(announcementId, this.requireAdmin(employeeId));
+  async deleteAnnouncement(@Param('announcementId') announcementId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    await this.domainUnitOfWork.run((store) => store.deleteAnnouncement(announcementId, this.requireAdmin(employeeId)));
   }
 
   @Get('/hard-problems')
-  hardProblems(@Query('status') status?: string, @Query('reviewStatus') reviewStatus?: string, @Headers('x-employee-id') employeeId?: string) {
+  async hardProblems(@Query('status') status?: string, @Query('reviewStatus') reviewStatus?: string, @Headers('x-employee-id') employeeId?: string) {
     if (status && status !== 'OPEN' && status !== 'RESOLVED') throw new BadRequestException('hard problem status must be OPEN or RESOLVED');
     if (reviewStatus && !['PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(reviewStatus)) throw new BadRequestException('hard problem reviewStatus is invalid');
-    return this.store.listHardProblems(status as 'OPEN' | 'RESOLVED' | undefined, reviewStatus as HardProblemReviewStatus | undefined, this.actor(employeeId));
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => store.listHardProblems(status as 'OPEN' | 'RESOLVED' | undefined, reviewStatus as HardProblemReviewStatus | undefined, actorId));
   }
 
   @Get('/hard-problems/:problemId')
-  hardProblem(@Param('problemId') problemId: string, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.getHardProblem(problemId, this.actor(employeeId));
+  async hardProblem(@Param('problemId') problemId: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => store.getHardProblem(problemId, actorId));
   }
 
   @Post('/hard-problems')
-  createHardProblem(@Body() body: Omit<HardProblem, 'id' | 'challengeId' | 'createdAt' | 'updatedAt' | 'status' | 'reviewStatus' | 'resolvedAt' | 'resolvedBy' | 'resolvedByName' | 'solutionSubmissionId' | 'solution'> & { id?: string; status?: 'OPEN' | 'RESOLVED'; solutionVisibility?: HardProblemSolutionVisibility; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async createHardProblem(@Body() body: Omit<HardProblem, 'id' | 'challengeId' | 'createdAt' | 'updatedAt' | 'status' | 'reviewStatus' | 'resolvedAt' | 'resolvedBy' | 'resolvedByName' | 'solutionSubmissionId' | 'solution'> & { id?: string; status?: 'OPEN' | 'RESOLVED'; solutionVisibility?: HardProblemSolutionVisibility; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.actor(employeeId);
     const { actorId: _ignoredActorId, ...problem } = body;
-    return this.store.createHardProblem(problem, actorId);
+    return this.domainUnitOfWork.run((store) => store.createHardProblem(problem, actorId));
   }
 
   @Post('/hard-problems/:problemId/review')
-  reviewHardProblem(@Param('problemId') problemId: string, @Body() body: { decision?: string; comment?: string; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async reviewHardProblem(@Param('problemId') problemId: string, @Body() body: { decision?: string; comment?: string; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     if (body.decision !== 'APPROVE' && body.decision !== 'REJECT') throw new BadRequestException('decision must be APPROVE or REJECT');
-    return this.store.reviewHardProblem(problemId, body.decision, body.comment ?? '', actorId);
+    return this.domainUnitOfWork.run((store) => store.reviewHardProblem(problemId, body.decision as 'APPROVE' | 'REJECT', body.comment ?? '', actorId));
   }
 
   @Post('/hard-problems/:problemId/resolve')
-  resolveHardProblem(@Param('problemId') problemId: string, @Body() body: { actorId?: string; submissionId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.resolveHardProblem(problemId, this.actor(employeeId), body.submissionId);
+  async resolveHardProblem(@Param('problemId') problemId: string, @Body() body: { actorId?: string; submissionId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.domainUnitOfWork.run((store) => store.resolveHardProblem(problemId, this.actor(employeeId), body.submissionId));
   }
 
   /**
@@ -214,7 +323,7 @@ export class PlatformController {
       throw new BadRequestException({ code: 'ENGINE_PACKAGE_INVALID', message: 'packageBase64 不是合法 base64' });
     }
     const record = await this.enginePackages.save(Buffer.from(normalized, 'base64'), body.fileName ?? 'engine.zip');
-    this.store.recordEnginePackageUpload(record, actorId);
+    await this.domainUnitOfWork.run((store) => store.recordEnginePackageUpload(record, actorId));
     return {
       packageHash: record.packageHash,
       size: record.size,
@@ -234,6 +343,20 @@ export class PlatformController {
     return this.executors.list();
   }
 
+  /** Git-pinned input/output constraints for the challenge editor dropdown. */
+  @Get('/evaluation-contracts')
+  evaluationContracts(@Headers('x-employee-id') employeeId?: string) {
+    this.requireAdmin(employeeId);
+    return this.contractCatalog.list();
+  }
+
+  /** Full public constraint detail, including its checked-in schema and example. */
+  @Get('/evaluation-contracts/:contractId')
+  evaluationContract(@Param('contractId') contractId: string, @Headers('x-employee-id') employeeId?: string) {
+    this.requireAdmin(employeeId);
+    return this.contractCatalog.get(contractId);
+  }
+
   /**
    * Lease queued evaluation tasks. The platform hands out immutable work
    * descriptors; the evaluation environment runs the engine and posts results
@@ -241,71 +364,71 @@ export class PlatformController {
    */
   @Post('/evaluation-tasks:lease')
   @HttpCode(200)
-  leaseEvaluationTasks(@Body() body: { workerId?: string; limit?: number; executorIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
+  async leaseEvaluationTasks(@Body() body: { workerId?: string; limit?: number; executorIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
-    const tasks = this.tasks.lease(String(body.workerId ?? '').trim(), Number(body.limit ?? 1), Array.isArray(body.executorIds) ? body.executorIds : [], actorId);
+    const tasks = await this.tasks.leasePersistent(String(body.workerId ?? '').trim(), Number(body.limit ?? 1), Array.isArray(body.executorIds) ? body.executorIds : [], actorId);
     return { leasedAt: new Date().toISOString(), tasks };
   }
 
   @Post('/evaluation-tasks/:runId/heartbeat')
   @HttpCode(200)
-  heartbeatEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.tasks.heartbeat(runId, String(body.leaseId ?? ''), this.requireAdmin(employeeId));
+  async heartbeatEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.tasks.heartbeatPersistent(runId, String(body.leaseId ?? ''), this.requireAdmin(employeeId));
   }
 
   @Post('/evaluation-tasks/:runId/complete')
   @HttpCode(201)
-  completeEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string; result?: Record<string, unknown> }, @Headers('x-employee-id') employeeId?: string) {
+  async completeEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string; result?: Record<string, unknown> }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     if (!body.result || typeof body.result !== 'object') throw new BadRequestException({ code: 'RESULT_REQUIRED', message: '缺少评测结果' });
-    return { accepted: true, stored: this.tasks.complete(runId, String(body.leaseId ?? ''), body.result, actorId) };
+    return { accepted: true, stored: await this.tasks.completePersistent(runId, String(body.leaseId ?? ''), body.result, actorId) };
   }
 
   @Post('/evaluation-tasks/:runId/fail')
   @HttpCode(200)
-  failEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string; reason?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.tasks.fail(runId, String(body.leaseId ?? ''), String(body.reason ?? ''), this.requireAdmin(employeeId));
+  async failEvaluationTask(@Param('runId') runId: string, @Body() body: { leaseId?: string; reason?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.tasks.failPersistent(runId, String(body.leaseId ?? ''), String(body.reason ?? ''), this.requireAdmin(employeeId));
   }
 
   @Get('/evaluation-batches')
-  evaluationBatchList(@Query('eventId') eventId?: string, @Headers('x-employee-id') employeeId?: string) {
-    return this.evaluationBatches.list(this.requireAdmin(employeeId), eventId);
+  async evaluationBatchList(@Query('eventId') eventId?: string, @Headers('x-employee-id') employeeId?: string) {
+    return this.evaluationBatches.listPersistent(this.requireAdmin(employeeId), eventId);
   }
 
   @Get('/evaluation-batches/:batchId')
-  evaluationBatch(@Param('batchId') batchId: string, @Headers('x-employee-id') employeeId?: string) {
-    return this.evaluationBatches.get(batchId, this.requireAdmin(employeeId));
+  async evaluationBatch(@Param('batchId') batchId: string, @Headers('x-employee-id') employeeId?: string) {
+    return this.evaluationBatches.getPersistent(batchId, this.requireAdmin(employeeId));
   }
 
   /** Lease complete same-challenge batches for a Code Agent worker. */
   @Post('/evaluation-batches:lease')
   @HttpCode(200)
-  leaseEvaluationBatches(@Body() body: { workerId?: string; limit?: number; executorIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
+  async leaseEvaluationBatches(@Body() body: { workerId?: string; limit?: number; executorIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
-    const batches = this.evaluationBatches.lease(String(body.workerId ?? '').trim(), Number(body.limit ?? 1), Array.isArray(body.executorIds) ? body.executorIds : [], actorId);
+    const batches = await this.evaluationBatches.leasePersistent(String(body.workerId ?? '').trim(), Number(body.limit ?? 1), Array.isArray(body.executorIds) ? body.executorIds : [], actorId);
     return { leasedAt: new Date().toISOString(), batches };
   }
 
   @Post('/evaluation-batches/:batchId/heartbeat')
   @HttpCode(200)
-  heartbeatEvaluationBatch(@Param('batchId') batchId: string, @Body() body: { leaseId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.evaluationBatches.heartbeat(batchId, String(body.leaseId ?? ''), this.requireAdmin(employeeId));
+  async heartbeatEvaluationBatch(@Param('batchId') batchId: string, @Body() body: { leaseId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.evaluationBatches.heartbeatPersistent(batchId, String(body.leaseId ?? ''), this.requireAdmin(employeeId));
   }
 
   @Post('/evaluation-batches/:batchId/complete')
   @HttpCode(201)
-  completeEvaluationBatch(
+  async completeEvaluationBatch(
     @Param('batchId') batchId: string,
     @Body() body: { leaseId?: string; results?: Array<{ runId: string; result: Record<string, unknown> }>; failures?: Array<{ runId: string; reason: string }> },
     @Headers('x-employee-id') employeeId?: string,
   ) {
-    return this.evaluationBatches.complete(batchId, String(body.leaseId ?? ''), body.results ?? [], body.failures ?? [], this.requireAdmin(employeeId));
+    return this.evaluationBatches.completePersistent(batchId, String(body.leaseId ?? ''), body.results ?? [], body.failures ?? [], this.requireAdmin(employeeId));
   }
 
   @Post('/evaluation-batches/:batchId/fail')
   @HttpCode(200)
-  failEvaluationBatch(@Param('batchId') batchId: string, @Body() body: { leaseId?: string; reason?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.evaluationBatches.fail(batchId, String(body.leaseId ?? ''), String(body.reason ?? ''), this.requireAdmin(employeeId));
+  async failEvaluationBatch(@Param('batchId') batchId: string, @Body() body: { leaseId?: string; reason?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.evaluationBatches.failPersistent(batchId, String(body.leaseId ?? ''), String(body.reason ?? ''), this.requireAdmin(employeeId));
   }
 
   /** Engine package bytes, so a worker can materialise the engine locally. */
@@ -320,16 +443,16 @@ export class PlatformController {
   }
 
   @Get('/admin/overview')
-  adminOverview(@Headers('x-employee-id') employeeId?: string) {
+  async adminOverview(@Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
-    return this.store.adminOverview(actorId);
+    return this.domainUnitOfWork.read((store) => store.adminOverview(actorId));
   }
 
   @Get('/admin/grading-queue')
-  gradingQueue(@Headers('x-employee-id') employeeId?: string) {
+  async gradingQueue(@Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     if (process.env.EMBEDDED_EVALUATION_WORKER === 'true') return this.autoQueue.getStats();
-    const batches = this.evaluationBatches.list(actorId);
+    const batches = await this.evaluationBatches.listPersistent(actorId);
     return {
       queued: batches.filter((batch) => batch.status === 'QUEUED').length,
       running: batches.filter((batch) => batch.status === 'RUNNING').length,
@@ -340,246 +463,310 @@ export class PlatformController {
   }
 
   @Get('/admin/code-agent-runtime')
-  codeAgentRuntime(@Headers('x-employee-id') employeeId?: string) {
-    return this.store.getCodeAgentRuntimeConfig(this.requireGlobalAdmin(employeeId));
+  async codeAgentRuntime(@Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireGlobalAdmin(employeeId);
+    return this.domainUnitOfWork.read((store) => store.getCodeAgentRuntimeConfig(actorId));
   }
 
   @Put('/admin/code-agent-runtime')
-  updateCodeAgentRuntime(@Body() body: CodeAgentRuntimeInput, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.updateCodeAgentRuntimeConfig(body, this.requireGlobalAdmin(employeeId));
+  async updateCodeAgentRuntime(@Body() body: CodeAgentRuntimeInput, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireGlobalAdmin(employeeId);
+    return this.domainUnitOfWork.run((store) => store.updateCodeAgentRuntimeConfig(body, actorId));
   }
 
   @Get('/admin/capabilities')
-  adminCapabilities(@Query('orgPath') orgPath?: string, @Query('subjectIds') subjectIds?: string, @Query('includeProfiles') includeProfiles?: string, @Headers('x-employee-id') employeeId?: string) {
+  async adminCapabilities(@Query('orgPath') orgPath?: string, @Query('subjectIds') subjectIds?: string, @Query('eventId') eventId?: string, @Query('includeProfiles') includeProfiles?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string, @Query('historyPage') historyPage?: string, @Query('historyPageSize') historyPageSize?: string, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const selectedSubjectIds = subjectIds
       ? subjectIds.split(',').map((item) => item.trim()).filter(Boolean)
       : [];
-    return this.store.adminCapabilities(actorId, { orgPath, subjectIds: selectedSubjectIds, includeProfiles: includeProfiles !== 'false' });
+    const profilePage = page === undefined ? 1 : queryInteger(page, 'page', 1);
+    const profilePageSize = pageSize === undefined ? 20 : queryInteger(pageSize, 'pageSize', 20, 100);
+    const historyPageValue = historyPage === undefined ? 1 : queryInteger(historyPage, 'historyPage', 1);
+    const historyPageSizeValue = historyPageSize === undefined ? 20 : queryInteger(historyPageSize, 'historyPageSize', 20, 100);
+    return this.domainUnitOfWork.read((store) => store.adminCapabilities(actorId, { orgPath, subjectIds: selectedSubjectIds, eventId, includeProfiles: includeProfiles !== 'false', page: profilePage, pageSize: profilePageSize, historyPage: historyPageValue, historyPageSize: historyPageSizeValue }));
   }
 
   @Get('/org-units')
   orgUnits(@Query('parentId') parentId?: string, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.listOrgUnits(parentId, this.actor(employeeId));
+    return this.userDirectory.listOrgUnits(parentId?.trim() || undefined, this.actor(employeeId));
   }
 
   @Post('/org-units')
   createOrgUnit(@Body() body: { id: string; parentId?: string; label?: string; name: string; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...input } = body;
-    return this.store.createOrgUnit(input, actorId);
+    return this.userDirectory.createOrgUnit(input, actorId);
   }
 
   @Patch('/org-units/:orgUnitId')
   updateOrgUnit(@Param('orgUnitId') orgUnitId: string, @Body() body: { label?: string; name?: string; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...patch } = body;
-    return this.store.updateOrgUnit(orgUnitId, patch, actorId);
+    return this.userDirectory.updateOrgUnit(orgUnitId, patch, actorId);
   }
 
   @Delete('/org-units/:orgUnitId')
   @HttpCode(204)
-  deleteOrgUnit(@Param('orgUnitId') orgUnitId: string, @Headers('x-employee-id') employeeId?: string): void {
-    this.store.deleteOrgUnit(orgUnitId, this.requireAdmin(employeeId));
+  async deleteOrgUnit(@Param('orgUnitId') orgUnitId: string, @Headers('x-employee-id') employeeId?: string): Promise<void> {
+    await this.userDirectory.deleteOrgUnit(orgUnitId, this.requireAdmin(employeeId));
   }
 
   @Get('/org-units/:orgUnitId')
   orgUnit(@Param('orgUnitId') orgUnitId: string) {
-    return this.store.getOrgUnit(orgUnitId);
+    return this.userDirectory.getOrgUnit(orgUnitId);
   }
 
   @Get('/users')
-  users(@Query('orgPath') orgPath?: string, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.listUsers(orgPath, this.actor(employeeId));
+  async users(@Query() query: UserListRequestQuery, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireAdmin(employeeId);
+    return this.userDirectory.list(parseUserListQuery(query), actorId);
   }
 
   @Get('/users/:userId')
-  user(@Param('userId') userId: string, @Headers('x-employee-id') employeeId?: string) {
-    this.store.assertSelfOrAdmin(this.actor(employeeId), userId);
-    return this.store.getUser(userId);
+  async user(@Param('userId') userId: string, @Headers('x-employee-id') employeeId?: string) {
+    return this.userDirectory.get(userId, this.actor(employeeId));
   }
 
   @Patch('/users/:userId')
-  updateUser(@Param('userId') userId: string, @Body() body: { orgUnitId?: string; roles?: string[]; roleBindings?: Array<{ role: string; scopeOrgPath: string }>; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async updateUser(@Param('userId') userId: string, @Body() body: { orgUnitId?: string; roles?: string[]; roleBindings?: Array<{ role: string; scopeOrgPath: string }>; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...patch } = body;
-    return this.store.updateUser(userId, patch, actorId);
+    return this.userDirectory.update(userId, patch, actorId);
   }
 
   @Get('/challenges')
-  challenges(@Headers('x-employee-id') employeeId?: string) {
-    return this.store.listChallenges(this.actor(employeeId)).map((challenge) => this.withResolvedSubmissionContracts(challenge));
+  async challenges(@Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => store.listChallenges(actorId).map((challenge) => this.withResolvedSubmissionContracts(challenge)));
   }
 
   @Get('/challenges/:challengeId')
-  challenge(@Param('challengeId') challengeId: string, @Headers('x-employee-id') employeeId?: string) {
-    return this.withResolvedSubmissionContracts(this.store.getChallenge(challengeId, this.actor(employeeId)));
+  async challenge(@Param('challengeId') challengeId: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => this.withResolvedSubmissionContracts(store.getChallenge(challengeId, actorId)));
   }
 
   @Post('/challenges')
-  createChallenge(@Body() body: Challenge & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async createChallenge(@Body() body: Challenge & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...challenge } = body;
     for (const version of challenge.versions ?? []) {
       this.assertExecutorSelection(version);
       this.assertSubmissionContract(version);
+      this.contractCatalog.assertSelection(version.evaluationEngine);
     }
-    return this.store.createChallenge(challenge, actorId);
+    return this.domainUnitOfWork.run((store) => store.createChallenge(challenge, actorId));
   }
 
   @Post('/challenges/:challengeId/publish')
-  publishChallenge(@Param('challengeId') challengeId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.publishChallenge(challengeId, this.requireAdmin(employeeId));
+  async publishChallenge(@Param('challengeId') challengeId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.domainUnitOfWork.run((store) => store.publishChallenge(challengeId, this.requireAdmin(employeeId)));
   }
 
   @Patch('/challenges/:challengeId')
-  updateChallenge(@Param('challengeId') challengeId: string, @Body() body: { category?: ChallengeCategory; solutionVisibility?: HardProblemSolutionVisibility; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async updateChallenge(@Param('challengeId') challengeId: string, @Body() body: { category?: ChallengeCategory; solutionVisibility?: HardProblemSolutionVisibility; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...patch } = body;
-    return this.store.updateChallenge(challengeId, patch, actorId);
+    return this.domainUnitOfWork.run((store) => store.updateChallenge(challengeId, patch, actorId));
+  }
+
+  @Delete('/challenges/:challengeId')
+  async deleteChallenge(@Param('challengeId') challengeId: string, @Headers('x-employee-id') employeeId?: string) {
+    return this.domainUnitOfWork.run((store) => store.deleteChallenge(challengeId, this.requireAdmin(employeeId)));
   }
 
   @Post('/challenges/:challengeId/archive')
-  archiveChallenge(@Param('challengeId') challengeId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.archiveChallenge(challengeId, this.requireAdmin(employeeId));
+  async archiveChallenge(@Param('challengeId') challengeId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.domainUnitOfWork.run((store) => store.archiveChallenge(challengeId, this.requireAdmin(employeeId)));
   }
 
   @Post('/challenges/:challengeId/trash')
-  trashChallenge(@Param('challengeId') challengeId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.archiveChallenge(challengeId, this.requireAdmin(employeeId));
+  async trashChallenge(@Param('challengeId') challengeId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.domainUnitOfWork.run((store) => store.archiveChallenge(challengeId, this.requireAdmin(employeeId)));
   }
 
   @Post('/challenges/:challengeId/restore')
-  restoreChallenge(@Param('challengeId') challengeId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.restoreChallenge(challengeId, this.requireAdmin(employeeId));
+  async restoreChallenge(@Param('challengeId') challengeId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.domainUnitOfWork.run((store) => store.restoreChallenge(challengeId, this.requireAdmin(employeeId)));
   }
 
   @Post('/challenges/:challengeId/versions')
-  createChallengeVersion(@Param('challengeId') challengeId: string, @Body() body: ChallengeVersion & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async createChallengeVersion(@Param('challengeId') challengeId: string, @Body() body: ChallengeVersion & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...version } = body;
     this.assertExecutorSelection(version);
     this.assertSubmissionContract(version);
-    return this.store.addChallengeVersion(challengeId, version, actorId);
+    this.contractCatalog.assertSelection(version.evaluationEngine);
+    return this.domainUnitOfWork.run((store) => store.addChallengeVersion(challengeId, version, actorId));
   }
 
   @Patch('/challenges/:challengeId/versions/:versionId')
-  updateChallengeVersion(@Param('challengeId') challengeId: string, @Param('versionId') versionId: string, @Body() body: Partial<ChallengeVersion> & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async updateChallengeVersion(@Param('challengeId') challengeId: string, @Param('versionId') versionId: string, @Body() body: Partial<ChallengeVersion> & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...patch } = body;
     if (patch.evaluationEngine) this.assertExecutorSelection(patch as { evaluationEngine?: EvaluationEngineConfig });
     this.assertSubmissionContract(patch);
-    return this.store.updateChallengeVersion(challengeId, versionId, patch, actorId);
+    if (patch.evaluationEngine) this.contractCatalog.assertSelection(patch.evaluationEngine);
+    return this.domainUnitOfWork.run((store) => store.updateChallengeVersion(challengeId, versionId, patch, actorId));
   }
 
   @Post('/challenges/:challengeId/versions/:versionId/publish')
-  publishChallengeVersion(@Param('challengeId') challengeId: string, @Param('versionId') versionId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.publishChallengeVersion(challengeId, versionId, this.requireAdmin(employeeId));
+  async publishChallengeVersion(@Param('challengeId') challengeId: string, @Param('versionId') versionId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    return this.domainUnitOfWork.run((store) => store.publishChallengeVersion(challengeId, versionId, this.requireAdmin(employeeId)));
   }
 
   @Get('/seasons')
-  seasons() {
-    return this.store.listSeasons();
+  async seasons() {
+    return this.domainUnitOfWork.read((store) => store.listSeasons());
   }
 
   @Post('/seasons')
-  createSeason(@Body() body: Season & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async createSeason(@Body() body: Season & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
-    this.store.assertGlobalAdmin(actorId);
     const { actorId: _ignoredActorId, ...season } = body;
-    return this.store.createSeason(season, actorId);
+    return this.domainUnitOfWork.run((store) => {
+      store.assertGlobalAdmin(actorId);
+      return store.createSeason(season, actorId);
+    });
   }
 
   @Get('/seasons/:seasonId/leaderboard')
-  leaderboard(@Param('seasonId') seasonId: string) {
-    return this.store.leaderboard(seasonId);
+  async leaderboard(@Param('seasonId') seasonId: string) {
+    return this.domainUnitOfWork.read((store) => store.leaderboard(seasonId));
   }
 
   @Get('/seasons/:seasonId')
-  season(@Param('seasonId') seasonId: string) {
-    return this.store.getSeason(seasonId);
+  async season(@Param('seasonId') seasonId: string) {
+    return this.domainUnitOfWork.read((store) => store.getSeason(seasonId));
   }
 
   @Get('/profiles/:subjectId')
-  profile(@Param('subjectId') subjectId: string, @Headers('x-employee-id') employeeId?: string) {
-    this.store.assertSelfOrAdmin(this.actor(employeeId), subjectId);
-    return this.store.profile(subjectId);
+  async profile(@Param('subjectId') subjectId: string, @Query('includeHistory') includeHistory?: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => {
+      store.assertSelfOrAdmin(actorId, subjectId);
+      return store.profile(subjectId, { includeHistory: includeHistory !== 'false' });
+    });
+  }
+
+  @Get('/profiles/:subjectId/history')
+  async profileHistory(@Param('subjectId') subjectId: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    const historyPage = page === undefined ? 1 : queryInteger(page, 'page', 1);
+    const historyPageSize = pageSize === undefined ? 20 : queryInteger(pageSize, 'pageSize', 20, 100);
+    return this.domainUnitOfWork.read((store) => {
+      store.assertSelfOrAdmin(actorId, subjectId);
+      return store.profileHistory(subjectId, { page: historyPage, pageSize: historyPageSize });
+    });
   }
 
   @Get('/profiles/:subjectId/capabilities')
-  capabilities(@Param('subjectId') subjectId: string, @Headers('x-employee-id') employeeId?: string) {
-    this.store.assertSelfOrAdmin(this.actor(employeeId), subjectId);
-    return this.store.capabilities(subjectId);
+  async capabilities(@Param('subjectId') subjectId: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => {
+      store.assertSelfOrAdmin(actorId, subjectId);
+      return store.capabilities(subjectId);
+    });
   }
 
   @Get('/events')
-  events(@Headers('x-employee-id') employeeId?: string) {
-    return this.store.listEvents(this.actor(employeeId));
+  async events(@Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => store.listEvents(actorId));
   }
 
   @Get('/events/:eventId')
-  event(@Param('eventId') eventId: string, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.getEvent(eventId, this.actor(employeeId));
+  async event(@Param('eventId') eventId: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => store.getEvent(eventId, actorId));
   }
 
   @Post('/events')
-  createEvent(@Body() body: (Omit<EventConfig, 'status'> & { status?: EventConfig['status'] }) & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async createEvent(@Body() body: (Omit<EventConfig, 'status'> & { status?: EventConfig['status'] }) & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...event } = body;
-    return this.store.createEvent(event, actorId);
+    return this.domainUnitOfWork.run((store) => store.createEvent(event, actorId));
   }
 
   @Patch('/events/:eventId')
-  updateEvent(@Param('eventId') eventId: string, @Body() body: Partial<Omit<EventConfig, 'id' | 'status'>> & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async updateEvent(@Param('eventId') eventId: string, @Body() body: Partial<Omit<EventConfig, 'id' | 'status'>> & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...patch } = body;
-    return this.store.updateEvent(eventId, patch, actorId);
+    return this.domainUnitOfWork.run((store) => store.updateEvent(eventId, patch, actorId));
+  }
+
+  @Delete('/events/:eventId')
+  @HttpCode(204)
+  async deleteEvent(@Param('eventId') eventId: string, @Headers('x-employee-id') employeeId?: string): Promise<void> {
+    await this.domainUnitOfWork.run((store) => store.deleteEvent(eventId, this.requireAdmin(employeeId)));
   }
 
   @Get('/events/:eventId/participants')
-  participants(@Param('eventId') eventId: string, @Headers('x-employee-id') employeeId?: string) {
+  async participants(@Param('eventId') eventId: string, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
-    return this.store.listParticipants(eventId, actorId);
+    return this.domainUnitOfWork.read((store) => store.listParticipants(eventId, actorId));
   }
 
   @Put('/events/:eventId/participants')
-  replaceParticipants(@Param('eventId') eventId: string, @Body() body: { subjectIds: string[] }, @Headers('x-employee-id') employeeId?: string) {
+  async replaceParticipants(@Param('eventId') eventId: string, @Body() body: { subjectIds: string[] }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     if (!Array.isArray(body.subjectIds) || body.subjectIds.length > 10000) throw new BadRequestException('subjectIds must be an array with at most 10000 items');
-    return this.store.replaceParticipants(eventId, body.subjectIds, actorId);
+    return this.domainUnitOfWork.run((store) => store.replaceParticipants(eventId, body.subjectIds, actorId));
   }
 
   @Post('/events/:eventId/participants:import')
-  importParticipants(@Param('eventId') eventId: string, @Body() body: { participants: Array<{ subjectId: string }> }, @Headers('x-employee-id') employeeId?: string) {
+  async importParticipants(@Param('eventId') eventId: string, @Body() body: { participants: Array<{ subjectId: string }> }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     if (!Array.isArray(body.participants) || body.participants.length > 10000) throw new BadRequestException('participants must be an array with at most 10000 items');
-    return this.store.importParticipants(eventId, body.participants, actorId);
+    return this.domainUnitOfWork.run((store) => store.importParticipants(eventId, body.participants, actorId));
   }
 
   @Get('/submissions')
-  submissions(@Query('eventId') eventId?: string, @Headers('x-employee-id') employeeId?: string) {
-    return this.store.listSubmissions(eventId, this.actor(employeeId));
+  submissions(@Query() query: Record<string, string | string[] | undefined>, @Headers('x-employee-id') employeeId?: string) {
+    const eventId = queryString(query.eventId, 'eventId');
+    const subjectId = queryString(query.subjectId, 'subjectId');
+    const state = queryString(query.state, 'state') as SubmissionListQuery['state'] | undefined;
+    if (state && !['RECEIVED', 'QUEUED', 'WAITING_TRIGGER', 'WAITING_IMPORT', 'IMPORT_VALIDATING', 'FAILED', 'GRADED', 'SEALED', 'REVEALED'].includes(state)) throw invalidUserQuery('state is not supported');
+    return this.platformRead.listSubmissions({ page: queryInteger(query.page, 'page', 1), pageSize: queryInteger(query.pageSize, 'pageSize', 20, 100), ...(eventId ? { eventId } : {}), ...(subjectId ? { subjectId } : {}), ...(state ? { state } : {}) }, this.actor(employeeId));
   }
 
   @Post('/submissions')
   async createSubmission(@Body() body: { eventId: string; subjectId: string; snapshot: SubmissionSnapshot }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.actor(employeeId);
-    this.store.assertSelfOrAdmin(actorId, body.subjectId);
+    const context = await this.domainUnitOfWork.read((store) => {
+      store.assertSelfOrAdmin(actorId, body.subjectId);
+      if (body.snapshot.artifactUri) this.assertRegisteredArtifactInStore(store, body.eventId, body.subjectId, body.snapshot.artifactUri);
+      return { version: store.challengeVersionForEvent(body.eventId) };
+    });
     const snapshot = this.normalizeSnapshot(body.snapshot);
-    const version = this.store.challengeVersionForEvent(body.eventId);
-    if (snapshot.artifactUri) await this.submissionContracts.validateArtifact(version, snapshot.artifactUri);
+    const version = context.version;
+    if (snapshot.artifactUri) {
+      await this.submissionContracts.validateArtifact(version, snapshot.artifactUri);
+    }
     else if (snapshot.workspacePath) this.submissionContracts.validateWorkspace(version, snapshot.workspacePath);
-    const submission = this.store.createSubmission(body.eventId, body.subjectId, snapshot);
-    this.scheduleIfAutomatic(body.eventId, submission.id);
+    const submission = await this.domainUnitOfWork.run((store) => {
+      store.assertSelfOrAdmin(actorId, body.subjectId);
+      if (snapshot.artifactUri) this.assertRegisteredArtifactInStore(store, body.eventId, body.subjectId, snapshot.artifactUri);
+      const created = store.createSubmission(body.eventId, body.subjectId, snapshot);
+      if (created.gradingRunId && store.getEvent(body.eventId).trigger === 'AUTO' && process.env.EMBEDDED_EVALUATION_WORKER !== 'true') {
+        store.createEvaluationBatch([created.gradingRunId], 'system');
+      }
+      return created;
+    });
+    await this.scheduleIfAutomatic(body.eventId, submission.id);
     return submission;
   }
 
   @Post('/events/:eventId/submissions:upload')
   async upload(@Param('eventId') eventId: string, @Body() body: { subjectId: string; snapshot: SubmissionSnapshot; artifactBase64?: string; fileName?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.actor(employeeId);
-    this.store.assertSelfOrAdmin(actorId, body.subjectId);
-    const event = this.store.getEvent(eventId);
-    this.store.assertSubmissionSubject(eventId, body.subjectId);
+    const context = await this.domainUnitOfWork.read((store) => {
+      store.assertSelfOrAdmin(actorId, body.subjectId);
+      store.assertSubmissionSubject(eventId, body.subjectId);
+      return { event: store.getEvent(eventId, actorId), version: store.challengeVersionForEvent(eventId) };
+    });
+    const event = context.event;
     if (body.artifactBase64 && body.snapshot.workspacePath) throw new BadRequestException('provide either artifactBase64 or workspacePath, not both');
     const fileName = body.fileName ?? 'submission.bin';
     const allowedFormats = event.deliveryConfig?.allowedFormats;
@@ -592,20 +779,28 @@ export class PlatformController {
     let snapshot = { ...body.snapshot, sourceType: 'UPLOAD' as const };
     if (body.artifactBase64) {
       const normalizedEncoded = body.artifactBase64.replace(/\s+/g, '');
+      if (!normalizedEncoded || normalizedEncoded.length % 4 === 1 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalizedEncoded)) {
+        throw new BadRequestException('artifactBase64 is not valid base64');
+      }
+      const uploadedBytes = Buffer.from(normalizedEncoded, 'base64');
+      if (!uploadedBytes.length) throw new BadRequestException('artifact is empty');
       const estimatedBytes = Math.floor(normalizedEncoded.length * 3 / 4);
       if (event.deliveryConfig?.maxBytes && estimatedBytes > event.deliveryConfig.maxBytes) {
         throw new BadRequestException(`artifact exceeds event maxBytes ${event.deliveryConfig.maxBytes}`);
       }
-      const stored = await this.artifacts.saveBase64(body.artifactBase64, fileName);
+      const maxBytes = Number(event.deliveryConfig?.maxBytes ?? process.env.ARTIFACT_MAX_BYTES ?? 50 * 1024 * 1024);
+      const uploadSession = await this.objectStorage.createUpload({ actorId, eventId, fileName, declaredSize: uploadedBytes.length, maxBytes });
+      await this.objectStorage.put(uploadSession.uploadId, uploadSession.uploadToken, uploadedBytes, actorId);
+      const stored = await this.objectStorage.confirm(uploadSession.uploadId, uploadSession.uploadToken, actorId);
       if (event.deliveryConfig?.maxBytes && stored.size > event.deliveryConfig.maxBytes) {
         throw new BadRequestException(`artifact exceeds event maxBytes ${event.deliveryConfig.maxBytes}`);
       }
       if (snapshot.artifactHash && snapshot.artifactHash !== stored.sha256) {
         throw new BadRequestException('artifactHash does not match uploaded bytes');
       }
-      await this.artifacts.validateArchive(stored.uri, event.deliveryConfig?.maxFiles ?? 2000);
-      await this.submissionContracts.validateArtifact(this.store.challengeVersionForEvent(eventId), stored.uri);
-      const computedSnapshotHash = await this.artifacts.snapshotHash(stored.uri);
+      await this.objectStorage.validateArchive(stored.uri, event.deliveryConfig?.maxFiles ?? 2000);
+      await this.submissionContracts.validateArtifact(context.version, stored.uri);
+      const computedSnapshotHash = await this.objectStorage.snapshotHash(stored.uri);
       if (snapshot.snapshotHash && snapshot.snapshotHash !== computedSnapshotHash) {
         throw new BadRequestException('snapshotHash does not match uploaded workspace contents');
       }
@@ -619,13 +814,14 @@ export class PlatformController {
     } else if (snapshot.artifactUri) {
       // A client may retry a previously stored artifact, but it may not invent
       // an artifact URI or hash. Re-read both hashes from the immutable store.
-      const actualArtifactHash = await this.artifacts.contentHash(snapshot.artifactUri);
+      await this.domainUnitOfWork.read((store) => this.assertRegisteredArtifactInStore(store, eventId, body.subjectId, snapshot.artifactUri!, true));
+      const actualArtifactHash = await this.objectStorage.contentHash(snapshot.artifactUri);
       if (snapshot.artifactHash && snapshot.artifactHash !== actualArtifactHash) {
         throw new BadRequestException('artifactHash does not match stored artifact bytes');
       }
-      await this.artifacts.validateArchive(snapshot.artifactUri, event.deliveryConfig?.maxFiles ?? 2000);
-      await this.submissionContracts.validateArtifact(this.store.challengeVersionForEvent(eventId), snapshot.artifactUri);
-      const computedSnapshotHash = await this.artifacts.snapshotHash(snapshot.artifactUri);
+      await this.objectStorage.validateArchive(snapshot.artifactUri, event.deliveryConfig?.maxFiles ?? 2000);
+      await this.submissionContracts.validateArtifact(context.version, snapshot.artifactUri);
+      const computedSnapshotHash = await this.objectStorage.snapshotHash(snapshot.artifactUri);
       if (snapshot.snapshotHash && snapshot.snapshotHash !== computedSnapshotHash) {
         throw new BadRequestException('snapshotHash does not match stored artifact contents');
       }
@@ -633,62 +829,102 @@ export class PlatformController {
     } else if (!snapshot.workspacePath) {
       throw new BadRequestException('upload requires artifactBase64, artifactUri or a local workspacePath');
     } else {
-      this.submissionContracts.validateWorkspace(this.store.challengeVersionForEvent(eventId), snapshot.workspacePath);
+      this.submissionContracts.validateWorkspace(context.version, snapshot.workspacePath);
     }
-    const submission = this.store.createSubmission(eventId, body.subjectId, this.normalizeSnapshot(snapshot));
-    this.scheduleIfAutomatic(eventId, submission.id);
+    const submission = await this.domainUnitOfWork.run((store) => {
+      store.assertSelfOrAdmin(actorId, body.subjectId);
+      store.assertSubmissionSubject(eventId, body.subjectId);
+      if (snapshot.artifactUri && !body.artifactBase64) this.assertRegisteredArtifactInStore(store, eventId, body.subjectId, snapshot.artifactUri, true);
+      const created = store.createSubmission(eventId, body.subjectId, this.normalizeSnapshot(snapshot));
+      if (created.gradingRunId && store.getEvent(eventId).trigger === 'AUTO' && process.env.EMBEDDED_EVALUATION_WORKER !== 'true') {
+        store.createEvaluationBatch([created.gradingRunId], 'system');
+      }
+      return created;
+    });
+    await this.scheduleIfAutomatic(eventId, submission.id);
     return submission;
   }
 
   @Post('/events/:eventId/submissions:register-git')
   async registerGit(@Param('eventId') eventId: string, @Body() body: { subjectId: string; snapshot: SubmissionSnapshot }, @Headers('x-employee-id') employeeId?: string) {
-    this.store.assertSelfOrAdmin(this.actor(employeeId), body.subjectId);
-    const event = this.store.getEvent(eventId);
-    this.store.assertSubmissionSubject(eventId, body.subjectId);
+    const actorId = this.actor(employeeId);
+    const context = await this.domainUnitOfWork.read((store) => {
+      store.assertSelfOrAdmin(actorId, body.subjectId);
+      store.assertSubmissionSubject(eventId, body.subjectId);
+      return { event: store.getEvent(eventId, actorId), version: store.challengeVersionForEvent(eventId) };
+    });
+    const event = context.event;
     let snapshot = this.normalizeSnapshot({ ...body.snapshot, ...(this.localGit.enabled ? { workspacePath: undefined } : {}), sourceType: 'GIT_REF' });
     if (this.localGit.enabled && event.deliveryConfig?.pinAt !== 'DEADLINE' && snapshot.repository && snapshot.branch && snapshot.commitSha) {
       const local = await this.localGit.snapshot({ repository: snapshot.repository, branch: snapshot.branch, commitSha: snapshot.commitSha });
-      await this.submissionContracts.validateArtifact(this.store.challengeVersionForEvent(eventId), local.artifact.uri);
+      await this.submissionContracts.validateArtifact(context.version, local.artifact.uri);
       snapshot = { ...snapshot, commitSha: local.commitSha, artifactUri: local.artifact.uri, artifactHash: local.artifact.sha256, snapshotHash: local.snapshotHash };
     }
-    const submission = this.store.createSubmission(eventId, body.subjectId, snapshot);
-    this.scheduleIfAutomatic(eventId, submission.id);
+    const submission = await this.domainUnitOfWork.run((store) => {
+      store.assertSelfOrAdmin(actorId, body.subjectId);
+      store.assertSubmissionSubject(eventId, body.subjectId);
+      const created = store.createSubmission(eventId, body.subjectId, snapshot);
+      if (created.gradingRunId && store.getEvent(eventId).trigger === 'AUTO' && process.env.EMBEDDED_EVALUATION_WORKER !== 'true') {
+        store.createEvaluationBatch([created.gradingRunId], 'system');
+      }
+      return created;
+    });
+    await this.scheduleIfAutomatic(eventId, submission.id);
     return submission;
   }
 
   @Post('/submissions/:submissionId/start-grading')
-  startSubmission(@Param('submissionId') submissionId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async startSubmission(@Param('submissionId') submissionId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
-    const run = this.store.startGrading(submissionId, actorId);
-    this.evaluationBatches.create([run.id], actorId);
-    return run;
+    const result = await this.domainUnitOfWork.run((store) => {
+      const run = store.startGrading(submissionId, actorId);
+      const batch = store.createEvaluationBatch([run.id], actorId);
+      return { run, batch };
+    });
+    return result.run;
   }
 
   @Post('/submissions/:submissionId/regrade')
-  regradeSubmission(@Param('submissionId') submissionId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
-    const result = this.store.regradeSubmission(submissionId, this.requireAdmin(employeeId));
-    if (result.run?.triggerType === 'AUTO') this.scheduleIfAutomatic(result.submission.eventId, submissionId);
+  async regradeSubmission(@Param('submissionId') submissionId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireAdmin(employeeId);
+    const result = await this.domainUnitOfWork.run((store) => {
+      const regraded = store.regradeSubmission(submissionId, actorId);
+      if (regraded.run?.triggerType === 'AUTO' && process.env.EMBEDDED_EVALUATION_WORKER !== 'true') {
+        store.createEvaluationBatch([regraded.run.id], actorId);
+      }
+      return regraded;
+    });
+    if (result.run?.triggerType === 'AUTO') await this.scheduleIfAutomatic(result.submission.eventId, submissionId);
     return result;
   }
 
   @Post('/events/:eventId/start-grading')
-  startEvent(@Param('eventId') eventId: string, @Body() body: { actorId?: string; submissionIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
+  async startEvent(@Param('eventId') eventId: string, @Body() body: { actorId?: string; submissionIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
-    const runs = this.store.startEventGrading(eventId, actorId, body.submissionIds);
-    return { runs, ...(runs.length ? { batch: this.evaluationBatches.create(runs.map((run) => run.id), actorId) } : {}) };
+    return this.domainUnitOfWork.run((store) => {
+      const runs = store.startEventGrading(eventId, actorId, body.submissionIds);
+      return { runs, ...(runs.length ? { batch: store.createEvaluationBatch(runs.map((run) => run.id), actorId) } : {}) };
+    });
   }
 
   @Post('/events/:eventId/regrade')
-  regradeEvent(@Param('eventId') eventId: string, @Body() body: { actorId?: string; submissionIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
-    const result = this.store.regradeEvent(eventId, this.requireAdmin(employeeId), body.submissionIds);
-    for (const run of result.runs) if (run.triggerType === 'AUTO') this.scheduleIfAutomatic(eventId, run.submissionId);
+  async regradeEvent(@Param('eventId') eventId: string, @Body() body: { actorId?: string; submissionIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireAdmin(employeeId);
+    const result = await this.domainUnitOfWork.run((store) => {
+      const regraded = store.regradeEvent(eventId, actorId, body.submissionIds);
+      if (process.env.EMBEDDED_EVALUATION_WORKER !== 'true') {
+        for (const run of regraded.runs) if (run.triggerType === 'AUTO') store.createEvaluationBatch([run.id], actorId);
+      }
+      return regraded;
+    });
+    for (const run of result.runs) if (run.triggerType === 'AUTO') await this.scheduleIfAutomatic(eventId, run.submissionId);
     return result;
   }
 
   @Post('/events/:eventId/grading-input')
-  gradingInput(@Param('eventId') eventId: string, @Body() body: { submissionIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
+  async gradingInput(@Param('eventId') eventId: string, @Body() body: { submissionIds?: string[] }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
-    const batch = this.store.prepareEvaluationInput(eventId, body.submissionIds ?? [], actorId);
+    const batch = await this.domainUnitOfWork.run((store) => store.prepareEvaluationInput(eventId, body.submissionIds ?? [], actorId));
     // The local administrator/CodeAgent workflow needs the real file path for
     // locally stored uploads. This field is only returned from the admin
     // endpoint; employees never receive it.
@@ -712,79 +948,186 @@ export class PlatformController {
     }
     const actorId = this.requireAdmin(employeeId);
     const executions: Array<Record<string, unknown>> = [];
-    const available = this.store.listSubmissions(eventId, actorId);
     const selectedIds = body.submissionIds === undefined ? undefined : [...new Set(body.submissionIds.map((id) => String(id).trim()).filter(Boolean))];
     if (selectedIds && !selectedIds.length) throw new BadRequestException('at least one submission must be selected');
-    if (selectedIds && selectedIds.some((id) => !available.some((submission) => submission.id === id))) {
-      throw new BadRequestException('selected submissions are outside this event or administrator scope');
-    }
-    for (const submission of available.filter((item) => !selectedIds || selectedIds.includes(item.id))) {
-      if (!submission.gradingRunId || submission.resultId) continue;
-      const currentRun = this.store.getRun(submission.gradingRunId);
-      if (currentRun.status === 'RUNNING') continue;
-      const run = this.store.markRunRunning(submission.gradingRunId);
+    // Reserve the exact immutable submissions and mark their runs in the
+    // canonical transaction before invoking the local compatibility worker.
+    // The worker itself remains outside the transaction so a long-running
+    // grader never holds PostgreSQL locks.
+    const jobs = await this.domainUnitOfWork.run((store) => {
+      const available = store.listSubmissions(eventId, actorId);
+      if (selectedIds && selectedIds.some((id) => !available.some((submission) => submission.id === id))) {
+        throw new BadRequestException('selected submissions are outside this event or administrator scope');
+      }
+      const event = store.getEvent(eventId, actorId);
+      return available
+        .filter((item) => !selectedIds || selectedIds.includes(item.id))
+        .flatMap((submission) => {
+          if (!submission.gradingRunId || submission.resultId) return [];
+          const currentRun = store.getRun(submission.gradingRunId);
+          if (currentRun.status === 'RUNNING') return [];
+          const run = store.markRunRunning(submission.gradingRunId);
+          return [{ event, submission, run, context: store.gradingContextForSubmission(submission) }];
+        });
+    });
+    for (const job of jobs) {
       try {
-        const result = await this.localGrader.execute({ event: this.store.getEvent(eventId), submission, run, ...this.store.gradingContextForSubmission(submission) });
-        executions.push({ run: this.store.getRun(run.id), stored: this.store.completeRun(run.id, result) });
+        const result = await this.localGrader.execute({ event: job.event, submission: job.submission, run: job.run, ...job.context });
+        const stored = await this.domainUnitOfWork.run((store) => store.completeRun(job.run.id, result));
+        executions.push({ run: stored.gradingRunId ? await this.domainUnitOfWork.run((store) => store.getRun(stored.gradingRunId)) : job.run, stored });
       } catch (error) {
-        this.store.failRun(run.id, error instanceof Error ? error.message : String(error));
-        executions.push({ run: this.store.getRun(run.id), error: error instanceof Error ? error.message : String(error) });
+        const reason = error instanceof Error ? error.message : String(error);
+        const failed = await this.domainUnitOfWork.run((store) => store.failRun(job.run.id, reason));
+        executions.push({ run: failed, error: reason });
       }
     }
     return executions;
   }
 
   @Post('/events/:eventId/reveal')
-  reveal(@Param('eventId') eventId: string, @Headers('x-employee-id') employeeId?: string) {
-    return { eventId, revealed: this.store.reveal(eventId, this.requireAdmin(employeeId)) };
+  async reveal(@Param('eventId') eventId: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireAdmin(employeeId);
+    return { eventId, revealed: await this.domainUnitOfWork.run((store) => store.reveal(eventId, actorId)) };
   }
 
   @Post('/events/:eventId/close')
   async close(@Param('eventId') eventId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
-    const event = this.store.getEvent(eventId, actorId);
-    if (event.submissionSource === 'GIT_REF' && event.deliveryConfig?.pinAt === 'DEADLINE') {
+    const deadline = await this.domainUnitOfWork.run((store) => {
+      const event = store.getEvent(eventId, actorId);
+      if (event.submissionSource !== 'GIT_REF' || event.deliveryConfig?.pinAt !== 'DEADLINE') return undefined;
       // Deadline pinning must cover every delivery in the event, not just the
-      // ones inside the closing administrator's subject scope; the event scope
-      // itself was already asserted above.
-      const pending = this.store.systemSubmissions(eventId).filter((submission) => !submission.resultId && !submission.gradingRunId);
-      if (pending.length && !this.localGit.enabled) {
-        throw new BadRequestException('DEADLINE Git pinning requires LOCAL_GIT_ROOT in local mode');
-      }
-      for (const submission of pending) {
-        const repository = submission.snapshot.repository;
-        const branch = submission.snapshot.branch;
-        if (!repository || !branch) throw new BadRequestException(`submission ${submission.id} has no Git repository or branch`);
-        const local = await this.localGit.snapshot({ repository, branch });
-        await this.submissionContracts.validateArtifact(this.store.challengeVersionForEvent(eventId), local.artifact.uri);
-        this.store.pinGitSnapshot(submission.id, { commitSha: local.commitSha, artifactUri: local.artifact.uri, artifactHash: local.artifact.sha256, snapshotHash: local.snapshotHash }, actorId);
+      // ones inside the closing administrator's subject scope.  The final
+      // close transaction rechecks the complete event again, so a concurrent
+      // submission cannot bypass the pin requirement.
+      return {
+        challengeVersion: store.challengeVersionForEvent(eventId),
+        pending: store.systemSubmissions(eventId)
+          .filter((submission) => !submission.resultId && !submission.gradingRunId)
+          .map((submission) => ({ id: submission.id, snapshotHash: submission.snapshot.snapshotHash, repository: submission.snapshot.repository, branch: submission.snapshot.branch })),
+      };
+    });
+    const pins = new Map<string, { originalHash: string; commitSha: string; artifactUri: string; artifactHash: string; snapshotHash: string }>();
+    if (deadline?.pending.length) {
+      if (!this.localGit.enabled) throw new BadRequestException('DEADLINE Git pinning requires LOCAL_GIT_ROOT in local mode');
+      for (const submission of deadline.pending) {
+        if (!submission.repository || !submission.branch) throw new BadRequestException(`submission ${submission.id} has no Git repository or branch`);
+        const local = await this.localGit.snapshot({ repository: submission.repository, branch: submission.branch });
+        await this.submissionContracts.validateArtifact(deadline.challengeVersion, local.artifact.uri);
+        pins.set(submission.id, { originalHash: submission.snapshotHash, commitSha: local.commitSha, artifactUri: local.artifact.uri, artifactHash: local.artifact.sha256, snapshotHash: local.snapshotHash });
       }
     }
-    return this.store.closeEvent(eventId, actorId);
+    return this.domainUnitOfWork.run((store) => {
+      const currentEvent = store.getEvent(eventId, actorId);
+      if (currentEvent.submissionSource === 'GIT_REF' && currentEvent.deliveryConfig?.pinAt === 'DEADLINE') {
+        for (const [submissionId, pin] of pins) {
+          const current = store.getSubmission(submissionId);
+          if (current.resultId || current.gradingRunId) continue;
+          if (current.snapshot.snapshotHash !== pin.originalHash) {
+            // Another administrator may have completed the pin while the
+            // external Git snapshot was being materialised.  Preserve that
+            // newer immutable snapshot; reject only an incomplete mutation.
+            if (!current.snapshot.commitSha || !current.snapshot.artifactUri || !current.snapshot.artifactHash) {
+              throw new BadRequestException(`submission ${submissionId} changed while its Git snapshot was being pinned`);
+            }
+            continue;
+          }
+          store.pinGitSnapshot(submissionId, pin, actorId);
+        }
+      }
+      return store.closeEvent(eventId, actorId);
+    });
   }
 
   @Get('/audits')
-  audits(@Query('target') target?: string, @Headers('x-employee-id') employeeId?: string) {
-    this.requireAdmin(employeeId);
-    return this.store.listAudits(target);
+  audits(@Query() query: Record<string, string | string[] | undefined>, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireAdmin(employeeId);
+    const target = queryString(query.target, 'target');
+    return this.platformRead.listAudits({ page: queryInteger(query.page, 'page', 1), pageSize: queryInteger(query.pageSize, 'pageSize', 20, 100), ...(target ? { target } : {}) }, actorId);
+  }
+
+  /** Create a short-lived upload handle bound to the authenticated actor and event. */
+  @Post('/uploads')
+  @HttpCode(201)
+  async createUpload(@Body() body: { eventId?: string; subjectId?: string; fileName?: string; declaredSize?: number }, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    const eventId = String(body.eventId ?? '').trim();
+    const subjectId = String(body.subjectId ?? actorId).trim();
+    if (!eventId || !body.fileName || !Number.isSafeInteger(Number(body.declaredSize))) throw new BadRequestException({ code: 'UPLOAD_REQUEST_INVALID', message: 'eventId、fileName 和 declaredSize 必须有效' });
+    const event = await this.domainUnitOfWork.read((store) => {
+      store.assertSelfOrAdmin(actorId, subjectId);
+      store.assertSubmissionSubject(eventId, subjectId);
+      return store.getEvent(eventId, actorId);
+    });
+    if (event.submissionSource !== 'UPLOAD') throw new BadRequestException({ code: 'UPLOAD_SOURCE_NOT_ALLOWED', message: '该训战不接受文件上传' });
+    const fileName = String(body.fileName).trim();
+    const allowedFormats = event.deliveryConfig?.allowedFormats;
+    if (allowedFormats?.length && !allowedFormats.some((format) => fileName.toLowerCase().endsWith(format.startsWith('.') ? format.toLowerCase() : `.${format.toLowerCase()}`))) {
+      throw new BadRequestException({ code: 'UPLOAD_FORMAT_NOT_ALLOWED', message: `文件格式不符合训战要求: ${eventId}` });
+    }
+    const configuredLimit = Number(event.deliveryConfig?.maxBytes ?? process.env.ARTIFACT_MAX_BYTES ?? 50 * 1024 * 1024);
+    const session = await this.objectStorage.createUpload({ actorId, eventId, fileName, declaredSize: Number(body.declaredSize), maxBytes: configuredLimit });
+    return { ...session, subjectId };
+  }
+
+  /** Upload bytes to a previously issued handle. JSON base64 is retained for local clients; S3 uses the same server-side checks. */
+  @Put('/uploads/:uploadId')
+  async putUpload(@Param('uploadId') uploadId: string, @Body() body: unknown, @Headers('x-upload-token') uploadToken: string | undefined, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    const token = uploadToken?.trim();
+    if (!token) throw new UnauthorizedException('x-upload-token is required');
+    const encoded = Buffer.isBuffer(body) ? body.toString('base64') : (body as { bytesBase64?: string } | undefined)?.bytesBase64;
+    if (typeof encoded !== 'string' || !encoded) throw new BadRequestException({ code: 'UPLOAD_BYTES_REQUIRED', message: 'bytesBase64 is required' });
+    const normalized = encoded.replace(/\s+/g, '');
+    // Buffer.from(..., 'base64') is intentionally forgiving and silently
+    // drops invalid characters. Reject malformed input before decoding so the
+    // declared checksum/size cannot be bypassed with a different byte stream.
+    if (!normalized || normalized.length % 4 === 1 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalized)) {
+      throw new BadRequestException({ code: 'UPLOAD_BYTES_INVALID', message: '上传内容不是合法 base64' });
+    }
+    const bytes = Buffer.from(normalized, 'base64');
+    return this.objectStorage.put(uploadId, token, bytes, actorId);
+  }
+
+  @Post('/uploads/:uploadId/confirm')
+  @HttpCode(201)
+  async confirmUpload(@Param('uploadId') uploadId: string, @Body() body: { size?: number; sha256?: string }, @Headers('x-upload-token') uploadToken: string | undefined, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    const token = uploadToken?.trim();
+    if (!token) throw new UnauthorizedException('x-upload-token is required');
+    const expected = body?.size === undefined && body?.sha256 === undefined ? undefined : { size: Number(body.size), sha256: String(body.sha256 ?? '') };
+    if (expected && (!Number.isSafeInteger(expected.size) || expected.size <= 0 || !/^[a-f0-9]{64}$/.test(expected.sha256))) throw new BadRequestException({ code: 'UPLOAD_METADATA_INVALID', message: '上传对象元数据无效' });
+    return this.objectStorage.confirm(uploadId, token, actorId, expected);
   }
 
   @Get('/submissions/:submissionId')
-  submission(@Param('submissionId') submissionId: string, @Headers('x-employee-id') employeeId?: string) {
-    this.store.assertCanViewSubmission(this.actor(employeeId), submissionId);
-    return this.store.getSubmission(submissionId);
+  async submission(@Param('submissionId') submissionId: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => {
+      store.assertCanViewSubmission(actorId, submissionId);
+      return store.getSubmission(submissionId);
+    });
   }
 
   @Get('/submissions/:submissionId/artifact')
   async downloadSubmissionArtifact(@Param('submissionId') submissionId: string, @Headers('x-employee-id') employeeId?: string, @Res({ passthrough: true }) response?: any) {
     const actorId = this.requireAdmin(employeeId);
-    this.store.assertCanViewSubmission(actorId, submissionId);
-    const submission = this.store.getSubmission(submissionId);
+    const submission = await this.domainUnitOfWork.read((store) => {
+      store.assertCanViewSubmission(actorId, submissionId);
+      return store.getSubmission(submissionId);
+    });
     const artifactUri = submission.snapshot.artifactUri;
     if (!artifactUri) throw new NotFoundException('该提交没有可下载的交付件');
     let content: Buffer;
     try {
-      content = await this.artifacts.readBuffer(artifactUri);
+      // Submission artifacts may be local or S3-backed; the controller only
+      // depends on the object-storage port and never resolves a filesystem
+      // path itself.
+      content = await this.objectStorage.read(artifactUri);
+      if (submission.snapshot.artifactHash) {
+        const actualHash = await this.objectStorage.contentHash(artifactUri);
+        if (actualHash !== submission.snapshot.artifactHash) throw new Error('artifact hash mismatch');
+      }
     } catch {
       throw new NotFoundException('交付件不存在');
     }
@@ -797,17 +1140,17 @@ export class PlatformController {
 
   @Post('/grading-results:import')
   @HttpCode(201)
-  importResult(@Body() body: { result: Record<string, unknown>; actorId?: string; eventId?: string; subjectId?: string }, @Headers('x-employee-id') employeeId?: string, @Headers('idempotency-key') requestIdempotencyKey?: string) {
+  async importResult(@Body() body: { result: Record<string, unknown>; actorId?: string; eventId?: string; subjectId?: string }, @Headers('x-employee-id') employeeId?: string, @Headers('idempotency-key') requestIdempotencyKey?: string) {
     const actorId = this.requireAdmin(employeeId);
     if (requestIdempotencyKey && body.result.idempotencyKey !== requestIdempotencyKey) throw new BadRequestException({ code: 'IDEMPOTENCY_KEY_MISMATCH', message: 'Idempotency-Key must match result.idempotencyKey' });
     const errors = validateEvaluationResult(body.result);
     if (errors.length) throw new BadRequestException({ code: 'RESULT_SCHEMA_INVALID', errors });
-    return { accepted: true, stored: this.store.importResult(body.result as Record<string, any>, actorId, { eventId: body.eventId, subjectId: body.subjectId }) };
+    return { accepted: true, stored: await this.domainUnitOfWork.run((store) => store.importResult(body.result as Record<string, any>, actorId, { eventId: body.eventId, subjectId: body.subjectId })) };
   }
 
   @Post('/grading-results:import-batch')
   @HttpCode(201)
-  importBatch(@Body() body: { results: Array<{ result: Record<string, unknown>; eventId?: string; subjectId?: string }> }, @Headers('x-employee-id') employeeId?: string) {
+  async importBatch(@Body() body: { results: Array<{ result: Record<string, unknown>; eventId?: string; subjectId?: string }> }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     if (!Array.isArray(body.results) || body.results.length > 500) throw new BadRequestException('results must be an array with at most 500 items');
     const accepted: Array<Record<string, unknown>> = [];
@@ -819,7 +1162,7 @@ export class PlatformController {
         continue;
       }
       try {
-        const stored = this.store.importResult(item.result as Record<string, any>, actorId, { eventId: item.eventId, subjectId: item.subjectId });
+        const stored = await this.domainUnitOfWork.run((store) => store.importResult(item.result as Record<string, any>, actorId, { eventId: item.eventId, subjectId: item.subjectId }));
         accepted.push({ index, ok: true, resultId: stored.resultId, submissionId: stored.submissionId, code: 'RESULT_IMPORTED', message: 'evaluation result accepted' });
       } catch (error) {
         rejected.push({ index, ok: false, resultId: item.result?.resultId, code: 'RESULT_IMPORT_REJECTED', message: error instanceof Error ? error.message : String(error) });
@@ -829,31 +1172,45 @@ export class PlatformController {
   }
 
   @Get('/grading-runs/:runId')
-  gradingRun(@Param('runId') runId: string, @Headers('x-employee-id') employeeId?: string) {
-    this.store.assertCanViewRun(this.actor(employeeId), runId);
-    return this.store.getRun(runId);
+  async gradingRun(@Param('runId') runId: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => {
+      store.assertCanViewRun(actorId, runId);
+      return store.getRun(runId);
+    });
   }
 
   @Post('/grading-runs/:runId/execute')
   async executeLocal(@Param('runId') runId: string, @Headers('x-employee-id') employeeId?: string) {
+    if (process.env.EMBEDDED_EVALUATION_WORKER !== 'true') {
+      throw new BadRequestException({ code: 'CODE_AGENT_WORKER_REQUIRED', message: '请由评测 Worker 领取批次并调用 Code Agent' });
+    }
     const actorId = this.requireAdmin(employeeId);
-    const storedRun = this.store.getRun(runId);
-    const submission = this.store.getSubmission(storedRun.submissionId);
-    this.store.getEvent(submission.eventId, actorId);
-    const run = this.store.markRunRunning(runId);
-    if (run.status === 'GRADED' && submission.resultId) return { run, stored: this.store.getReport(submission.id) };
+    const job = await this.domainUnitOfWork.run((store) => {
+      const storedRun = store.getRun(runId);
+      const submission = store.getSubmission(storedRun.submissionId);
+      const event = store.getEvent(submission.eventId, actorId);
+      if (storedRun.status === 'GRADED' && submission.resultId) return { event, submission, run: storedRun, context: store.gradingContextForSubmission(submission), alreadyGraded: true };
+      const run = store.markRunRunning(runId);
+      return { event, submission, run, context: store.gradingContextForSubmission(submission), alreadyGraded: false };
+    });
+    if (job.alreadyGraded) return { run: job.run, stored: await this.domainUnitOfWork.run((store) => store.getReport(job.submission.id)) };
     try {
-      const result = await this.localGrader.execute({ event: this.store.getEvent(submission.eventId), submission, run, ...this.store.gradingContextForSubmission(submission) });
-      return { run: this.store.getRun(runId), stored: this.store.completeRun(runId, result) };
+      const result = await this.localGrader.execute({ event: job.event, submission: job.submission, run: job.run, ...job.context });
+      const stored = await this.domainUnitOfWork.run((store) => store.completeRun(runId, result));
+      return { run: await this.domainUnitOfWork.run((store) => store.getRun(runId)), stored };
     } catch (error) {
-      this.store.failRun(runId, error instanceof Error ? error.message : String(error));
+      await this.domainUnitOfWork.run((store) => store.failRun(runId, error instanceof Error ? error.message : String(error)));
       throw error;
     }
   }
 
   @Get('/reports/:submissionId')
-  report(@Param('submissionId') submissionId: string, @Headers('x-employee-id') employeeId?: string) {
-    this.store.assertCanViewSubmission(this.actor(employeeId), submissionId);
-    return this.store.getReport(submissionId);
+  async report(@Param('submissionId') submissionId: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => {
+      store.assertCanViewSubmission(actorId, submissionId);
+      return store.getReport(submissionId);
+    });
   }
 }

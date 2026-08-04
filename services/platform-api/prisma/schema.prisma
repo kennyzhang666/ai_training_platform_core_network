@@ -55,6 +55,10 @@ model OrgUnit {
   users     AppUser[]
 
   @@index([parentId])
+  // Sibling-name uniqueness is represented by the partial PostgreSQL indexes
+  // in 0011/0012 because Prisma cannot express the separate NULL-parent
+  // (root organization) invariant in the model DSL.
+  @@index([parentId, name])
 }
 
 model AppUser {
@@ -63,6 +67,9 @@ model AppUser {
   name         String
   orgUnitId    String?
   orgPath      String?
+  departmentHint   String?
+  departmentSource String?
+  roles        Json     @default("[]")
   status       String   @default("ACTIVE")
   orgUnit      OrgUnit? @relation(fields: [orgUnitId], references: [id])
   roleBindings  RoleBinding[]
@@ -72,6 +79,12 @@ model AppUser {
   updatedAt    DateTime @updatedAt
 
   @@index([orgPath])
+  @@index([status])
+  @@index([name, id])
+  @@index([orgPath, id])
+  @@index([status, employeeNo, id])
+  @@index([status, name, id])
+  @@index([status, orgPath, id])
 }
 
 model RoleBinding {
@@ -92,6 +105,8 @@ model Challenge {
   origin      String
   category    String            @default("TRAINING")
   status      String            @default("DRAFT")
+  archivedFrom String?
+  board       Json?
   versions    ChallengeVersion[]
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
@@ -143,6 +158,8 @@ model Event {
   trigger            TriggerType
   reveal             RevealMode
   participantMode    String           @default("OPEN")
+  purpose            String?
+  accessPolicy       Json?
   rubricVersion      String           @default("1.0")
   startsAt           DateTime?
   endsAt             DateTime?
@@ -166,6 +183,7 @@ model Submission {
   sourceType    SubmissionSource
   snapshotHash  String
   artifactUri   String?
+  artifactName  String?
   artifactHash  String?
   repository    String?
   branch        String?
@@ -173,12 +191,24 @@ model Submission {
   workspacePath String?
   submittedAt   DateTime
   state         SubmissionState  @default(RECEIVED)
+  challengeVersionSnapshot String?
+  rubricVersionSnapshot    String?
+  gradingStatus String?
+  gradingAttempt Int?
+  previousResultIds Json?
+  failureReason String?
   gradingRuns   GradingRun[]
   results       EvaluationResult[]
+  // Historical relations contain every attempt; these fields identify the
+  // current pointers after a regrade and therefore survive process restart.
+  currentGradingRunId String?
+  currentResultId    String?
   createdAt     DateTime         @default(now())
 
   @@unique([eventId, subjectId, snapshotHash])
   @@index([eventId, state])
+  @@index([eventId, state, createdAt, id])
+  @@index([subjectId, createdAt, id])
 }
 
 model GradingRun {
@@ -190,6 +220,11 @@ model GradingRun {
   status          String
   idempotencyKey  String
   graderVersion   String?
+  attempt         Int?
+  failureReason   String?
+  leaseId         String?
+  leasedBy        String?
+  leaseExpiresAt  DateTime?
   evaluationBatchId String?
   evaluationBatch EvaluationBatch? @relation(fields: [evaluationBatchId], references: [id])
   createdAt       DateTime         @default(now())
@@ -323,6 +358,7 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@index([target, createdAt])
+  @@index([createdAt, id])
 }
 
 model Announcement {
@@ -332,6 +368,43 @@ model Announcement {
   tag         String
   publishedAt DateTime
   pinned      Boolean  @default(false)
+  orgPath     String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+/// Transitional state envelope used by the PostgreSQL PlatformStore adapter.
+/// Domain repositories remain the long-term normalized boundary; the envelope
+/// makes the adapter switch atomic while the remaining vertical slices migrate.
+model PlatformSnapshot {
+  id            String   @id
+  schemaVersion Int      @default(1)
+  revision      Int      @default(0)
+  state         Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+/// Short-lived capability state for two-phase object uploads.  The bearer
+/// token is never stored; tokenHash and the CAS status survive API restarts.
+model UploadSession {
+  id              String   @id
+  tokenHash       String
+  objectKey       String
+  actorId         String
+  eventId         String
+  fileName        String
+  declaredSize    Int
+  status          String   @default("CREATED")
+  expiresAt       DateTime
+  uploadedSize    Int?
+  uploadedSha256  String?
+  completedUri    String?
+  completedSize   Int?
+  completedSha256 String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([expiresAt, status])
+  @@index([actorId, eventId])
 }

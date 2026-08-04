@@ -45,9 +45,17 @@ import {
   CAPABILITY_ITEMS,
   CAPABILITY_ITEM_BY_KEY,
 } from './capability-catalog';
+import type { AuditListQuery, AuditPage, SortOrder, SubmissionListQuery, SubmissionPage, UserListQuery, UserPage, UserSortField } from './repository';
+
+export type { UserListQuery, UserPage } from './repository';
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function pageInfo(page: number, pageSize: number, total: number) {
+  const totalPages = total ? Math.ceil(total / pageSize) : 0;
+  return { page, pageSize, total, totalPages, hasNext: totalPages > 0 && page < totalPages, hasPrevious: totalPages > 0 && page > 1 };
 }
 
 const CHALLENGE_CATEGORIES: readonly ChallengeCategory[] = ['TRAINING', 'COMPETITION', 'HARD_PROBLEM'];
@@ -229,6 +237,48 @@ function resultIdempotencyKey(submissionId: string, key: string): string {
   return `${submissionId}:${key}`;
 }
 
+/** Compatibility aliases for callers that still import pagination types from the file adapter. */
+export type UserListSortBy = UserSortField;
+export type UserListSortOrder = SortOrder;
+
+/**
+ * The file adapter and the PostgreSQL snapshot adapter share this explicit
+ * state shape.  Keeping the serialization boundary in the store prevents a
+ * Prisma model from leaking into domain services while the relational
+ * repositories are migrated one vertical slice at a time.
+ */
+export interface PlatformStateSnapshot {
+  events: EventConfig[];
+  submissions: SubmissionRecord[];
+  runs: GradingRun[];
+  evaluationBatches: EvaluationBatch[];
+  results: StoredResult[];
+  orgUnits: OrgUnit[];
+  users: AppUser[];
+  challenges: Challenge[];
+  seasons: Season[];
+  audits: AuditRecord[];
+  announcements: Announcement[];
+  hardProblems: HardProblem[];
+  participants: ParticipantRecord[];
+  codeAgentRuntimeConfig: CodeAgentRuntimeConfig;
+}
+
+export interface PlatformStatePersistence {
+  write(state: PlatformStateSnapshot): void | Promise<void>;
+  flush?(): Promise<void>;
+  /** Notify a canonical normalized repository write in this process. */
+  noteExternalCommit?(): void;
+  close?(): Promise<void>;
+}
+
+export interface PlatformStoreOptions {
+  dataFile?: string;
+  persistence?: PlatformStatePersistence;
+  /** Local fixtures are opt-in for database-backed startup. */
+  seed?: boolean;
+}
+
 @Injectable()
 export class PlatformStore {
   private readonly events = new Map<string, EventConfig>();
@@ -247,10 +297,14 @@ export class PlatformStore {
   private readonly participants = new Map<string, ParticipantRecord>();
   private codeAgentRuntimeConfig: CodeAgentRuntimeConfig = defaultCodeAgentRuntimeConfig();
   private readonly dataFile: string;
+  private persistence?: PlatformStatePersistence;
 
-  constructor(dataFile = process.env.PLATFORM_DATA_FILE ?? join(existsSync(join(process.cwd(), 'grader')) ? process.cwd() : resolve(process.cwd(), '..', '..'), 'tmp', 'platform-data.json')) {
-    this.dataFile = dataFile;
+  constructor(options: string | PlatformStoreOptions = process.env.PLATFORM_DATA_FILE ?? join(existsSync(join(process.cwd(), 'grader')) ? process.cwd() : resolve(process.cwd(), '..', '..'), 'tmp', 'platform-data.json')) {
+    const resolvedOptions = typeof options === 'string' ? { dataFile: options } : options;
+    this.dataFile = resolvedOptions.dataFile ?? ':memory:';
+    this.persistence = resolvedOptions.persistence;
     this.load();
+    if (resolvedOptions.seed === false) return;
     let seeded = false;
     const localTrainingStartsAt = '2026-08-01T09:00:00+08:00';
     const localTrainingEndsAt = '2026-08-08T18:00:00+08:00';
@@ -678,22 +732,7 @@ export class PlatformStore {
   private load(): void {
     if (this.dataFile === ':memory:' || !existsSync(this.dataFile)) return;
     try {
-      const state = JSON.parse(readFileSync(this.dataFile, 'utf8')) as {
-        events?: EventConfig[];
-        submissions?: SubmissionRecord[];
-        runs?: GradingRun[];
-        evaluationBatches?: EvaluationBatch[];
-        results?: StoredResult[];
-        orgUnits?: OrgUnit[];
-        users?: AppUser[];
-        challenges?: Challenge[];
-        seasons?: Season[];
-        audits?: AuditRecord[];
-        announcements?: Announcement[];
-        hardProblems?: HardProblem[];
-        participants?: ParticipantRecord[];
-        codeAgentRuntimeConfig?: CodeAgentRuntimeConfig;
-      };
+      const state = JSON.parse(readFileSync(this.dataFile, 'utf8')) as Partial<PlatformStateSnapshot>;
       for (const event of state.events ?? []) this.events.set(event.id, event);
       for (const submission of state.submissions ?? []) this.submissions.set(submission.id, submission);
       for (const run of state.runs ?? []) this.runs.set(run.id, run);
@@ -723,15 +762,9 @@ export class PlatformStore {
     }
   }
 
-  private persist(): void {
-    if (this.dataFile === ':memory:') return;
-    mkdirSync(dirname(this.dataFile), { recursive: true });
-    // Write-then-rename: a crash or a full disk during a direct overwrite left
-    // a truncated JSON file behind, and `load()` then refused to start the API
-    // at all. rename(2) is atomic on the same filesystem, so a reader always
-    // sees either the previous or the complete new state.
-    const temporary = `${this.dataFile}.${process.pid}.tmp`;
-    writeFileSync(temporary, JSON.stringify({
+  /** Return a detached, JSON-safe representation for a persistence adapter. */
+  exportState(): PlatformStateSnapshot {
+    return JSON.parse(JSON.stringify({
       events: [...this.events.values()],
       submissions: [...this.submissions.values()],
       runs: [...this.runs.values()],
@@ -746,7 +779,100 @@ export class PlatformStore {
       hardProblems: [...this.hardProblems.values()],
       participants: [...this.participants.values()],
       codeAgentRuntimeConfig: this.codeAgentRuntimeConfig,
-    }, null, 2), 'utf8');
+    })) as PlatformStateSnapshot;
+  }
+
+  /**
+   * Replace in-memory state from a previously validated snapshot.  This is
+   * used only at startup by the PostgreSQL adapter; request handlers continue
+   * to use the same domain methods as the local adapter.
+   */
+  importState(state: Partial<PlatformStateSnapshot>): void {
+    this.events.clear();
+    this.submissions.clear();
+    this.runs.clear();
+    this.evaluationBatches.clear();
+    this.results.clear();
+    this.resultsByIdempotency.clear();
+    this.orgUnits.clear();
+    this.users.clear();
+    this.challenges.clear();
+    this.seasons.clear();
+    this.audits.clear();
+    this.announcements.clear();
+    this.hardProblems.clear();
+    this.participants.clear();
+    for (const event of state.events ?? []) if (event?.id) this.events.set(event.id, event);
+    for (const submission of state.submissions ?? []) if (submission?.id) this.submissions.set(submission.id, submission);
+    for (const run of state.runs ?? []) if (run?.id) this.runs.set(run.id, run);
+    for (const batch of state.evaluationBatches ?? []) if (batch?.id) this.evaluationBatches.set(batch.id, batch);
+    for (const result of state.results ?? []) {
+      if (!result?.resultId) continue;
+      this.results.set(result.resultId, result);
+      const key = (result.result as { idempotencyKey?: string })?.idempotencyKey;
+      if (key) this.resultsByIdempotency.set(resultIdempotencyKey(result.submissionId, key), result.resultId);
+    }
+    for (const unit of state.orgUnits ?? []) if (unit?.id) this.orgUnits.set(unit.id, unit);
+    for (const user of state.users ?? []) if (user?.id) this.users.set(user.id, user);
+    for (const challenge of state.challenges ?? []) if (challenge?.id) this.challenges.set(challenge.id, challenge);
+    for (const season of state.seasons ?? []) if (season?.id) this.seasons.set(season.id, season);
+    for (const audit of state.audits ?? []) if (audit?.id) this.audits.set(audit.id, audit);
+    for (const announcement of state.announcements ?? []) if (announcement?.id) this.announcements.set(announcement.id, announcement);
+    for (const problem of state.hardProblems ?? []) if (problem?.id) this.hardProblems.set(problem.id, problem);
+    for (const participant of state.participants ?? []) if (participant?.eventId && participant?.subjectId) this.participants.set(`${participant.eventId}:${participant.subjectId}`, participant);
+    if (state.codeAgentRuntimeConfig) this.codeAgentRuntimeConfig = buildCodeAgentRuntimeConfig(state.codeAgentRuntimeConfig, state.codeAgentRuntimeConfig.updatedBy || 'system', state.codeAgentRuntimeConfig.updatedAt || now());
+  }
+
+  /** Attach the database writer after startup state has been loaded. */
+  attachPersistence(persistence: PlatformStatePersistence, flushInitial = false): void {
+    this.persistence = persistence;
+    if (flushInitial) this.persist();
+  }
+
+  async flushPersistence(): Promise<void> {
+    await this.persistence?.flush?.();
+  }
+
+  /** Keep the transitional writer's CAS revision aligned with a repository
+   * transaction that has already committed the canonical normalized rows. */
+  noteExternalCommit(): void {
+    this.persistence?.noteExternalCommit?.();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    try {
+      await this.flushPersistence();
+    } finally {
+      await this.persistence?.close?.();
+    }
+  }
+
+  /** Update the authorization cache after an external identity transaction. */
+  cacheUserSnapshot(user: AppUser): void {
+    this.users.set(user.id, JSON.parse(JSON.stringify(user)) as AppUser);
+    // In PostgreSQL mode the user-directory repository has already committed
+    // the canonical row (and its audit) in its own transaction.  This method
+    // only refreshes the in-process authorization/read cache; asking the
+    // transitional full-state envelope to write here would let a stale API
+    // instance overwrite a concurrent normalized user update.  File mode
+    // writes already happen inside the adapter operation that produced this
+    // snapshot.
+  }
+
+  private persist(): void {
+    const state = this.exportState();
+    if (this.persistence) {
+      void this.persistence.write(state);
+      return;
+    }
+    if (this.dataFile === ':memory:') return;
+    mkdirSync(dirname(this.dataFile), { recursive: true });
+    // Write-then-rename: a crash or a full disk during a direct overwrite left
+    // a truncated JSON file behind, and `load()` then refused to start the API
+    // at all. rename(2) is atomic on the same filesystem, so a reader always
+    // sees either the previous or the complete new state.
+    const temporary = `${this.dataFile}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(state, null, 2), 'utf8');
     renameSync(temporary, this.dataFile);
   }
 
@@ -1364,16 +1490,84 @@ export class PlatformStore {
     return unit;
   }
 
+  /**
+   * Legacy in-process callers still need an unpaged projection while they are
+   * migrated one vertical slice at a time.  HTTP callers use listUsersPage.
+   */
   listUsers(orgPath?: string, actorId = 'w00123'): AppUser[] {
-    const prefix = orgPath && (orgPath.endsWith('/') ? orgPath : `${orgPath}/`);
+    const prefix = orgPath && this.normalizeOrgPath(orgPath);
     const actor = this.getUser(actorId);
     const adminAccess = this.isAdmin(actorId) ? this.getAdminAccess(actorId) : undefined;
     const scopes = adminAccess?.level === 'GLOBAL' ? undefined : adminAccess?.scopeOrgPaths ?? [actor.orgPath];
     return [...this.users.values()].filter((user) => {
       const inScope = !scopes || scopes.some((scope) => this.orgPathIncludes(scope, user.orgPath));
-      const inRequestedPath = !prefix || user.orgPath === prefix || user.orgPath.startsWith(prefix);
+      const inRequestedPath = !prefix || this.orgPathIncludes(prefix, user.orgPath);
       return inScope && inRequestedPath;
     });
+  }
+
+  /**
+   * Query users with deterministic, server-side pagination.  This is the file
+   * adapter implementation of the v0.7 OrganizationRepository port; the
+  * authorization and ordering rules intentionally live here rather than in
+  * the React client so every adapter can share the same observable contract.
+  */
+  listUsersPage(query: UserListQuery = {}, actorId = 'w00123'): UserPage {
+    // Keep the same synthetic admin ids accepted by the existing in-process
+    // store tests; the HTTP controller still calls requireAdmin first and
+    // therefore never permits these ids in a real request.
+    const access = this.resolveAdminAccess(actorId, true);
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    if (!Number.isSafeInteger(page) || page < 1) throw new BadRequestException('page must be a positive integer');
+    if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+      throw new BadRequestException('pageSize must be an integer between 1 and 100');
+    }
+
+    const requestedPath = query.orgPath?.trim() ? this.normalizeOrgPath(query.orgPath) : undefined;
+    // A department administrator must receive an explicit 403 when asking for
+    // a path outside its scope.  Returning an empty page would leak whether a
+    // protected organization exists and would make client-side mistakes hard
+    // to distinguish from a legitimate empty result.
+    if (requestedPath && access.level !== 'GLOBAL') this.assertAdminOrgScope(actorId, requestedPath);
+
+    const normalizedQuery = query.query?.trim().toLocaleLowerCase('zh-CN') ?? '';
+    const requestedRoles = [...new Set((query.roles ?? []).map((role) => role.trim()).filter(Boolean))];
+    const scopes = access.level === 'GLOBAL' ? undefined : access.scopeOrgPaths;
+    const sortBy = query.sortBy ?? 'employeeNo';
+    const sortOrder = query.sortOrder ?? 'asc';
+    const compareText = (left: string, right: string): number => left.localeCompare(right, 'zh-CN', { sensitivity: 'base', numeric: true });
+
+    const filtered = [...this.users.values()]
+      .filter((user) => {
+        if (scopes && !scopes.some((scope) => this.orgPathIncludes(scope, user.orgPath))) return false;
+        if (requestedPath && !this.orgPathIncludes(requestedPath, user.orgPath)) return false;
+        if (normalizedQuery && ![user.employeeNo, user.name].some((value) => value.toLocaleLowerCase('zh-CN').includes(normalizedQuery))) return false;
+        if (requestedRoles.length && !requestedRoles.some((role) => user.roles.includes(role))) return false;
+        if (query.status && user.status !== query.status) return false;
+        return true;
+      })
+      .sort((left, right) => {
+        const leftValue = String(left[sortBy]);
+        const rightValue = String(right[sortBy]);
+        const primary = compareText(leftValue, rightValue) * (sortOrder === 'desc' ? -1 : 1);
+        return primary || compareText(left.id, right.id);
+      });
+
+    const total = filtered.length;
+    const totalPages = total ? Math.ceil(total / pageSize) : 0;
+    const start = (page - 1) * pageSize;
+    return {
+      items: filtered.slice(start, start + pageSize),
+      pageInfo: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasNext: totalPages > 0 && page < totalPages,
+        hasPrevious: totalPages > 0 && page > 1,
+      },
+    };
   }
 
   getUser(userId: string): AppUser {
@@ -1948,6 +2142,15 @@ export class PlatformStore {
     return challenge;
   }
 
+  /**
+   * Remove a challenge from the active library without destroying its
+   * versions or audit history.  The platform exposes this as DELETE while
+   * retaining the ARCHIVED state so an administrator can restore it later.
+   */
+  deleteChallenge(challengeId: string, actorId = 'admin-local'): Challenge {
+    return this.archiveChallenge(challengeId, actorId);
+  }
+
   restoreChallenge(challengeId: string, actorId = 'admin-local'): Challenge {
     const challenge = this.getChallengeForAdmin(challengeId, actorId);
     if (challenge.status !== 'ARCHIVED') throw new ConflictException('challenge is not in the trash');
@@ -2046,7 +2249,7 @@ export class PlatformStore {
     return sorted.map(([subjectId, row], index) => ({ rank: index + 1, subjectId, score: Number(row.score.toFixed(4)), points: row.points, total: row.points, submissions: row.submissions }));
   }
 
-  profile(subjectId: string): Record<string, unknown> {
+  profile(subjectId: string, options: { includeHistory?: boolean } = {}): Record<string, unknown> {
     const user = this.getUser(subjectId);
     const submissions = this.systemSubmissions().filter((item) => item.subjectId === subjectId);
     const visible = submissions.filter((submission) => {
@@ -2062,8 +2265,41 @@ export class PlatformStore {
     return {
       subject: user,
       stats: { submissions: submissions.length, graded: visible.length, average: scores.length ? Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(4)) : null, best: scores.length ? Math.max(...scores) : null, totalPoints },
-      history: visible.map((submission) => ({ submissionId: submission.id, eventId: submission.eventId, total: Number((this.results.get(submission.resultId!)?.result as { total?: number } | undefined)?.total ?? 0), points: pointsByEvent.get(submission.eventId) ?? 0, resultId: submission.resultId, createdAt: submission.createdAt })),
+      history: options.includeHistory === false ? [] : visible.map((submission) => ({ submissionId: submission.id, eventId: submission.eventId, total: Number((this.results.get(submission.resultId!)?.result as { total?: number } | undefined)?.total ?? 0), points: pointsByEvent.get(submission.eventId) ?? 0, resultId: submission.resultId, createdAt: submission.createdAt })),
     };
+  }
+
+  /**
+   * Server-side page for the profile result history.  The profile summary
+   * remains an aggregate, while the high-cardinality history rows are bounded
+   * by the same PageInfo contract used by users, submissions and audits.
+   */
+  profileHistory(subjectId: string, options: { page?: number; pageSize?: number } = {}): Record<string, unknown> {
+    const page = options.page ?? 1;
+    const pageSize = options.pageSize ?? 20;
+    if (!Number.isSafeInteger(page) || page < 1) throw new BadRequestException('page must be a positive integer');
+    if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new BadRequestException('pageSize must be between 1 and 100');
+    // Resolve the user before scanning submissions so a missing subject is a
+    // stable 404 even when the history is empty.
+    this.getUser(subjectId);
+    const submissions = this.systemSubmissions().filter((item) => item.subjectId === subjectId);
+    const visible = submissions.filter((submission) => {
+      if (!submission.resultId) return false;
+      const event = this.getEvent(submission.eventId);
+      return event.reveal === 'IMMEDIATE' || submission.state === 'REVEALED';
+    });
+    const runningSeason = [...this.seasons.values()].find((season) => season.status === 'RUNNING');
+    const pointsByEvent = new Map<string, number>();
+    for (const eventId of runningSeason?.eventIds ?? []) pointsByEvent.set(eventId, this.eventRanking(eventId).get(subjectId)?.points ?? 0);
+    const items = visible.map((submission) => ({
+      submissionId: submission.id,
+      eventId: submission.eventId,
+      total: Number((this.results.get(submission.resultId!)?.result as { total?: number } | undefined)?.total ?? 0),
+      points: pointsByEvent.get(submission.eventId) ?? 0,
+      resultId: submission.resultId,
+      createdAt: submission.createdAt,
+    }));
+    return { items: items.slice((page - 1) * pageSize, page * pageSize), pageInfo: pageInfo(page, pageSize, items.length) };
   }
 
   /**
@@ -2071,10 +2307,16 @@ export class PlatformStore {
   * Scores are normalized to percentages so different rubrics can share one
   * radar chart while the original score/max values remain available for detail.
   */
-  capabilities(subjectId: string, options: { includeSealed?: boolean } = {}): Record<string, unknown> {
+  capabilities(subjectId: string, options: { includeSealed?: boolean; trendPage?: number; trendPageSize?: number; eventId?: string } = {}): Record<string, unknown> {
     const includeSealed = options.includeSealed === true;
+    const trendPage = options.trendPage;
+    const trendPageSize = options.trendPageSize;
+    const requestedEventId = options.eventId?.trim() || undefined;
+    if (trendPage !== undefined && (!Number.isSafeInteger(trendPage) || trendPage < 1)) throw new BadRequestException('page must be a positive integer');
+    if (trendPageSize !== undefined && (!Number.isSafeInteger(trendPageSize) || trendPageSize < 1 || trendPageSize > 100)) throw new BadRequestException('pageSize must be between 1 and 100');
     const subject = this.getUser(subjectId);
-    const visible = this.systemSubmissions()
+    if (requestedEventId) this.getEvent(requestedEventId);
+    const visible = this.systemSubmissions(requestedEventId)
       .filter((submission) => submission.subjectId === subjectId)
       .filter((submission) => submission.resultId)
       .filter((submission) => {
@@ -2130,6 +2372,7 @@ export class PlatformStore {
     const peerDomainSamples = new Map<string, Map<string, number[]>>();
     for (const candidate of this.submissions.values()) {
       if (candidate.subjectId === subjectId || !candidate.resultId) continue;
+      if (requestedEventId && candidate.eventId !== requestedEventId) continue;
       let candidateUser: AppUser;
       try { candidateUser = this.getUser(candidate.subjectId); } catch { continue; }
       if (candidateUser.orgPath !== subject.orgPath) continue;
@@ -2314,6 +2557,7 @@ export class PlatformStore {
     const departmentTotals = new Map<string, number[]>();
     for (const candidate of this.submissions.values()) {
       if (!candidate.resultId) continue;
+      if (requestedEventId && candidate.eventId !== requestedEventId) continue;
       let candidateUser: AppUser;
       try { candidateUser = this.getUser(candidate.subjectId); } catch { continue; }
       if (candidateUser.orgPath !== subject.orgPath) continue;
@@ -2382,7 +2626,8 @@ export class PlatformStore {
       gradeMatrix: skills,
       weakItems,
       recommendations: weakItems.map((item) => item.recommendation),
-      trend,
+      trend: trendPage === undefined ? trend : trend.slice((trendPage - 1) * (trendPageSize ?? 20), trendPage * (trendPageSize ?? 20)),
+      ...(trendPage === undefined ? {} : { trendPageInfo: pageInfo(trendPage, trendPageSize ?? 20, trend.length) }),
       zoneStats,
       departmentComparison,
       lastUpdated: visible.at(-1)?.result.finishedAt ?? visible.at(-1)?.submission.createdAt ?? null,
@@ -2395,13 +2640,37 @@ export class PlatformStore {
    * console can switch between an entire department and an explicit roster without
    * asking the browser to reconstruct scoring rules.
    */
-  adminCapabilities(actorId = 'w00123', options: { orgPath?: string; subjectIds?: string[]; includeProfiles?: boolean } = {}): Record<string, unknown> {
+  adminCapabilities(actorId = 'w00123', options: { orgPath?: string; subjectIds?: string[]; eventId?: string; includeProfiles?: boolean; page?: number; pageSize?: number; historyPage?: number; historyPageSize?: number } = {}): Record<string, unknown> {
     this.assertAdmin(actorId);
     const includeProfiles = options.includeProfiles !== false;
+    const profilePage = options.page ?? 1;
+    const profilePageSize = options.pageSize ?? 20;
+    const historyPage = options.historyPage ?? 1;
+    const historyPageSize = options.historyPageSize ?? 20;
+    if (!Number.isSafeInteger(profilePage) || profilePage < 1) throw new BadRequestException('page must be a positive integer');
+    if (!Number.isSafeInteger(profilePageSize) || profilePageSize < 1 || profilePageSize > 100) throw new BadRequestException('pageSize must be between 1 and 100');
+    if (!Number.isSafeInteger(historyPage) || historyPage < 1) throw new BadRequestException('historyPage must be a positive integer');
+    if (!Number.isSafeInteger(historyPageSize) || historyPageSize < 1 || historyPageSize > 100) throw new BadRequestException('historyPageSize must be between 1 and 100');
     const normalizedOrgPath = options.orgPath?.trim() || undefined;
+    const normalizedEventId = options.eventId?.trim() || undefined;
     const requestedSubjectIds = [...new Set((options.subjectIds ?? []).map((id) => id.trim()).filter(Boolean))];
-    const candidates = this.listUsers(normalizedOrgPath, actorId).filter((user) => user.status === 'ACTIVE' && user.roles.includes('learner'));
-    const candidateById = new Map(candidates.map((user) => [user.id, user]));
+    if (requestedSubjectIds.length > 1000) throw new BadRequestException('subjectIds must contain at most 1000 ids');
+    if (normalizedEventId) {
+      const event = this.getEvent(normalizedEventId, actorId);
+      if (event.purpose === 'HARD_PROBLEM') throw new BadRequestException('eventId must reference a training event');
+    }
+    const baseCandidates = this.listUsers(normalizedOrgPath, actorId).filter((user) => user.status === 'ACTIVE' && user.roles.includes('learner'));
+    const eventSubjectIds = normalizedEventId
+      ? new Set(this.systemSubmissions(normalizedEventId).map((submission) => submission.subjectId))
+      : undefined;
+    // In ALL mode the event view is intentionally limited to employees who
+    // submitted in that training. Explicit selections remain valid even when
+    // they have no result yet, so the administrator can see a pending/empty
+    // profile instead of receiving a scope error.
+    const candidates = requestedSubjectIds.length || !eventSubjectIds
+      ? baseCandidates
+      : baseCandidates.filter((user) => eventSubjectIds.has(user.id));
+    const candidateById = new Map(baseCandidates.map((user) => [user.id, user]));
     const outsideScope = requestedSubjectIds.filter((subjectId) => !candidateById.has(subjectId));
     if (outsideScope.length) {
       throw new BadRequestException(`selected subjects are outside the requested organization scope: ${outsideScope.join(', ')}`);
@@ -2409,10 +2678,11 @@ export class PlatformStore {
     const selected = requestedSubjectIds.length
       ? requestedSubjectIds.map((subjectId) => candidateById.get(subjectId)!).filter(Boolean)
       : candidates;
-    const profiles = selected.map((subject) => ({
+    const allProfiles = selected.map((subject) => ({
       subject,
-      profile: this.capabilities(subject.id, { includeSealed: true }),
+      profile: this.capabilities(subject.id, { includeSealed: true, eventId: normalizedEventId, trendPage: historyPage, trendPageSize: historyPageSize }),
     }));
+    const profiles = allProfiles.slice((profilePage - 1) * profilePageSize, profilePage * profilePageSize);
     const round = (value: number): number => Number(value.toFixed(2));
     const average = (values: number[]): number | null => values.length ? round(values.reduce((sum, value) => sum + value, 0) / values.length) : null;
     const median = (values: number[]): number | null => {
@@ -2429,7 +2699,7 @@ export class PlatformStore {
     const dimensionLabels = new Map<string, string>();
     const domainLabels = new Map<string, string>();
     const skillLabels = new Map<string, string>();
-    for (const item of profiles) {
+    for (const item of allProfiles) {
       const profile = item.profile as { summary?: Record<string, unknown>; dimensions?: unknown; domains?: unknown };
       for (const raw of Array.isArray(profile.dimensions) ? profile.dimensions : []) {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
@@ -2479,8 +2749,8 @@ export class PlatformStore {
       }
       return result;
     };
-    const gradedUsers = profiles.filter((item) => Number((item.profile as { summary?: { gradedSubmissions?: unknown } }).summary?.gradedSubmissions ?? 0) > 0).length;
-    const overallValues = profiles
+    const gradedUsers = allProfiles.filter((item) => Number((item.profile as { summary?: { gradedSubmissions?: unknown } }).summary?.gradedSubmissions ?? 0) > 0).length;
+    const overallValues = allProfiles
       .map((item) => (item.profile as { summary?: { overallAverage?: unknown } }).summary?.overallAverage)
       .filter((value): value is number => typeof value === 'number');
     const overallAverage = average(overallValues);
@@ -2488,11 +2758,15 @@ export class PlatformStore {
       generatedAt: now(),
       selection: {
         orgPath: normalizedOrgPath ?? null,
+        eventId: normalizedEventId ?? null,
         mode: requestedSubjectIds.length ? 'SELECTED' : 'ALL',
-        subjectIds: selected.map((subject) => subject.id),
+        // Do not echo an unbounded employee roster.  Explicit selections are
+        // capped above; ALL mode returns only the current profile page keys.
+        subjectIds: requestedSubjectIds.length ? selected.map((subject) => subject.id) : profiles.map(({ subject }) => subject.id),
       },
       totalCandidates: candidates.length,
       selectedCount: selected.length,
+      profilePageInfo: pageInfo(profilePage, profilePageSize, selected.length),
       gradedUsers,
       aggregate: {
         overallAverage,
@@ -2744,6 +3018,32 @@ export class PlatformStore {
     return event;
   }
 
+  /**
+   * Delete an unused training event. Submissions are immutable evidence and
+   * therefore make the event non-deletable; released events and the system
+   * managed hard-problem delivery entry point are immutable as well.
+   */
+  deleteEvent(eventId: string, actorId = 'admin-local'): void {
+    const event = this.getEventForAdmin(eventId, actorId);
+    if (event.purpose === 'HARD_PROBLEM') throw new ConflictException('难题榜交付入口由系统管理，不能删除');
+    if (event.status === 'RELEASED') throw new ConflictException('已公布训战不能删除');
+    const submissionCount = [...this.submissions.values()].filter((submission) => submission.eventId === eventId).length;
+    if (submissionCount) throw new ConflictException('训战已有提交，不能删除；请保留训战记录');
+
+    const before = { ...event };
+    this.events.delete(eventId);
+    for (const key of [...this.participants.keys()]) {
+      if (key.startsWith(`${eventId}:`)) this.participants.delete(key);
+    }
+    // A season only stores event ids as a projection. Remove the deleted
+    // event from every season before the normalized repository is synced.
+    for (const season of this.seasons.values()) {
+      season.eventIds = season.eventIds.filter((id) => id !== eventId);
+    }
+    this.audit(actorId, 'event.delete', `event:${eventId}`, before, undefined);
+    this.persist();
+  }
+
   createSubmission(eventId: string, subjectId: string, snapshot: SubmissionSnapshot): SubmissionRecord {
     const event = this.getEvent(eventId);
     if (event.status !== 'OPEN') throw new ConflictException(`event ${eventId} is not open`);
@@ -2940,6 +3240,15 @@ export class PlatformStore {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  listAuditsPage(query: AuditListQuery = {}, actorId = 'w00123'): AuditPage {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    if (!Number.isSafeInteger(page) || page < 1) throw new BadRequestException('page must be a positive integer');
+    if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new BadRequestException('pageSize must be between 1 and 100');
+    const items = this.listAudits(query.target, actorId).sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));
+    return { items: items.slice((page - 1) * pageSize, page * pageSize), pageInfo: pageInfo(page, pageSize, items.length) };
+  }
+
   listSubmissions(eventId?: string, actorId = 'w00123'): SubmissionRecord[] {
     for (const submission of this.submissions.values()) this.syncSubmissionLifecycle(submission);
     let adminAccess: AdminAccess | undefined;
@@ -2956,6 +3265,17 @@ export class PlatformStore {
         return Boolean(subject && adminAccess.scopeOrgPaths.some((scope) => this.orgPathIncludes(scope, subject.orgPath)));
       })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  listSubmissionsPage(query: SubmissionListQuery = {}, actorId = 'w00123'): SubmissionPage {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    if (!Number.isSafeInteger(page) || page < 1) throw new BadRequestException('page must be a positive integer');
+    if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new BadRequestException('pageSize must be between 1 and 100');
+    const items = this.listSubmissions(query.eventId, actorId)
+      .filter((item) => (!query.subjectId || item.subjectId === query.subjectId) && (!query.state || item.state === query.state))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));
+    return { items: items.slice((page - 1) * pageSize, page * pageSize), pageInfo: pageInfo(page, pageSize, items.length) };
   }
 
   startGrading(submissionId: string, actorId: string): GradingRun {
@@ -3364,7 +3684,29 @@ export class PlatformStore {
       this.persist();
       return existing;
     }
-    const { workspacePath: _workspacePath, ...snapshotForResult } = submission.snapshot;
+    // Evaluation-result.submission is a published contract, not a copy of the
+    // internal delivery snapshot.  In particular, artifactName and
+    // workspacePath are platform storage/working-directory metadata and are
+    // intentionally not part of the result schema.  Build the projection
+    // explicitly so adding a field to SubmissionSnapshot cannot silently make
+    // every local completion fail schema validation.
+    const evaluatorSubmission = rawResult.submission && typeof rawResult.submission === 'object' && !Array.isArray(rawResult.submission)
+      ? rawResult.submission as Record<string, unknown>
+      : {};
+    const resultSubmission: Record<string, unknown> = {};
+    for (const field of ['language', 'root', 'gradedAt'] as const) {
+      if (typeof evaluatorSubmission[field] === 'string' && evaluatorSubmission[field]) resultSubmission[field] = evaluatorSubmission[field];
+    }
+    Object.assign(resultSubmission, {
+      sourceType: submission.snapshot.sourceType,
+      snapshotHash: submission.snapshot.snapshotHash,
+      ...(submission.snapshot.artifactHash ? { artifactHash: submission.snapshot.artifactHash } : {}),
+      ...(submission.snapshot.artifactUri ? { artifactUri: submission.snapshot.artifactUri } : {}),
+      ...(submission.snapshot.repository ? { repository: submission.snapshot.repository } : {}),
+      ...(submission.snapshot.branch ? { branch: submission.snapshot.branch } : {}),
+      ...(submission.snapshot.commitSha ? { commitSha: submission.snapshot.commitSha } : {}),
+      submittedAt: submission.snapshot.submittedAt,
+    });
     const result = {
       ...rawResult,
       gradingRunId: run.id,
@@ -3379,7 +3721,7 @@ export class PlatformStore {
         name: subject.name,
         orgPath: submission.orgPathSnapshot ?? subject.orgPath,
       },
-      submission: { ...(rawResult.submission as Record<string, unknown> | undefined), ...snapshotForResult },
+      submission: resultSubmission,
       resultId: this.uniqueResultId(String(rawResult.resultId ?? ''), run.id),
     } as Record<string, any>;
     const errors = validateEvaluationResult(result);
@@ -3728,6 +4070,12 @@ export class PlatformStore {
   closeEvent(eventId: string, actorId = 'admin-local'): EventConfig {
     const event = this.getEventForAdmin(eventId, actorId);
     if (event.status === 'RELEASED') throw new ConflictException('released event cannot be closed');
+    if (event.submissionSource === 'GIT_REF' && event.deliveryConfig?.pinAt === 'DEADLINE') {
+      const unpinned = this.systemSubmissions(eventId).filter((submission) => (
+        !submission.snapshot.commitSha || !submission.snapshot.artifactUri || !submission.snapshot.artifactHash || !/^[a-f0-9]{64}$/.test(submission.snapshot.snapshotHash)
+      ));
+      if (unpinned.length) throw new ConflictException({ code: 'DEADLINE_GIT_SNAPSHOT_MISSING', message: `${unpinned.length} 份 Git 提交尚未固定截止快照` });
+    }
     const before = event.status;
     event.status = 'CLOSED';
     this.audit(actorId, 'event.close', `event:${eventId}`, { status: before }, { status: event.status });

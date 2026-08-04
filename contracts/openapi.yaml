@@ -7,6 +7,10 @@ servers:
   - url: http://localhost:3000
 security:
   - localEmployee: []
+  - oidcBearer: []
+  - trustedGatewayEmployeeNo: []
+    trustedGatewayIssuedAt: []
+    trustedGatewaySignature: []
 paths:
   /api/v1/health:
     get:
@@ -15,6 +19,25 @@ paths:
       responses:
         '200':
           description: 服务状态
+  /api/v1/metrics:
+    get:
+      operationId: getPlatformMetrics
+      description: 仅全局管理员可读取的进程级聚合运行指标，不包含令牌、源码、员工号或对象存储凭据。
+      responses:
+        '200':
+          description: 聚合运行指标
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, generatedAt, uptimeSeconds, requests, latencyMs, routes]
+                properties:
+                  schemaVersion: { type: string, enum: ['1.0'] }
+                  generatedAt: { type: string, format: date-time }
+                  uptimeSeconds: { type: integer, minimum: 0 }
+                  requests: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+                  latencyMs: { type: object, additionalProperties: { type: number, minimum: 0 } }
+                  routes: { type: object, additionalProperties: { type: object, additionalProperties: { type: number, minimum: 0 } } }
   /api/v1/me:
     get:
       operationId: getCurrentUser
@@ -24,7 +47,9 @@ paths:
   /api/v1/auth/sso:
     post:
       operationId: syncSsoIdentity
-      security: []
+      description: >-
+        本地开发可用请求体完成显式同步；生产环境必须先通过 OIDC/JWT 或可信网关身份校验，
+        请求体中的 employeeNo/name/department 不得覆盖已验证的操作者。
       requestBody:
         required: true
         content:
@@ -124,6 +149,42 @@ paths:
         '200':
           description: 内置执行器清单
         '403': { description: 需要管理员权限 }
+  /api/v1/evaluation-contracts:
+    get:
+      operationId: listEvaluationContracts
+      summary: 列出 Git 固定的评测约束
+      description: >-
+        返回管理员赛题编辑器可选的输入/输出约束。约束目录、Schema、示例和 AI 开发说明
+        都随平台 Git 版本发布；内部桥接约束不会出现在列表中。
+      responses:
+        '200':
+          description: 评测约束目录
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EvaluationContractOption' }
+        '403': { description: 需要管理员权限 }
+  /api/v1/evaluation-contracts/{contractId}:
+    get:
+      operationId: getEvaluationContract
+      summary: 查看 Git 固定的评测约束详情
+      description: >-
+        返回管理员点击查看的公开评测约束详情，包含 Git 固定 Schema、已校验示例和
+        供 AI 出题使用的编写说明；内部桥接约束不会通过此接口暴露。
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 评测约束详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluationContractDetail' }
+        '403': { description: 需要管理员权限 }
+        '404': { description: 评测约束不存在或不是公开约束 }
   /api/v1/evaluation-tasks:lease:
     post:
       operationId: leaseEvaluationTasks
@@ -403,11 +464,46 @@ paths:
     get:
       operationId: listUsers
       parameters:
+        - name: page
+          in: query
+          description: 1-based page number.
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          description: Number of users per page.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
         - name: orgPath
           in: query
-          schema: { type: string }
+          description: Organization path including descendants.
+          schema: { type: string, maxLength: 512 }
+        - name: query
+          in: query
+          description: Case-insensitive fuzzy match against employee number or name.
+          schema: { type: string, maxLength: 200 }
+        - name: role
+          in: query
+          description: Comma-separated exact role names (a user matches when any role is present).
+          style: form
+          explode: false
+          schema: { type: string, maxLength: 512 }
+        - name: status
+          in: query
+          schema: { type: string, enum: [ACTIVE, DISABLED] }
+        - name: sortBy
+          in: query
+          description: Whitelisted primary sort field; id is always used as the final tie-breaker.
+          schema: { type: string, enum: [employeeNo, name, orgPath, status, id], default: employeeNo }
+        - name: sortOrder
+          in: query
+          schema: { type: string, enum: [asc, desc], default: asc }
       responses:
-        '200': { description: 用户列表 }
+        '200':
+          description: 服务端分页用户列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserPage' }
+        '400': { description: 分页或筛选参数不合法 }
+        '403': { description: 需要管理员权限或超出管理员组织范围 }
   /api/v1/users/{userId}:
     get:
       operationId: getUser
@@ -531,6 +627,17 @@ paths:
             schema: { $ref: '#/components/schemas/ChallengePatch' }
       responses:
         '200': { description: 赛题类型已更新 }
+    delete:
+      operationId: deleteChallenge
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 赛题已移入回收站，可通过恢复接口撤销 }
+        '403': { description: 管理员无权操作该赛题 }
+        '409': { description: 赛题仍有关联的开放训战 }
   /api/v1/challenges/{challengeId}/publish:
     post:
       operationId: publishChallenge
@@ -658,8 +765,36 @@ paths:
           in: path
           required: true
           schema: { type: string }
+        - name: includeHistory
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
       responses:
         '200': { description: 能力画像与成绩历史 }
+  /api/v1/profiles/{subjectId}/history:
+    get:
+      operationId: getProfileHistory
+      parameters:
+        - name: subjectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: server-side paginated profile result history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProfileHistoryPage' }
+        '400': { description: invalid pagination parameters }
+        '403': { description: profile history is outside the caller scope }
   /api/v1/profiles/{subjectId}/capabilities:
     get:
       operationId: getCapabilityProfile
@@ -688,15 +823,43 @@ paths:
           required: false
           schema: { type: string }
           description: 逗号分隔的员工 ID；不传表示所选部门全部员工
+        - name: eventId
+          in: query
+          required: false
+          schema: { type: string }
+          description: 训战 ID；传入后只聚合该训战中有提交的员工及其 AI 评测结果
         - name: includeProfiles
           in: query
           required: false
           schema: { type: boolean, default: true }
           description: 是否返回个人明细；部门或选定人员的群体画像可设为 false，仅返回平均聚合
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+          description: profile page number
+        - name: pageSize
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: profile page size
+        - name: historyPage
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+          description: result history page for each profile
+        - name: historyPageSize
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: result history page size for each profile
       responses:
         '200':
-          description: 管理员选择范围内的个人画像、部门聚合和 16 个评分点
-        '400': { description: 选定员工不在部门范围内 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminCapabilityBundle' }
+          description: 管理员选择的部门或训战范围内的个人画像、AI 评测聚合和 16 个评分点
+        '400': { description: 选定员工不在部门范围内或 eventId 不是训战 }
         '403': { description: 需要管理员权限 }
   /api/v1/events:
     get:
@@ -732,6 +895,15 @@ paths:
           application/json: { schema: { $ref: '#/components/schemas/EventConfig' } }
       responses:
         '200': { description: 场次已更新 }
+    delete:
+      operationId: deleteEvent
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '204': { description: 训战已删除 }
+        '403': { description: 管理员无权操作该训战 }
+        '404': { description: 训战不存在 }
+        '409': { description: 已公布、系统管理或已有提交的训战不能删除 }
   /api/v1/events/{eventId}/participants:
     get:
       operationId: listEventParticipants
@@ -816,12 +988,29 @@ paths:
   /api/v1/submissions:
     get:
       operationId: listSubmissions
+      description: Server-side paginated submission listing.
       parameters:
         - name: eventId
           in: query
           schema: { type: string }
+        - name: subjectId
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string, enum: [RECEIVED, QUEUED, WAITING_TRIGGER, WAITING_IMPORT, IMPORT_VALIDATING, FAILED, GRADED, SEALED, REVEALED] }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
       responses:
-        '200': { description: 提交列表 }
+        '200':
+          description: 提交列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmissionPage' }
     post:
       operationId: createSubmission
       requestBody:
@@ -1019,12 +1208,88 @@ paths:
   /api/v1/audits:
     get:
       operationId: listAudits
+      description: Server-side paginated audit listing.
       parameters:
         - name: target
           in: query
           schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
       responses:
-        '200': { description: 操作审计记录 }
+        '200':
+          description: 操作审计记录
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditPage' }
+  /api/v1/uploads:
+    post:
+      operationId: createUpload
+      description: 创建绑定身份、场次和大小限制的短期上传句柄。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UploadRequest' }
+      responses:
+        '201':
+          description: 上传句柄已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadSession' }
+  /api/v1/uploads/{uploadId}:
+    put:
+      operationId: putUpload
+      parameters:
+        - $ref: '#/components/parameters/UploadId'
+        - $ref: '#/components/parameters/UploadToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bytesBase64]
+              properties:
+                bytesBase64: { type: string }
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+          application/zip:
+            schema:
+              type: string
+              format: binary
+          application/x-zip-compressed:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: 上传内容已接收
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadMetadata' }
+  /api/v1/uploads/{uploadId}/confirm:
+    post:
+      operationId: confirmUpload
+      parameters:
+        - $ref: '#/components/parameters/UploadId'
+        - $ref: '#/components/parameters/UploadToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UploadMetadata' }
+      responses:
+        '201':
+          description: 对象已固化
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoredArtifact' }
   /api/v1/reports/{submissionId}:
     get:
       operationId: getSubmissionReport
@@ -1039,6 +1304,23 @@ components:
       type: apiKey
       in: header
       name: X-Employee-Id
+    oidcBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 生产 OIDC/JWT 身份；服务端校验 issuer、audience、JWKS、有效期和签名。
+    trustedGatewayEmployeeNo:
+      type: apiKey
+      in: header
+      name: X-Trusted-Employee-No
+    trustedGatewayIssuedAt:
+      type: apiKey
+      in: header
+      name: X-Trusted-Issued-At
+    trustedGatewaySignature:
+      type: apiKey
+      in: header
+      name: X-Trusted-Identity-Signature
   parameters:
     EventId:
       name: eventId
@@ -1055,6 +1337,16 @@ components:
       in: header
       required: false
       schema: { type: string, minLength: 16, maxLength: 128 }
+    UploadId:
+      name: uploadId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    UploadToken:
+      name: X-Upload-Token
+      in: header
+      required: true
+      schema: { type: string, minLength: 32 }
   schemas:
     CodeAgentRuntimeInput:
       type: object
@@ -1094,6 +1386,43 @@ components:
       properties:
         label: { type: string }
         name: { type: string }
+    UploadRequest:
+      type: object
+      additionalProperties: false
+      required: [eventId, fileName, declaredSize]
+      properties:
+        eventId: { type: string }
+        subjectId: { type: string }
+        fileName: { type: string, minLength: 1, maxLength: 200 }
+        declaredSize: { type: integer, minimum: 1 }
+    UploadSession:
+      type: object
+      additionalProperties: false
+      required: [uploadId, uploadToken, objectKey, actorId, eventId, subjectId, fileName, declaredSize, expiresAt]
+      properties:
+        uploadId: { type: string, format: uuid }
+        uploadToken: { type: string }
+        objectKey: { type: string }
+        actorId: { type: string }
+        eventId: { type: string }
+        subjectId: { type: string }
+        fileName: { type: string }
+        declaredSize: { type: integer, minimum: 1 }
+        expiresAt: { type: string, format: date-time }
+    UploadMetadata:
+      type: object
+      additionalProperties: false
+      required: [size, sha256]
+      properties:
+        size: { type: integer, minimum: 1 }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+    StoredArtifact:
+      allOf:
+        - $ref: '#/components/schemas/UploadMetadata'
+        - type: object
+          required: [uri]
+          properties:
+            uri: { type: string }
     SsoIdentity:
       type: object
       additionalProperties: false
@@ -1118,6 +1447,90 @@ components:
             properties:
               role: { type: string }
               scopeOrgPath: { type: string }
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, employeeNo, name, orgUnitId, orgPath, roles, status]
+      properties:
+        id: { type: string }
+        employeeNo: { type: string }
+        name: { type: string }
+        orgUnitId: { type: string }
+        orgPath: { type: string }
+        departmentHint: { type: string }
+        departmentSource: { type: string, enum: [SSO, ADMIN] }
+        roles: { type: array, items: { type: string } }
+        roleBindings:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [role, scopeOrgPath]
+            properties:
+              role: { type: string }
+              scopeOrgPath: { type: string }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+    UserPageInfo:
+      type: object
+      additionalProperties: false
+      required: [page, pageSize, total, totalPages, hasNext, hasPrevious]
+      properties:
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 100 }
+        total: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+        hasNext: { type: boolean }
+        hasPrevious: { type: boolean }
+    UserPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/User' }
+        pageInfo: { $ref: '#/components/schemas/UserPageInfo' }
+    ListPageInfo:
+      type: object
+      additionalProperties: false
+      required: [page, pageSize, total, totalPages, hasNext, hasPrevious]
+      properties:
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 100 }
+        total: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+        hasNext: { type: boolean }
+        hasPrevious: { type: boolean }
+    SubmissionPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Submission' }
+        pageInfo: { $ref: '#/components/schemas/ListPageInfo' }
+    Audit:
+      type: object
+      additionalProperties: false
+      required: [id, actorId, action, target, createdAt]
+      properties:
+        id: { type: string }
+        actorId: { type: string }
+        action: { type: string }
+        target: { type: string }
+        before: {}
+        after: {}
+        createdAt: { type: string, format: date-time }
+    AuditPage:
+      type: object
+      additionalProperties: false
+      required: [items, pageInfo]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Audit' }
+        pageInfo: { $ref: '#/components/schemas/ListPageInfo' }
     Submission:
       type: object
       required: [eventId, subjectId, snapshot]
@@ -1462,6 +1875,39 @@ components:
             format: { type: string, enum: [JSON] }
             schemaVersion: { type: string }
             contractPath: { type: string }
+    EvaluationContractOption:
+      type: object
+      additionalProperties: false
+      required: [id, kind, visibility, modes, schemaVersion, path, label, description, examplePath, guidePath]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [INPUT, OUTPUT] }
+        visibility: { type: string, enum: [PUBLIC] }
+        modes: { type: array, minItems: 1, items: { type: string, enum: [EXTERNAL_CLI, PLATFORM_LOCAL, PACKAGED] } }
+        schemaVersion: { type: string }
+        path: { type: string }
+        label: { type: string }
+        description: { type: string }
+        examplePath: { type: string }
+        guidePath: { type: string }
+    EvaluationContractDetail:
+      type: object
+      additionalProperties: false
+      required: [id, kind, visibility, modes, schemaVersion, path, label, description, examplePath, guidePath, schema, example, guide]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [INPUT, OUTPUT] }
+        visibility: { type: string, enum: [PUBLIC] }
+        modes: { type: array, minItems: 1, items: { type: string, enum: [EXTERNAL_CLI, PLATFORM_LOCAL, PACKAGED] } }
+        schemaVersion: { type: string }
+        path: { type: string }
+        label: { type: string }
+        description: { type: string }
+        examplePath: { type: string }
+        guidePath: { type: string }
+        schema: { type: object, additionalProperties: true }
+        example: {}
+        guide: { type: string }
     EvaluationInputBatch:
       type: object
       required: [schemaVersion, generatedAt, event, challenge, submissions]
@@ -1514,6 +1960,43 @@ components:
         tag: { type: string, enum: [平台通知, 训战提醒, 规则更新] }
         publishedAt: { type: string, format: date-time }
         pinned: { type: boolean }
+    ProfileHistoryPage:
+      type: object
+      required: [items, pageInfo]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [submissionId, eventId, total, resultId, createdAt]
+            properties:
+              submissionId: { type: string }
+              eventId: { type: string }
+              total: { type: number, minimum: 0, maximum: 100 }
+              points: { type: number }
+              resultId: { type: string }
+              createdAt: { type: string, format: date-time }
+        pageInfo: { $ref: '#/components/schemas/ListPageInfo' }
+    AdminCapabilityBundle:
+      type: object
+      required: [generatedAt, selection, totalCandidates, selectedCount, gradedUsers, aggregate, profiles, profilePageInfo]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        selection:
+          type: object
+          required: [orgPath, eventId, mode, subjectIds]
+          properties:
+            orgPath: { type: [string, 'null'] }
+            eventId: { type: [string, 'null'] }
+            mode: { type: string, enum: [ALL, SELECTED] }
+            subjectIds: { type: array, items: { type: string } }
+          additionalProperties: true
+        totalCandidates: { type: integer, minimum: 0 }
+        selectedCount: { type: integer, minimum: 0 }
+        gradedUsers: { type: integer, minimum: 0 }
+        aggregate: { type: object, additionalProperties: true }
+        profiles: { type: array, items: { type: object, additionalProperties: true } }
+        profilePageInfo: { $ref: '#/components/schemas/ListPageInfo' }
     CapabilityProfile:
       type: object
       required: [subjectId, summary, dimensions, domains, skills, trend, capabilityCatalogVersion]

@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
-import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Optional } from '@nestjs/common';
 import { EvaluationBatch, EvaluationBatchTask, GradingRun, StoredResult } from './domain';
 import { ExecutorRegistry } from './executor-registry';
 import { PlatformStore } from './store';
+import { PostgresDomainUnitOfWork } from './postgres-domain-unit-of-work';
 
 const LEASE_SECONDS = Number(process.env.EVALUATION_BATCH_LEASE_SECONDS ?? process.env.EVALUATION_LEASE_SECONDS ?? 1800);
 const MAX_LEASE_BATCHES = Number(process.env.EVALUATION_BATCH_LEASE_MAX ?? 5);
@@ -16,6 +17,7 @@ export class EvaluationBatchService {
   constructor(
     @Inject(PlatformStore) private readonly store: PlatformStore,
     @Inject(ExecutorRegistry) private readonly executors: ExecutorRegistry,
+    @Optional() @Inject(PostgresDomainUnitOfWork) private readonly domainUnitOfWork?: PostgresDomainUnitOfWork,
   ) {}
 
   create(runIds: string[], actorId: string): EvaluationBatch {
@@ -26,6 +28,11 @@ export class EvaluationBatchService {
     return this.store.listEvaluationBatches(actorId, eventId);
   }
 
+  async listPersistent(actorId: string, eventId?: string): Promise<EvaluationBatch[]> {
+    if (!this.domainUnitOfWork?.isPostgres) return this.list(actorId, eventId);
+    return this.domainUnitOfWork.read((store) => store.listEvaluationBatches(actorId, eventId));
+  }
+
   get(batchId: string, actorId: string): EvaluationBatch {
     const batch = this.store.getEvaluationBatch(batchId);
     // Reuse the scoped list rather than exposing a system-level batch lookup.
@@ -33,6 +40,14 @@ export class EvaluationBatchService {
       throw new ConflictException('evaluation batch is outside the administrator scope');
     }
     return batch;
+  }
+
+  async getPersistent(batchId: string, actorId: string): Promise<EvaluationBatch> {
+    if (!this.domainUnitOfWork?.isPostgres) return this.get(batchId, actorId);
+    return this.domainUnitOfWork.read((store) => {
+      store.assertEvaluationBatchScope(batchId, actorId);
+      return store.getEvaluationBatch(batchId);
+    });
   }
 
   reclaimExpiredLeases(): number {
@@ -56,10 +71,10 @@ export class EvaluationBatchService {
     }
   }
 
-  private taskFor(batch: EvaluationBatch, workerId: string): EvaluationBatchTask {
-    const runs = batch.runIds.map((runId) => this.store.getRun(runId));
-    const firstSubmission = this.store.getSubmission(runs[0].submissionId);
-    const context = this.store.gradingContextForSubmission(firstSubmission);
+  private taskFor(store: PlatformStore, batch: EvaluationBatch, workerId: string): EvaluationBatchTask {
+    const runs = batch.runIds.map((runId) => store.getRun(runId));
+    const firstSubmission = store.getSubmission(runs[0].submissionId);
+    const context = store.gradingContextForSubmission(firstSubmission);
     const resolved = this.executors.resolve(context.engine);
     const configuredAgent = context.engine.agent;
     const manifestAgent = resolved.manifest.agent;
@@ -69,7 +84,7 @@ export class EvaluationBatchService {
     this.resolveAgentPaths(resolved.root, instruction, skills);
     const assets: Record<string, string> = {};
     for (const [key, value] of Object.entries(resolved.manifest.assets ?? {})) if (value) assets[key] = value;
-    const lease = this.store.acquireEvaluationBatchLease(batch.id, workerId, LEASE_SECONDS);
+    const lease = store.acquireEvaluationBatchLease(batch.id, workerId, LEASE_SECONDS);
     const activeRuns = runs.filter((run) => run.status === 'RUNNING');
     return {
       batchId: batch.id,
@@ -98,13 +113,13 @@ export class EvaluationBatchService {
         output: { ...context.engine.output },
       },
       challenge: context.challenge,
-      submissions: activeRuns.map((run) => this.submissionDescriptor(run)),
+      submissions: activeRuns.map((run) => this.submissionDescriptor(store, run)),
     };
   }
 
-  private submissionDescriptor(run: GradingRun): EvaluationBatchTask['submissions'][number] {
-    const submission = this.store.getSubmission(run.submissionId);
-    const subject = this.store.getUser(submission.subjectId);
+  private submissionDescriptor(store: PlatformStore, run: GradingRun): EvaluationBatchTask['submissions'][number] {
+    const submission = store.getSubmission(run.submissionId);
+    const subject = store.getUser(submission.subjectId);
     return {
       runId: run.id,
       attempt: run.attempt ?? 1,
@@ -149,7 +164,7 @@ export class EvaluationBatchService {
           );
           continue;
         }
-        const task = this.taskFor(batch, workerId);
+        const task = this.taskFor(this.store, batch, workerId);
         if (executorIds.length && !executorIds.includes(task.engine.id)) {
           this.store.releaseEvaluationBatchLease(batch.id);
           continue;
@@ -170,9 +185,55 @@ export class EvaluationBatchService {
     return tasks;
   }
 
-  private assertLease(batchId: string, leaseId: string, actorId: string): EvaluationBatch {
-    this.store.assertEvaluationBatchScope(batchId, actorId);
-    const batch = this.store.getEvaluationBatch(batchId);
+  /** PostgreSQL request path: batch selection, lease and every run transition share one UoW. */
+  async leasePersistent(workerId: string, limit = 1, executorIds: string[] = [], actorId = 'w00123'): Promise<EvaluationBatchTask[]> {
+    if (!this.domainUnitOfWork?.isPostgres) return this.lease(workerId, limit, executorIds, actorId);
+    return this.domainUnitOfWork.run((store) => {
+      if (!workerId.trim()) throw new BadRequestException({ code: 'WORKER_ID_REQUIRED', message: '评测环境必须声明 workerId' });
+      const current = Date.now();
+      for (const batch of store.systemEvaluationBatches()) {
+        if (batch.status === 'RUNNING' && batch.leaseExpiresAt && Date.parse(batch.leaseExpiresAt) <= current) {
+          store.releaseEvaluationBatchLease(batch.id, '评测批次租约超时，已重新排队');
+        }
+      }
+      const wanted = Math.max(1, Math.min(Number(limit) || 1, MAX_LEASE_BATCHES));
+      const tasks: EvaluationBatchTask[] = [];
+      const allowedBatchIds = new Set(store.listEvaluationBatches(actorId).map((batch) => batch.id));
+      for (const batch of store.systemEvaluationBatches()) {
+        if (tasks.length >= wanted || batch.status !== 'QUEUED' || !allowedBatchIds.has(batch.id)) continue;
+        try {
+          const batchRuns = batch.runIds.map((runId) => store.getRun(runId));
+          const completedRunIds = batchRuns.filter((run) => run.status === 'GRADED').map((run) => run.id);
+          const failedRunIds = batchRuns.filter((run) => run.status === 'FAILED').map((run) => run.id);
+          if (completedRunIds.length + failedRunIds.length === batchRuns.length) {
+            store.finishEvaluationBatch(batch.id, completedRunIds, failedRunIds, failedRunIds.length ? `${failedRunIds.length} 份提交未完成评测` : undefined);
+            continue;
+          }
+          const task = this.taskFor(store, batch, workerId);
+          if (executorIds.length && !executorIds.includes(task.engine.id)) {
+            store.releaseEvaluationBatchLease(batch.id);
+            continue;
+          }
+          tasks.push(task);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          const failed: string[] = [];
+          for (const runId of batch.runIds) {
+            const run = store.getRun(runId);
+            if (run.status === 'GRADED' || run.status === 'FAILED') continue;
+            store.failRun(runId, reason);
+            failed.push(runId);
+          }
+          store.finishEvaluationBatch(batch.id, [], failed, reason);
+        }
+      }
+      return tasks;
+    });
+  }
+
+  private assertLeaseForStore(store: PlatformStore, batchId: string, leaseId: string, actorId: string): EvaluationBatch {
+    store.assertEvaluationBatchScope(batchId, actorId);
+    const batch = store.getEvaluationBatch(batchId);
     if (['COMPLETED', 'PARTIAL', 'FAILED'].includes(batch.status)) {
       if (!batch.completionLeaseId || batch.completionLeaseId !== leaseId) {
         throw new ConflictException({ code: 'BATCH_LEASE_INVALID', message: '批次回调凭据无效' });
@@ -185,26 +246,39 @@ export class EvaluationBatchService {
     return batch;
   }
 
+  private assertLease(batchId: string, leaseId: string, actorId: string): EvaluationBatch {
+    return this.assertLeaseForStore(this.store, batchId, leaseId, actorId);
+  }
+
   heartbeat(batchId: string, leaseId: string, actorId = 'w00123'): { leaseExpiresAt: string } {
     const batch = this.assertLease(batchId, leaseId, actorId);
     if (batch.status !== 'RUNNING') throw new ConflictException({ code: 'BATCH_ALREADY_FINISHED', message: '该评测批次已经结束' });
     return { leaseExpiresAt: this.store.extendEvaluationBatchLease(batch.id, LEASE_SECONDS) };
   }
 
-  complete(batchId: string, leaseId: string, results: BatchResultInput[], failures: BatchFailureInput[] = [], actorId = 'w00123'): {
+  async heartbeatPersistent(batchId: string, leaseId: string, actorId = 'w00123'): Promise<{ leaseExpiresAt: string }> {
+    if (!this.domainUnitOfWork?.isPostgres) return this.heartbeat(batchId, leaseId, actorId);
+    return this.domainUnitOfWork.run((store) => {
+      const batch = this.assertLeaseForStore(store, batchId, leaseId, actorId);
+      if (batch.status !== 'RUNNING') throw new ConflictException({ code: 'BATCH_ALREADY_FINISHED', message: '该评测批次已经结束' });
+      return { leaseExpiresAt: store.extendEvaluationBatchLease(batch.id, LEASE_SECONDS) };
+    });
+  }
+
+  private completeForStore(store: PlatformStore, batchId: string, leaseId: string, results: BatchResultInput[], failures: BatchFailureInput[] = [], actorId = 'w00123'): {
     batch: EvaluationBatch;
     accepted: StoredResult[];
     rejected: Array<{ runId: string; reason: string }>;
   } {
-    const batch = this.assertLease(batchId, leaseId, actorId);
+    const batch = this.assertLeaseForStore(store, batchId, leaseId, actorId);
     if (batch.status !== 'RUNNING') {
       return {
         batch,
         accepted: (batch.completedRunIds ?? []).map((runId) => {
-          const submission = this.store.getSubmission(this.store.getRun(runId).submissionId);
-          return this.store.getStoredResult(submission.resultId!);
+          const submission = store.getSubmission(store.getRun(runId).submissionId);
+          return store.getStoredResult(submission.resultId!);
         }),
-        rejected: (batch.failedRunIds ?? []).map((runId) => ({ runId, reason: this.store.getRun(runId).failureReason ?? '评测失败' })),
+        rejected: (batch.failedRunIds ?? []).map((runId) => ({ runId, reason: store.getRun(runId).failureReason ?? '评测失败' })),
       };
     }
     if (!Array.isArray(results) || !Array.isArray(failures) || results.length + failures.length > 500) {
@@ -215,11 +289,11 @@ export class EvaluationBatchService {
     const rejected: Array<{ runId: string; reason: string }> = [];
     const seen = new Set<string>();
     for (const runId of batch.runIds) {
-      const run = this.store.getRun(runId);
+      const run = store.getRun(runId);
       if (run.status === 'GRADED') {
-        const submission = this.store.getSubmission(run.submissionId);
+        const submission = store.getSubmission(run.submissionId);
         if (!submission.resultId) throw new ConflictException({ code: 'BATCH_RESULT_MISSING', message: `已完成运行缺少结果：${runId}` });
-        accepted.push(this.store.getStoredResult(submission.resultId));
+        accepted.push(store.getStoredResult(submission.resultId));
         seen.add(runId);
       } else if (run.status === 'FAILED') {
         rejected.push({ runId, reason: run.failureReason ?? '评测失败' });
@@ -233,22 +307,22 @@ export class EvaluationBatchService {
     }
     for (const item of results) {
       try {
-        accepted.push(this.store.completeRun(item.runId, item.result));
+        accepted.push(store.completeRun(item.runId, item.result));
       } catch (error) {
         rejected.push({ runId: item.runId, reason: error instanceof Error ? error.message : String(error) });
       }
     }
     for (const item of failures) {
       const reason = item.reason?.trim() || 'Code Agent 未给出失败原因';
-      this.store.failRun(item.runId, reason);
+      store.failRun(item.runId, reason);
       rejected.push({ runId: item.runId, reason });
     }
     for (const runId of batch.runIds.filter((id) => !seen.has(id))) {
       const reason = 'Code Agent 未返回该提交的评测结果';
-      this.store.failRun(runId, reason);
+      store.failRun(runId, reason);
       rejected.push({ runId, reason });
     }
-    const finished = this.store.finishEvaluationBatch(
+    const finished = store.finishEvaluationBatch(
       batch.id,
       accepted.map((item) => item.gradingRunId),
       rejected.map((item) => item.runId),
@@ -257,16 +331,42 @@ export class EvaluationBatchService {
     return { batch: finished, accepted, rejected };
   }
 
-  fail(batchId: string, leaseId: string, reason: string, actorId = 'w00123'): EvaluationBatch {
-    const batch = this.assertLease(batchId, leaseId, actorId);
+  complete(batchId: string, leaseId: string, results: BatchResultInput[], failures: BatchFailureInput[] = [], actorId = 'w00123'): {
+    batch: EvaluationBatch;
+    accepted: StoredResult[];
+    rejected: Array<{ runId: string; reason: string }>;
+  } {
+    return this.completeForStore(this.store, batchId, leaseId, results, failures, actorId);
+  }
+
+  async completePersistent(batchId: string, leaseId: string, results: BatchResultInput[], failures: BatchFailureInput[] = [], actorId = 'w00123'): Promise<{
+    batch: EvaluationBatch;
+    accepted: StoredResult[];
+    rejected: Array<{ runId: string; reason: string }>;
+  }> {
+    if (!this.domainUnitOfWork?.isPostgres) return this.complete(batchId, leaseId, results, failures, actorId);
+    return this.domainUnitOfWork.run((store) => this.completeForStore(store, batchId, leaseId, results, failures, actorId));
+  }
+
+  private failForStore(store: PlatformStore, batchId: string, leaseId: string, reason: string, actorId = 'w00123'): EvaluationBatch {
+    const batch = this.assertLeaseForStore(store, batchId, leaseId, actorId);
     if (batch.status !== 'RUNNING') return batch;
     const failed: string[] = [];
     for (const runId of batch.runIds) {
-      const run = this.store.getRun(runId);
+      const run = store.getRun(runId);
       if (run.status === 'GRADED' || run.status === 'FAILED') continue;
-      this.store.failRun(runId, reason || '评测环境未给出失败原因');
+      store.failRun(runId, reason || '评测环境未给出失败原因');
       failed.push(runId);
     }
-    return this.store.finishEvaluationBatch(batch.id, [], failed, reason || '评测环境未给出失败原因');
+    return store.finishEvaluationBatch(batch.id, [], failed, reason || '评测环境未给出失败原因');
+  }
+
+  fail(batchId: string, leaseId: string, reason: string, actorId = 'w00123'): EvaluationBatch {
+    return this.failForStore(this.store, batchId, leaseId, reason, actorId);
+  }
+
+  async failPersistent(batchId: string, leaseId: string, reason: string, actorId = 'w00123'): Promise<EvaluationBatch> {
+    if (!this.domainUnitOfWork?.isPostgres) return this.fail(batchId, leaseId, reason, actorId);
+    return this.domainUnitOfWork.run((store) => this.failForStore(store, batchId, leaseId, reason, actorId));
   }
 }

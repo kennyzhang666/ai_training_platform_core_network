@@ -9,6 +9,7 @@ import { EnginePackageStore } from '../src/engine-package-store';
 import { EngineRunner } from '../src/packaged-engine-executor';
 import { ExecutorRegistry } from '../src/executor-registry';
 import { PlatformStore } from '../src/store';
+import { LocalObjectStorage } from '../src/object-storage';
 import { checkEvaluationScore } from '../src/score-validator';
 import { validateEvaluationResult } from '../src/contract-validator';
 
@@ -108,7 +109,7 @@ test('the packaged engine grades a real delivery inside the sandbox and the plat
       const context = store.gradingContextForSubmission(submission);
       assert.equal(context.engine.mode, 'PACKAGED');
       const artifacts = new ArtifactStore();
-      const executor = new EngineRunner(artifacts, packages, new ExecutorRegistry(packages));
+      const executor = new EngineRunner(new LocalObjectStorage(artifacts), packages, new ExecutorRegistry(packages));
       const result = await executor.execute({ event: store.getEvent(event.id), submission, run, ...context });
 
       // The engine's output is a contract, not a trusted score.

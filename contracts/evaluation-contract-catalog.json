@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "1.0",
+  "contracts": [
+    {
+      "id": "external-evaluation-input-v1",
+      "kind": "INPUT",
+      "visibility": "PUBLIC",
+      "modes": ["EXTERNAL_CLI"],
+      "schemaVersion": "1.0",
+      "path": "contracts/evaluation-input.schema.json",
+      "label": "外部评测批次输入约束 v1.0",
+      "description": "EXTERNAL_CLI 线下评测使用的批次清单；评测完成后通过统一结果约束导入。",
+      "examplePath": "contracts/examples/evaluation-input.external.valid.json",
+      "guidePath": "docs/evaluation-contract-authoring.md"
+    },
+    {
+      "id": "code-agent-batch-input-v1.1",
+      "kind": "INPUT",
+      "visibility": "PUBLIC",
+      "modes": ["PLATFORM_LOCAL", "PACKAGED"],
+      "schemaVersion": "1.1",
+      "path": "contracts/evaluation-agent-batch-v1.1.schema.json",
+      "label": "Code Agent 批次输入约束 v1.1",
+      "description": "平台 Worker 交给 Code Agent 的批次清单；在线内置执行器和打包引擎共用。",
+      "examplePath": "contracts/examples/evaluation-agent-batch.valid.json",
+      "guidePath": "docs/evaluation-contract-authoring.md"
+    },
+    {
+      "id": "platform-evaluation-result-v1",
+      "kind": "OUTPUT",
+      "visibility": "PUBLIC",
+      "modes": ["EXTERNAL_CLI", "PLATFORM_LOCAL", "PACKAGED"],
+      "schemaVersion": "1.0",
+      "path": "contracts/evaluation-result.schema.json",
+      "label": "平台统一评测输出约束 v1.0",
+      "description": "所有评测方式最终都必须返回的平台结果信封；平台会重新校验归属、Schema 和总分。",
+      "examplePath": "contracts/examples/evaluation-result.valid.json",
+      "guidePath": "docs/evaluation-contract-authoring.md"
+    },
+    {
+      "id": "engine-invocation-input-v1",
+      "kind": "INPUT",
+      "visibility": "INTERNAL",
+      "modes": ["PACKAGED"],
+      "schemaVersion": "1.0",
+      "path": "contracts/engine-invocation.schema.json",
+      "label": "打包引擎单份调用输入约束 v1.0",
+      "description": "仅供平台桥接器传给引擎进程，包含沙箱路径；不是管理员赛题编辑器的可选批次输入约束。",
+      "examplePath": "contracts/examples/engine-invocation.valid.json",
+      "guidePath": "docs/evaluation-contract-authoring.md"
+    },
+    {
+      "id": "legacy-platform-local-input-v1",
+      "kind": "INPUT",
+      "visibility": "INTERNAL",
+      "modes": ["PLATFORM_LOCAL"],
+      "schemaVersion": "1.0",
+      "path": "contracts/evaluation-input.schema.json",
+      "label": "旧版内置评测输入约束 v1.0",
+      "description": "兼容历史文件适配器数据；新建或编辑赛题时应选择 Code Agent 批次输入约束 v1.1。",
+      "examplePath": "contracts/examples/evaluation-input.external.valid.json",
+      "guidePath": "docs/evaluation-contract-authoring.md"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-08-04T09:00:00.000Z",
+  "engine": {
+    "id": "example-packaged-evaluator",
+    "version": "1.0.0",
+    "packageHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "packageRoot": "/sandbox/engine",
+    "source": "PACKAGE",
+    "assets": {
+      "submissionContract": "/sandbox/engine/assets/submission-contract.json",
+      "testsDir": "/sandbox/engine/assets/hidden-tests"
+    }
+  },
+  "challenge": {
+    "id": "example-parking",
+    "title": "示例：停车费计算",
+    "challengeVersion": "example-parking@1",
+    "rubricVersion": "1.0",
+    "zone": "YELLOW",
+    "languagePolicy": { "mode": "fixed", "languages": ["python"] }
+  },
+  "grading": {
+    "runId": "run-example-001",
+    "idempotencyKey": "0123456789abcdef0123456789abcdef",
+    "triggerType": "MANUAL",
+    "attempt": 1
+  },
+  "subject": { "id": "example-person-001", "name": "示例学员", "orgPath": "/example/" },
+  "submission": {
+    "id": "submission-example-001",
+    "sourceType": "UPLOAD",
+    "snapshotHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "artifactHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "submittedAt": "2026-08-04T08:55:00.000Z"
+  },
+  "workspace": "/sandbox/submission/workspace",
+  "outputPath": "/sandbox/submission/result.json",
+  "scratchDir": "/sandbox/submission/scratch",
+  "limits": { "wallClockSeconds": 120, "memoryMB": 512, "outputBytes": 1048576 },
+  "params": { "entry": "src/parking.py", "function": "calculate_fee" }
+}

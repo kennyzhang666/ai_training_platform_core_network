@@ -65,6 +65,28 @@ async function withApp(run: (baseUrl: string) => Promise<void>): Promise<void> {
   }
 }
 
+test('only a global administrator can read aggregate operational metrics', async () => {
+  await withApp(async (baseUrl) => {
+    await fetch(`${baseUrl}/api/v1/health`);
+    const unknown = await fetch(`${baseUrl}/api/v1/not-found/w00123?secret=should-not-be-recorded`, { headers: { 'x-employee-id': 'w00123' } });
+    assert.equal(unknown.status, 404);
+    const invalidQuery = await fetch(`${baseUrl}/api/v1/users?page=not-a-number`, { headers: { 'x-employee-id': 'w00123' } });
+    assert.equal(invalidQuery.status, 400);
+    const global = await fetch(`${baseUrl}/api/v1/metrics`, { headers: { 'x-employee-id': 'w00123' } });
+    assert.equal(global.status, 200);
+    const body = await global.json() as { schemaVersion?: string; requests?: { total?: number; clientErrors?: number }; latencyMs?: { p95?: number }; routes?: Record<string, unknown> };
+    assert.equal(body.schemaVersion, '1.0');
+    assert.ok((body.requests?.total ?? 0) >= 1);
+    assert.ok((body.requests?.clientErrors ?? 0) >= 1);
+    assert.ok((body.latencyMs?.p95 ?? 0) >= 0);
+    assert.ok(body.routes && typeof body.routes === 'object');
+    assert.doesNotMatch(JSON.stringify(body), /w00123|should-not-be-recorded/);
+
+    const scoped = await fetch(`${baseUrl}/api/v1/metrics`, { headers: { 'x-employee-id': 'w00134' } });
+    assert.equal(scoped.status, 403);
+  });
+});
+
 test('browser preflight allows administration update and delete requests', async () => {
   await withApp(async (baseUrl) => {
     for (const method of ['PATCH', 'DELETE']) {
@@ -112,6 +134,58 @@ test('administrator can update and delete an empty department through the API', 
     assert.equal(deleted.status, 204);
     const missing = await fetch(`${baseUrl}/api/v1/org-units/org-api-empty`, { headers: { 'x-employee-id': 'w00123' } });
     assert.equal(missing.status, 404);
+  });
+});
+
+test('administrator mutations keep the workspace refresh endpoints healthy', async () => {
+  await withApp(async (baseUrl) => {
+    const headers = { 'content-type': 'application/json', 'x-employee-id': 'w00123' };
+    const updated = await fetch(`${baseUrl}/api/v1/users/w00124`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ orgUnitId: 'org-125', roles: ['learner', 'mentor'] }),
+    });
+    assert.equal(updated.status, 200);
+
+    // The Web admin calls this set after every mutation. A single broken
+    // refresh request used to turn a successful user edit into a visible
+    // failure, because runAction awaited Promise.all(refresh()).
+    const refreshPaths = [
+      '/api/v1/admin/overview',
+      '/api/v1/challenges',
+      '/api/v1/events',
+      '/api/v1/submissions?page=1&pageSize=100',
+      '/api/v1/users?page=1&pageSize=100',
+      '/api/v1/users?page=1&pageSize=20&role=learner&status=ACTIVE',
+      '/api/v1/org-units',
+      '/api/v1/admin/capabilities',
+      '/api/v1/announcements',
+      '/api/v1/audits?page=1&pageSize=100',
+      '/api/v1/admin/grading-queue',
+      '/api/v1/evaluation-executors',
+      '/api/v1/admin/code-agent-runtime',
+      '/api/v1/evaluation-contracts',
+    ];
+    const responses = await Promise.all(refreshPaths.map((path) => fetch(`${baseUrl}${path}`, { headers })));
+    assert.deepEqual(responses.map((response) => response.status), refreshPaths.map(() => 200));
+
+    const contractCatalogResponse = await fetch(`${baseUrl}/api/v1/evaluation-contracts`, { headers });
+    assert.equal(contractCatalogResponse.status, 200);
+    const contractCatalog = await contractCatalogResponse.json() as Array<{ id: string; visibility: string; examplePath: string; guidePath: string }>;
+    assert.equal(contractCatalog.length, 3);
+    assert.ok(contractCatalog.every((item) => item.visibility === 'PUBLIC' && item.examplePath.startsWith('contracts/examples/') && item.guidePath === 'docs/evaluation-contract-authoring.md'));
+
+    const contractDetailResponse = await fetch(`${baseUrl}/api/v1/evaluation-contracts/platform-evaluation-result-v1`, { headers });
+    assert.equal(contractDetailResponse.status, 200);
+    const contractDetail = await contractDetailResponse.json() as { kind: string; label: string; schema: Record<string, unknown>; example: Record<string, unknown>; guide: string };
+    assert.equal(contractDetail.kind, 'OUTPUT');
+    assert.match(contractDetail.label, /输出约束/);
+    assert.equal(typeof contractDetail.schema, 'object');
+    assert.equal(typeof contractDetail.example, 'object');
+    assert.match(contractDetail.guide, /复制给 AI/);
+
+    const internalContractDetailResponse = await fetch(`${baseUrl}/api/v1/evaluation-contracts/engine-invocation-input-v1`, { headers });
+    assert.equal(internalContractDetailResponse.status, 404);
   });
 });
 
@@ -205,6 +279,51 @@ test('manual upload can be triggered and imported results are idempotent', async
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ result: reusedRun, eventId: 'event-import', subjectId: 'w00124' }),
     });
     assert.equal(rejectedRunReuse.status, 409);
+  });
+});
+
+test('two-phase upload handles are actor-bound and confirm immutable objects', async () => {
+  await withApp(async (baseUrl) => {
+    const content = Buffer.from('v07 upload object');
+    const create = await fetch(`${baseUrl}/api/v1/uploads`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00124' },
+      body: JSON.stringify({ eventId: 'event-local', fileName: 'delivery.zip', declaredSize: content.length }),
+    });
+    assert.equal(create.status, 201);
+    const session = await create.json() as { uploadId: string; uploadToken: string };
+    const denied = await fetch(`${baseUrl}/api/v1/uploads/${session.uploadId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00125', 'x-upload-token': session.uploadToken },
+      body: JSON.stringify({ bytesBase64: content.toString('base64') }),
+    });
+    assert.equal(denied.status, 400);
+
+    const put = await fetch(`${baseUrl}/api/v1/uploads/${session.uploadId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00124', 'x-upload-token': session.uploadToken },
+      body: JSON.stringify({ bytesBase64: content.toString('base64') }),
+    });
+    assert.equal(put.status, 200);
+    const metadata = await put.json() as { size: number; sha256: string };
+    assert.equal(metadata.size, content.length);
+
+    const invalid = await fetch(`${baseUrl}/api/v1/uploads/${session.uploadId}/confirm`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00124', 'x-upload-token': session.uploadToken },
+      body: JSON.stringify({ size: metadata.size, sha256: 'not-a-sha256' }),
+    });
+    assert.equal(invalid.status, 400);
+    const confirmed = await fetch(`${baseUrl}/api/v1/uploads/${session.uploadId}/confirm`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00124', 'x-upload-token': session.uploadToken },
+      body: JSON.stringify(metadata),
+    });
+    assert.equal(confirmed.status, 201);
+    const stored = await confirmed.json() as { sha256: string; size: number; uri: string };
+    assert.equal(stored.sha256, metadata.sha256);
+    assert.equal(stored.size, metadata.size);
+    assert.match(stored.uri, /^local:\/\//);
   });
 });
 
@@ -450,23 +569,61 @@ test('local grading executor runs the reference challenge without GitLab', async
     assert.ok(capabilities.weakItems.length >= 1);
     assert.ok(capabilities.weakItems[0].recommendation.length > 0);
 
+    const profileWithoutHistoryResponse = await fetch(`${baseUrl}/api/v1/profiles/w00123?includeHistory=false`);
+    assert.equal(profileWithoutHistoryResponse.status, 200);
+    const profileWithoutHistory = await profileWithoutHistoryResponse.json() as { history: unknown[]; stats: { graded: number } };
+    assert.deepEqual(profileWithoutHistory.history, []);
+    assert.equal(profileWithoutHistory.stats.graded, 1);
+
+    const profileHistoryResponse = await fetch(`${baseUrl}/api/v1/profiles/w00123/history?page=1&pageSize=1`);
+    assert.equal(profileHistoryResponse.status, 200);
+    const profileHistory = await profileHistoryResponse.json() as { items: Array<{ submissionId: string; total: number }>; pageInfo: { page: number; pageSize: number; total: number; totalPages: number } };
+    assert.equal(profileHistory.items.length, 1);
+    assert.equal(profileHistory.items[0].total, 52.5);
+    assert.deepEqual(profileHistory.pageInfo, { page: 1, pageSize: 1, total: 1, totalPages: 1, hasNext: false, hasPrevious: false });
+
     const allPeopleResponse = await fetch(`${baseUrl}/api/v1/admin/capabilities`);
     assert.equal(allPeopleResponse.status, 200);
     const allPeople = await allPeopleResponse.json() as {
-      selection: { mode: string; orgPath: string | null };
+      selection: { mode: string; orgPath: string | null; eventId: string | null };
       totalCandidates: number;
       selectedCount: number;
       gradedUsers: number;
       aggregate: { skills: Array<{ key: string; percent: number | null; evaluatedUsers: number }> };
       profiles: Array<{ subject: { id: string }; profile: { summary: { gradedSubmissions: number } } }>;
+      profilePageInfo: { page: number; pageSize: number; total: number; totalPages: number; hasNext: boolean; hasPrevious: boolean };
     };
     assert.equal(allPeople.selection.mode, 'ALL');
     assert.equal(allPeople.selection.orgPath, null);
+    assert.equal(allPeople.selection.eventId, null);
     assert.equal(allPeople.totalCandidates, 10);
     assert.equal(allPeople.selectedCount, 10);
     assert.equal(allPeople.gradedUsers, 1);
+    assert.deepEqual(allPeople.profilePageInfo, { page: 1, pageSize: 20, total: 10, totalPages: 1, hasNext: false, hasPrevious: false });
     assert.equal(allPeople.aggregate.skills.length, 16);
     assert.equal(allPeople.profiles.find((item) => item.subject.id === 'w00123')?.profile.summary.gradedSubmissions, 1);
+
+    const eventPeopleResponse = await fetch(`${baseUrl}/api/v1/admin/capabilities?eventId=event-local`);
+    assert.equal(eventPeopleResponse.status, 200);
+    const eventPeople = await eventPeopleResponse.json() as {
+      selection: { mode: string; orgPath: string | null; eventId: string | null };
+      totalCandidates: number;
+      selectedCount: number;
+      gradedUsers: number;
+      aggregate: { overallAverage: number | null };
+      profiles: Array<{ subject: { id: string }; profile: { summary: { gradedSubmissions: number; overallAverage: number | null } } }>;
+    };
+    assert.equal(eventPeople.selection.eventId, 'event-local');
+    assert.equal(eventPeople.totalCandidates, 1);
+    assert.equal(eventPeople.selectedCount, 1);
+    assert.equal(eventPeople.gradedUsers, 1);
+    assert.equal(eventPeople.aggregate.overallAverage, 52.5);
+    assert.deepEqual(eventPeople.profiles.map((item) => item.subject.id), ['w00123']);
+    assert.equal(eventPeople.profiles[0].profile.summary.gradedSubmissions, 1);
+    assert.equal(eventPeople.profiles[0].profile.summary.overallAverage, 52.5);
+
+    const missingEventResponse = await fetch(`${baseUrl}/api/v1/admin/capabilities?eventId=event-does-not-exist`);
+    assert.equal(missingEventResponse.status, 404);
 
     const selectedResponse = await fetch(`${baseUrl}/api/v1/admin/capabilities?orgPath=%2F1%2F12%2F125%2F&subjectIds=w00124,w00126&includeProfiles=false`);
     assert.equal(selectedResponse.status, 200);
@@ -476,6 +633,12 @@ test('local grading executor runs the reference challenge without GitLab', async
     assert.equal(selected.selectedCount, 2);
     assert.equal(selected.aggregate.skills.length, 16);
     assert.equal(selected.profiles.length, 0);
+
+    const pagedPeopleResponse = await fetch(`${baseUrl}/api/v1/admin/capabilities?page=2&pageSize=2&historyPageSize=1`);
+    assert.equal(pagedPeopleResponse.status, 200);
+    const pagedPeople = await pagedPeopleResponse.json() as { profiles: Array<{ subject: { id: string } }>; profilePageInfo: { page: number; pageSize: number; total: number; totalPages: number; hasNext: boolean; hasPrevious: boolean } };
+    assert.equal(pagedPeople.profiles.length, 2);
+    assert.deepEqual(pagedPeople.profilePageInfo, { page: 2, pageSize: 2, total: 10, totalPages: 5, hasNext: true, hasPrevious: true });
 
     const outsideScope = await fetch(`${baseUrl}/api/v1/admin/capabilities?orgPath=%2F1%2F12%2F125%2F&subjectIds=w00125`);
     assert.equal(outsideScope.status, 400);
@@ -602,16 +765,31 @@ test('administrator workspace endpoints manage challenge versions and announceme
     assert.equal(published.status, 201);
     const hardBoard = await fetch(`${baseUrl}/api/v1/hard-problems?status=OPEN`);
     assert.ok((await hardBoard.json() as Array<{ id: string }>).some((item) => item.id === 'admin-api-demo'));
-    const trashed = await fetch(`${baseUrl}/api/v1/challenges/admin-api-demo/trash`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
+    const trashed = await fetch(`${baseUrl}/api/v1/challenges/admin-api-demo`, {
+      method: 'DELETE',
     });
-    assert.equal(trashed.status, 201);
+    assert.equal(trashed.status, 200);
     assert.equal((await trashed.json() as { status: string }).status, 'ARCHIVED');
     const restored = await fetch(`${baseUrl}/api/v1/challenges/admin-api-demo/restore`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
     });
     assert.equal(restored.status, 201);
     assert.equal((await restored.json() as { status: string }).status, 'PUBLISHED');
+
+    const editableEvent = await fetch(`${baseUrl}/api/v1/events`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'admin-api-delete-event', challengeVersion: 'parking-fee-01@1', submissionSource: 'UPLOAD', trigger: 'IMPORT', reveal: 'IMMEDIATE' }),
+    });
+    assert.equal(editableEvent.status, 201);
+    const editedEvent = await fetch(`${baseUrl}/api/v1/events/admin-api-delete-event`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reveal: 'ON_RELEASE' }),
+    });
+    assert.equal(editedEvent.status, 200);
+    assert.equal((await editedEvent.json() as { reveal: string }).reveal, 'ON_RELEASE');
+    const deletedEvent = await fetch(`${baseUrl}/api/v1/events/admin-api-delete-event`, { method: 'DELETE' });
+    assert.equal(deletedEvent.status, 204);
+    assert.equal((await fetch(`${baseUrl}/api/v1/events/admin-api-delete-event`)).status, 404);
 
     const announcement = await fetch(`${baseUrl}/api/v1/announcements`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -691,12 +869,33 @@ test('global and department administrators are isolated by organization scope', 
 
     const users = await fetch(`${baseUrl}/api/v1/users`, { headers: { 'x-employee-id': 'w00134' } });
     assert.equal(users.status, 200);
-    const scopedUsers = await users.json() as Array<{ id: string }>;
-    assert.ok(scopedUsers.some((user) => user.id === 'w00124'));
-    assert.ok(!scopedUsers.some((user) => user.id === 'w00125'));
+    const scopedPage = await users.json() as { items: Array<{ id: string }>; pageInfo: { page: number; pageSize: number; total: number; totalPages: number; hasNext: boolean; hasPrevious: boolean } };
+    assert.ok(scopedPage.items.some((user) => user.id === 'w00124'));
+    assert.ok(!scopedPage.items.some((user) => user.id === 'w00125'));
+    assert.equal(scopedPage.pageInfo.page, 1);
+    assert.equal(scopedPage.pageInfo.pageSize, 20);
+    assert.equal(scopedPage.pageInfo.total, scopedPage.items.length);
+
+    const filtered = await fetch(`${baseUrl}/api/v1/users?page=1&pageSize=2&query=w0012&role=learner&sortBy=employeeNo&sortOrder=desc`, { headers: { 'x-employee-id': 'w00134' } });
+    assert.equal(filtered.status, 200);
+    const filteredPage = await filtered.json() as { items: Array<{ employeeNo: string; roles: string[] }>; pageInfo: { page: number; pageSize: number; totalPages: number } };
+    assert.equal(filteredPage.pageInfo.pageSize, 2);
+    assert.ok(filteredPage.items.every((user) => user.roles.includes('learner')));
+    assert.ok(filteredPage.items.every((user, index, rows) => index === 0 || rows[index - 1].employeeNo >= user.employeeNo));
+
+    const outsideUsers = await fetch(`${baseUrl}/api/v1/users?orgPath=/1/12/`, { headers: { 'x-employee-id': 'w00134' } });
+    assert.equal(outsideUsers.status, 403);
+    const invalidUsers = await fetch(`${baseUrl}/api/v1/users?pageSize=101`, { headers: { 'x-employee-id': 'w00134' } });
+    assert.equal(invalidUsers.status, 400);
+
+    const employeeUsers = await fetch(`${baseUrl}/api/v1/users`, { headers: { 'x-employee-id': 'w00124' } });
+    assert.equal(employeeUsers.status, 403);
 
     const outsideCapabilities = await fetch(`${baseUrl}/api/v1/admin/capabilities?subjectIds=w00125`, { headers: { 'x-employee-id': 'w00134' } });
     assert.equal(outsideCapabilities.status, 400);
+
+    const outsideEventCapabilities = await fetch(`${baseUrl}/api/v1/admin/capabilities?eventId=event-local`, { headers: { 'x-employee-id': 'w00134' } });
+    assert.equal(outsideEventCapabilities.status, 403);
 
     const outsideChallengeUpdate = await fetch(`${baseUrl}/api/v1/challenges/parking-fee-01`, {
       method: 'PATCH',
@@ -1003,5 +1202,35 @@ test('an evaluation environment leases work through the API for both engine sour
     }
     delete process.env.ENGINE_PACKAGE_ROOT;
     rmSync(engineRoot, { recursive: true, force: true });
+  }
+});
+
+test('API never executes a grading run in-process when the embedded worker is disabled', async () => {
+  const previousEmbedded = process.env.EMBEDDED_EVALUATION_WORKER;
+  process.env.EMBEDDED_EVALUATION_WORKER = 'false';
+  try {
+    await withApp(async (baseUrl) => {
+      const admin = { 'content-type': 'application/json', 'x-employee-id': 'w00123' };
+      const submitted = await fetch(`${baseUrl}/api/v1/events/event-local/submissions:upload`, {
+        method: 'POST', headers: admin,
+        body: JSON.stringify({ subjectId: 'w00124', snapshot: { sourceType: 'UPLOAD', workspacePath: 'challenges/parking-fee-v1/reference', submittedAt: '2026-08-01T10:00:00Z' } }),
+      });
+      assert.equal(submitted.status, 201);
+      const submission = await submitted.json() as { id: string };
+      const started = await fetch(`${baseUrl}/api/v1/submissions/${submission.id}/start-grading`, { method: 'POST', headers: admin, body: '{}' });
+      assert.equal(started.status, 201);
+      const run = await started.json() as { id: string };
+
+      const direct = await fetch(`${baseUrl}/api/v1/grading-runs/${run.id}/execute`, { method: 'POST', headers: admin, body: '{}' });
+      assert.equal(direct.status, 400);
+      const error = await direct.json() as { code?: string };
+      assert.equal(error.code, 'CODE_AGENT_WORKER_REQUIRED');
+
+      const current = await (await fetch(`${baseUrl}/api/v1/grading-runs/${run.id}`, { headers: admin })).json() as { status?: string };
+      assert.equal(current.status, 'QUEUED');
+    });
+  } finally {
+    if (previousEmbedded === undefined) delete process.env.EMBEDDED_EVALUATION_WORKER;
+    else process.env.EMBEDDED_EVALUATION_WORKER = previousEmbedded;
   }
 });

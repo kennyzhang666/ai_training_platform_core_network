@@ -12,6 +12,26 @@ const uploadSnapshot = {
   submittedAt: '2026-08-01T10:00:00Z',
 };
 
+test('database startup can opt out of local demo fixtures', () => {
+  const store = new PlatformStore({ dataFile: ':memory:', seed: false });
+  assert.deepEqual(store.exportState().users, []);
+  assert.deepEqual(store.exportState().events, []);
+});
+
+test('file user adapter applies scoped filtering, stable ordering, and pagination', () => {
+  const store = new PlatformStore(':memory:');
+  const firstPage = store.listUsersPage({ page: 1, pageSize: 3 }, 'w00123');
+  assert.deepEqual(firstPage.items.map((user) => user.employeeNo), ['w00123', 'w00124', 'w00125']);
+  assert.deepEqual(firstPage.pageInfo, { page: 1, pageSize: 3, total: 12, totalPages: 4, hasNext: true, hasPrevious: false });
+
+  const scoped = store.listUsersPage({ page: 1, pageSize: 100, orgPath: '/1/12/125/', query: '学员', roles: ['learner'], sortBy: 'name' }, 'w00134');
+  assert.ok(scoped.items.length >= 8);
+  assert.ok(scoped.items.every((user) => user.orgPath.startsWith('/1/12/125/') && user.roles.includes('learner')));
+  assert.throws(() => store.listUsersPage({ orgPath: '/1/12/' }, 'w00134'), /organization scope/);
+  assert.throws(() => store.listUsersPage({ pageSize: 101 }, 'w00123'), /pageSize/);
+  assert.throws(() => store.listUsersPage({}, 'w00124'), /administrator role/);
+});
+
 test('manual upload submission waits for administrator trigger', () => {
   const store = new PlatformStore(':memory:');
   const submission = store.createSubmission('event-local', 'w00123', uploadSnapshot);
@@ -358,7 +378,7 @@ test('administrator can create a draft version, update it, publish it and archiv
   store.publishChallengeVersion('admin-demo-01', 'admin-demo-01@1', 'admin-test');
   assert.equal(store.getChallenge('admin-demo-01').status, 'PUBLISHED');
   assert.throws(() => store.updateChallengeVersion('admin-demo-01', 'admin-demo-01@1', { title: '禁止修改' }, 'admin-test'), /immutable/);
-  store.archiveChallenge('admin-demo-01', 'admin-test');
+  store.deleteChallenge('admin-demo-01', 'admin-test');
   assert.equal(store.getChallenge('admin-demo-01').status, 'ARCHIVED');
   assert.equal(store.getChallenge('admin-demo-01').archivedFrom, 'PUBLISHED');
   const restored = store.restoreChallenge('admin-demo-01', 'admin-test');
@@ -367,6 +387,33 @@ test('administrator can create a draft version, update it, publish it and archiv
   assert.ok(store.listAudits().some((item) => item.action === 'challenge-version.publish'));
   assert.ok(store.listAudits().some((item) => item.action === 'challenge.archive'));
   assert.ok(store.listAudits().some((item) => item.action === 'challenge.restore'));
+});
+
+test('administrator can edit and delete an unused training event without losing audit or season integrity', () => {
+  const store = new PlatformStore(':memory:');
+  const event = store.createEvent({
+    id: 'event-admin-delete', challengeVersion: 'parking-fee-01@1', submissionSource: 'UPLOAD', trigger: 'IMPORT', reveal: 'IMMEDIATE',
+    mode: 'WINDOW', startsAt: '2026-08-01T09:00:00Z', endsAt: '2026-08-08T18:00:00Z',
+  }, 'admin-test');
+  store.createSeason({ id: 'season-admin-delete', name: '删除训战测试赛季', eventIds: [event.id], status: 'DRAFT' }, 'admin-test');
+  const updated = store.updateEvent(event.id, { reveal: 'ON_RELEASE', endsAt: '2026-08-09T18:00:00Z' }, 'admin-test');
+  assert.equal(updated.reveal, 'ON_RELEASE');
+  store.deleteEvent(event.id, 'admin-test');
+  assert.throws(() => store.getEvent(event.id), /not found/);
+  assert.deepEqual(store.getSeason('season-admin-delete').eventIds, []);
+  assert.ok(store.listAudits().some((item) => item.action === 'event.update' && item.target === `event:${event.id}`));
+  assert.ok(store.listAudits().some((item) => item.action === 'event.delete' && item.target === `event:${event.id}`));
+});
+
+test('event deletion preserves immutable submission evidence and released event history', () => {
+  const store = new PlatformStore(':memory:');
+  const submitted = store.createEvent({ id: 'event-delete-submitted', challengeVersion: 'parking-fee-01@1', submissionSource: 'UPLOAD', trigger: 'IMPORT', reveal: 'IMMEDIATE' }, 'admin-test');
+  store.createSubmission(submitted.id, 'w00124', { ...uploadSnapshot, snapshotHash: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' });
+  assert.throws(() => store.deleteEvent(submitted.id, 'admin-test'), /已有提交/);
+
+  const released = store.createEvent({ id: 'event-delete-released', challengeVersion: 'parking-fee-01@1', submissionSource: 'UPLOAD', trigger: 'IMPORT', reveal: 'IMMEDIATE', status: 'RELEASED' }, 'admin-test');
+  assert.throws(() => store.deleteEvent(released.id, 'admin-test'), /已公布/);
+  assert.equal(store.getEvent(released.id).status, 'RELEASED');
 });
 
 test('administrator overview and announcements expose operational state', () => {
@@ -478,7 +525,7 @@ test('equal event scores share a rank and earn the same season points', () => {
 test('re-evaluating the same delivery keeps the previous result intact', () => {
   const store = new PlatformStore(':memory:');
   const snapshotHash = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
-  const submission = store.createSubmission('event-local', 'w00124', { sourceType: 'UPLOAD', snapshotHash, artifactHash: snapshotHash, submittedAt: '2026-08-01T10:00:00Z' });
+  const submission = store.createSubmission('event-local', 'w00124', { sourceType: 'UPLOAD', snapshotHash, artifactHash: snapshotHash, artifactName: 'delivery.zip', submittedAt: '2026-08-01T10:00:00Z' });
   const graderResult = (total: number) => ({
     schemaVersion: '1.0', resultId: 'result-derived-from-snapshot', gradingRunId: 'replaced-by-platform',
     challengeVersion: 'parking-fee-01@1', rubricVersion: '1.0', graderVersion: '0.3.0',
@@ -499,6 +546,7 @@ test('re-evaluating the same delivery keeps the previous result intact', () => {
   store.markRunRunning(firstRun.id);
   const first = store.completeRun(firstRun.id, graderResult(10));
   assert.equal((first.result as { total: number }).total, 10);
+  assert.equal((first.result as { submission: { artifactName?: string } }).submission.artifactName, undefined);
 
   store.regradeSubmission(submission.id, 'w00123');
   const secondRun = store.startGrading(submission.id, 'w00123');

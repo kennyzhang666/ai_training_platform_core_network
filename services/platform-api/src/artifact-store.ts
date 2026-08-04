@@ -92,6 +92,78 @@ const ZIP_INSPECT = [
   'print(json.dumps(entries, ensure_ascii=False))',
 ].join('\n');
 
+function artifactProjectRoot(): string {
+  return resolve(process.env.PROJECT_ROOT ?? (existsSync(join(process.cwd(), 'grader', 'run_grader.py')) ? process.cwd() : join(process.cwd(), '..', '..')));
+}
+
+function artifactPython(projectRoot: string): string {
+  return process.env.PYTHON ?? (existsSync(join(projectRoot, '.venv', 'Scripts', 'python.exe')) ? join(projectRoot, '.venv', 'Scripts', 'python.exe') : 'python');
+}
+
+/** Compute the immutable tree hash for an already materialized artifact file. */
+export async function snapshotHashFile(path: string): Promise<string> {
+  if (!path.toLowerCase().endsWith('.zip')) return createHash('sha256').update(await readFile(path)).digest('hex');
+  const projectRoot = artifactProjectRoot();
+  let stdout: string;
+  try {
+    const result = await execFileAsync(artifactPython(projectRoot), ['-c', ZIP_SNAPSHOT_GUARDED, path], {
+      cwd: projectRoot,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' },
+    });
+    stdout = result.stdout.trim();
+  } catch (error) {
+    const details = error as { stderr?: string; message?: string };
+    throw new BadRequestException({
+      code: 'SNAPSHOT_HASHER_UNAVAILABLE',
+      message: `无法计算交付件内容哈希: ${(details.stderr ?? details.message ?? '').trim().slice(-500)}`,
+    });
+  }
+  if (stdout.endsWith(NOT_AN_ARCHIVE)) return createHash('sha256').update(await readFile(path)).digest('hex');
+  if (!/^[a-f0-9]{64}$/.test(stdout)) throw new BadRequestException({ code: 'SNAPSHOT_HASHER_UNAVAILABLE', message: '内容哈希计算返回了非预期结果' });
+  return stdout;
+}
+
+/** Validate ZIP path safety and expanded-size limits without extracting it. */
+export async function validateArchiveFile(path: string, maxFiles = 2000, maxExpandedBytes = 100 * 1024 * 1024): Promise<void> {
+  if (!path.toLowerCase().endsWith('.zip')) return;
+  const projectRoot = artifactProjectRoot();
+  try {
+    await execFileAsync(artifactPython(projectRoot), ['-c', ZIP_VALIDATE, path, String(Math.max(1, maxFiles)), String(Math.max(1, maxExpandedBytes))], {
+      cwd: projectRoot,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' },
+    });
+  } catch {
+    throw new BadRequestException({ code: 'ARTIFACT_ARCHIVE_INVALID', message: '交付压缩包校验未通过' });
+  }
+}
+
+/** List archive entries without extracting learner-controlled files. */
+export async function inspectArchiveFile(path: string): Promise<ArtifactEntry[]> {
+  if (!path.toLowerCase().endsWith('.zip')) throw new BadRequestException({ code: 'DELIVERY_ARCHIVE_REQUIRED', message: '该赛题要求提交 ZIP 交付件' });
+  const projectRoot = artifactProjectRoot();
+  try {
+    const result = await execFileAsync(artifactPython(projectRoot), ['-c', ZIP_INSPECT, path], {
+      cwd: projectRoot,
+      maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' },
+    });
+    const entries = JSON.parse(result.stdout) as ArtifactEntry[];
+    if (!Array.isArray(entries)) throw new Error('archive listing is not an array');
+    return entries;
+  } catch (error) {
+    const details = error as { stderr?: string; message?: string };
+    throw new BadRequestException({
+      code: 'DELIVERY_ARCHIVE_INVALID',
+      message: `无法读取交付目录: ${(details.stderr ?? details.message ?? '').trim().slice(-500)}`,
+    });
+  }
+}
+
 @Injectable()
 export class ArtifactStore {
   private readonly root = process.env.ARTIFACT_ROOT ?? join(existsSync(join(process.cwd(), 'grader')) ? process.cwd() : resolve(process.cwd(), '..', '..'), 'tmp', 'artifacts');
@@ -145,79 +217,16 @@ export class ArtifactStore {
 
   async snapshotHash(uri: string): Promise<string> {
     const path = this.localPath(uri);
-    if (!path.toLowerCase().endsWith('.zip')) return createHash('sha256').update(await readFile(path)).digest('hex');
-    const projectRoot = resolve(process.env.PROJECT_ROOT ?? (existsSync(join(process.cwd(), 'grader', 'run_grader.py')) ? process.cwd() : join(process.cwd(), '..', '..')));
-    const python = process.env.PYTHON ?? (existsSync(join(projectRoot, '.venv', 'Scripts', 'python.exe')) ? join(projectRoot, '.venv', 'Scripts', 'python.exe') : 'python');
-    let stdout: string;
-    try {
-      const result = await execFileAsync(python, ['-c', ZIP_SNAPSHOT_GUARDED, path], {
-        cwd: projectRoot,
-        maxBuffer: 1024 * 1024,
-        windowsHide: true,
-        env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' },
-      });
-      stdout = result.stdout.trim();
-    } catch (error) {
-      const details = error as { stderr?: string; message?: string };
-      throw new BadRequestException({
-        code: 'SNAPSHOT_HASHER_UNAVAILABLE',
-        message: `无法计算交付件内容哈希: ${(details.stderr ?? details.message ?? '').trim().slice(-500)}`,
-      });
-    }
-    if (stdout.endsWith(NOT_AN_ARCHIVE)) {
-      // A metadata-only or deliberately malformed local fixture still gets a
-      // stable byte hash; the executor surfaces the extraction error when
-      // grading is actually requested.
-      return createHash('sha256').update(await readFile(path)).digest('hex');
-    }
-    if (!/^[a-f0-9]{64}$/.test(stdout)) {
-      throw new BadRequestException({ code: 'SNAPSHOT_HASHER_UNAVAILABLE', message: '内容哈希计算返回了非预期结果' });
-    }
-    return stdout;
+    return snapshotHashFile(path);
   }
 
   /** Validate an uploaded ZIP before it enters an evaluation queue. */
   async validateArchive(uri: string, maxFiles = 2000, maxExpandedBytes = 100 * 1024 * 1024): Promise<void> {
-    const path = this.localPath(uri);
-    if (!path.toLowerCase().endsWith('.zip')) return;
-    const projectRoot = resolve(process.env.PROJECT_ROOT ?? (existsSync(join(process.cwd(), 'grader', 'run_grader.py')) ? process.cwd() : join(process.cwd(), '..', '..')));
-    const python = process.env.PYTHON ?? (existsSync(join(projectRoot, '.venv', 'Scripts', 'python.exe')) ? join(projectRoot, '.venv', 'Scripts', 'python.exe') : 'python');
-    try {
-      await execFileAsync(python, ['-c', ZIP_VALIDATE, path, String(Math.max(1, maxFiles)), String(Math.max(1, maxExpandedBytes))], {
-        cwd: projectRoot,
-        maxBuffer: 1024 * 1024,
-        windowsHide: true,
-        env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' },
-      });
-    } catch {
-      throw new BadRequestException({ code: 'ARTIFACT_ARCHIVE_INVALID', message: '交付压缩包校验未通过' });
-    }
+    await validateArchiveFile(this.localPath(uri), maxFiles, maxExpandedBytes);
   }
 
   /** List archive paths without extracting learner-controlled files. */
   async inspectArchive(uri: string): Promise<ArtifactEntry[]> {
-    const path = this.localPath(uri);
-    if (!path.toLowerCase().endsWith('.zip')) {
-      throw new BadRequestException({ code: 'DELIVERY_ARCHIVE_REQUIRED', message: '该赛题要求提交 ZIP 交付件' });
-    }
-    const projectRoot = resolve(process.env.PROJECT_ROOT ?? (existsSync(join(process.cwd(), 'grader', 'run_grader.py')) ? process.cwd() : join(process.cwd(), '..', '..')));
-    const python = process.env.PYTHON ?? (existsSync(join(projectRoot, '.venv', 'Scripts', 'python.exe')) ? join(projectRoot, '.venv', 'Scripts', 'python.exe') : 'python');
-    try {
-      const result = await execFileAsync(python, ['-c', ZIP_INSPECT, path], {
-        cwd: projectRoot,
-        maxBuffer: 16 * 1024 * 1024,
-        windowsHide: true,
-        env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' },
-      });
-      const entries = JSON.parse(result.stdout) as ArtifactEntry[];
-      if (!Array.isArray(entries)) throw new Error('archive listing is not an array');
-      return entries;
-    } catch (error) {
-      const details = error as { stderr?: string; message?: string };
-      throw new BadRequestException({
-        code: 'DELIVERY_ARCHIVE_INVALID',
-        message: `无法读取交付目录: ${(details.stderr ?? details.message ?? '').trim().slice(-500)}`,
-      });
-    }
+    return inspectArchiveFile(this.localPath(uri));
   }
 }

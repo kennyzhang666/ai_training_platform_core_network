@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.1",
+  "generatedAt": "2026-08-04T09:00:00.000Z",
+  "batch": {
+    "id": "batch-example-001",
+    "leaseId": "lease-example-001",
+    "challengeVersion": "example-parking@1"
+  },
+  "agent": {
+    "instructionPath": "engine/instruction.md",
+    "skillPaths": ["engine/skills/evaluation"]
+  },
+  "contracts": {
+    "input": {
+      "format": "JSON",
+      "schemaVersion": "1.1",
+      "sourcePath": "contracts/evaluation-agent-batch-v1.1.schema.json",
+      "path": "contracts/batch-input.schema.json",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "output": {
+      "format": "JSON",
+      "schemaVersion": "1.0",
+      "sourcePath": "contracts/evaluation-result.schema.json",
+      "path": "contracts/evaluation-result.schema.json",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  },
+  "engine": {
+    "id": "example-code-agent-evaluator",
+    "version": "1.0.0",
+    "source": "BUILT_IN",
+    "packageHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "root": "engine",
+    "entrypoint": "engine/judge.py",
+    "assets": {},
+    "params": {},
+    "limits": { "wallClockSeconds": 120, "outputBytes": 1048576 }
+  },
+  "challenge": {
+    "challengeVersion": "example-parking@1",
+    "rubricVersion": "1.0"
+  },
+  "submissions": [
+    {
+      "runId": "run-example-001",
+      "idempotencyKey": "0123456789abcdef0123456789abcdef",
+      "subject": { "id": "example-person-001", "name": "示例学员", "orgPath": "/example/" },
+      "submission": { "id": "submission-example-001", "snapshotHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+      "workspace": "submissions/submission-example-001/workspace",
+      "outputPath": "results/run-example-001.json",
+      "scratchDir": "submissions/submission-example-001/scratch"
+    }
+  ],
+  "resultIndexPath": "results/index.json"
+}

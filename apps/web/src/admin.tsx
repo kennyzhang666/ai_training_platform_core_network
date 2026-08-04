@@ -23,6 +23,8 @@ type EnginePackageUpload = {
 type EngineMode = 'EXTERNAL_CLI' | 'PLATFORM_LOCAL' | 'PACKAGED';
 type ExecutorParamSchema = { type: 'object'; required?: string[]; properties?: Record<string, { title?: string; description?: string; enum?: string[]; default?: string }> };
 type BuiltInExecutor = { id: string; version: string; title: string; description?: string; contentHash: string; params: ExecutorParamSchema | null };
+type EvaluationContractOption = { id: string; kind: 'INPUT' | 'OUTPUT'; visibility: 'PUBLIC'; modes: EngineMode[]; schemaVersion: string; path: string; label: string; description: string; examplePath: string; guidePath: string };
+type EvaluationContractDetail = EvaluationContractOption & { schema: unknown; example: unknown; guide: string };
 type PlatformExecutorReference = { id: string; version?: string; params?: Record<string, string> };
 type EvaluationEngineConfig = {
   id: string;
@@ -61,9 +63,11 @@ type ChallengeVersion = {
 type Challenge = { id: string; ownerOrgPath: string; origin: string; category?: ChallengeCategory; status: ChallengeStatus; archivedFrom?: Exclude<ChallengeStatus, 'ARCHIVED'>; board?: { type: 'HARD_PROBLEM'; status: 'OPEN' | 'RESOLVED'; reviewStatus?: HardProblemReviewStatus; solutionVisibility?: 'PUBLIC' | 'HIDDEN'; solutionSubmissionId?: string; reviewedAt?: string; reviewedBy?: string; reviewComment?: string; submissionEventId?: string; publisherType: 'DEPARTMENT' | 'EMPLOYEE'; publisherName: string; departmentName?: string; difficulty: 'HIGH' | 'MEDIUM' | 'LOW'; resolvedBy?: string; resolvedByName?: string; solverId?: string; solverName?: string }; versions: ChallengeVersion[] };
 type EventConfig = { id: string; challengeVersion: string; purpose?: 'TRAINING' | 'HARD_PROBLEM'; submissionSource: Source; trigger: Trigger; reveal: 'IMMEDIATE' | 'ON_RELEASE'; status: 'OPEN' | 'CLOSED' | 'RELEASED'; mode?: 'LIVE' | 'WINDOW'; startsAt?: string; endsAt?: string; participantMode?: 'OPEN' | 'ALLOWLIST'; accessPolicy?: { mode: 'OPEN' | 'RESTRICTED'; subjectIds?: string[]; departmentIds?: string[]; mentorIds?: string[] }; deliveryConfig?: { repository?: string; branchTemplate?: string; pinAt?: 'SUBMIT' | 'DEADLINE'; allowedFormats?: string[]; maxBytes?: number; maxFiles?: number } };
 type Submission = { id: string; eventId: string; subjectId: string; state: string; createdAt: string; gradingRunId?: string; resultId?: string; gradingStatus?: string; failureReason?: string; snapshot: { sourceType: Source; snapshotHash?: string; artifactHash?: string; artifactUri?: string; artifactPath?: string; artifactName?: string; workspacePath?: string; repository?: string; branch?: string; commitSha?: string; submittedAt?: string } };
+type SubmissionPage = { items: Submission[]; pageInfo: { page: number; pageSize: number; total: number; totalPages: number; hasNext: boolean; hasPrevious: boolean } };
 type EvaluationInputBatch = { schemaVersion: '1.0'; generatedAt: string; event: { id: string; challengeVersion: string; rubricVersion: string; trigger: 'IMPORT'; submissionSource: Source; reveal: 'IMMEDIATE' | 'ON_RELEASE' }; challenge: { id: string; title: string; version: number; evaluationEngine: EvaluationEngineConfig }; submissions: Array<{ submissionId: string; subject: { id: string; name: string; orgPath: string }; snapshot: Submission['snapshot']; grading: { runId: string; idempotencyKey: string; triggerType: 'IMPORT' } }> };
 type Announcement = { id: string; title: string; summary: string; tag: '平台通知' | '训战提醒' | '规则更新'; publishedAt: string; pinned?: boolean };
 type Audit = { id: string; actorId: string; action: string; target: string; createdAt: string };
+type AuditPage = { items: Audit[]; pageInfo: { page: number; pageSize: number; total: number; totalPages: number; hasNext: boolean; hasPrevious: boolean } };
 type Overview = {
   generatedAt: string;
   challenges: { total: number; published: number; drafts: number; archived: number; versions: number };
@@ -90,6 +94,7 @@ type CodeAgentRuntimeConfig = {
 };
 type OrgUnit = { id: string; parentId?: string; path: string; level: number; label: string; name: string };
 type AdminUser = { id: string; employeeNo: string; name: string; orgUnitId: string; orgPath: string; departmentHint?: string; departmentSource?: 'SSO' | 'ADMIN'; roles: string[]; roleBindings?: Array<{ role: string; scopeOrgPath: string }>; status: 'ACTIVE' | 'DISABLED' };
+type UserPage = { items: AdminUser[]; pageInfo: { page: number; pageSize: number; total: number; totalPages: number; hasNext: boolean; hasPrevious: boolean } };
 type AdminCapabilityProfile = {
   subjectId: string;
   summary: { gradedSubmissions: number; overallAverage: number | null; strongestDomain?: string | null; focusDomain?: string | null; evaluatedCapabilityDomains?: number; totalCapabilityDomains?: number };
@@ -99,9 +104,10 @@ type AdminCapabilityProfile = {
 };
 type AdminCapabilityBundle = {
   generatedAt: string;
-  selection: { orgPath: string | null; mode: 'ALL' | 'SELECTED'; subjectIds: string[] };
+  selection: { orgPath: string | null; eventId: string | null; mode: 'ALL' | 'SELECTED'; subjectIds: string[] };
   totalCandidates: number;
   selectedCount: number;
+  profilePageInfo: { page: number; pageSize: number; total: number; totalPages: number; hasNext: boolean; hasPrevious: boolean };
   gradedUsers: number;
   aggregate: {
     overallAverage: number | null;
@@ -190,6 +196,8 @@ function humanizeApiMessage(message: string): string {
     [/org unit label is required/i, '请选择组织类型'],
     [/org unit already exists/i, '该部门编号已存在'],
     [/org unit not found/i, '部门不存在或已删除'],
+    [/challenge has open events/i, '赛题仍有关联的开放训战，请先结束训战'],
+    [/训战已有提交|已公布训战不能删除|难题榜交付入口由系统管理/i, '已有提交、已公布或系统管理的训战不能删除'],
     [/published challenge.*immutable/i, '已发布赛题不可直接修改，请创建新版本'],
     [/result .*invalid|schema is invalid/i, '评测结果格式不正确'],
   ];
@@ -319,6 +327,22 @@ function modeLabel(mode?: string): string {
   return mode === 'LIVE' ? '集中训战' : mode === 'WINDOW' ? '开放窗口' : mode ?? '—';
 }
 
+function evaluationContractKindLabel(kind: EvaluationContractOption['kind']): string {
+  return kind === 'INPUT' ? '输入约束' : '输出约束';
+}
+
+function evaluationContractModeLabel(mode: EngineMode): string {
+  return ({
+    EXTERNAL_CLI: '线下结果导入',
+    PLATFORM_LOCAL: 'Code Agent + 内置执行器',
+    PACKAGED: 'Code Agent + 评测引擎包',
+  } as Record<EngineMode, string>)[mode];
+}
+
+function prettyJson(value: unknown): string {
+  return JSON.stringify(value, null, 2) ?? String(value);
+}
+
 function participantModeLabel(mode?: string): string {
   return mode === 'ALLOWLIST' ? '定向访问' : '全员可见';
 }
@@ -339,7 +363,7 @@ function auditActionLabel(action: string): string {
   return ({
     'challenge.create': '创建赛题', 'challenge.update': '更新赛题', 'challenge.publish': '发布赛题', 'challenge.archive': '移入垃圾箱', 'challenge.restore': '恢复赛题',
     'challenge.version.create': '创建赛题版本', 'challenge.version.update': '更新赛题版本', 'challenge.version.publish': '发布赛题版本',
-    'event.create': '创建训战', 'event.update': '更新训战', 'event.start-grading': '批量安排评测', 'event.execute-local': '执行线上评测', 'event.close': '结束训战', 'event.reveal': '公布评测结果',
+    'event.create': '创建训战', 'event.update': '更新训战', 'event.delete': '删除训战', 'event.start-grading': '批量安排评测', 'event.execute-local': '执行线上评测', 'event.close': '结束训战', 'event.reveal': '公布评测结果',
     'submission.start-grading': '安排评测', 'grading-result.import': '录入评测结果', 'grading.regrade': '重新评测', 'code-agent-runtime.update': '更新评测环境', 'org-unit.create': '创建部门', 'org-unit.update': '更新部门', 'org-unit.delete': '删除部门', 'user.create': '同步员工资料', 'user.update': '配置员工', 'user.roles.update': '配置员工权限', 'sso.user-provision': '登记员工资料', 'sso.user-sync': '同步员工资料', 'announcement.create': '发布公告', 'announcement.update': '更新公告', 'announcement.delete': '删除公告',
   } as Record<string, string>)[action] ?? action;
 }
@@ -441,7 +465,8 @@ function draftFromVersion(version?: ChallengeVersion): ChallengeDraft {
   const allowed = version?.deliveryPolicy.allowedSources ?? ['UPLOAD', 'GIT_REF'];
   const engine = version?.evaluationEngine;
   const mode = engine?.mode ?? 'EXTERNAL_CLI';
-  return { id: version?.challengeId ?? '', title: version?.title ?? '', category: 'TRAINING', description: version?.description ?? '', objectives: (version?.objectives ?? []).join('\n'), requirements: (version?.requirements ?? []).join('\n'), constraints: (version?.constraints ?? []).join('\n'), deliverables: (version?.deliverables ?? []).join('\n'), tags: (version?.tags ?? []).join('\n'), estimatedMinutes: String(version?.estimatedMinutes ?? 45), zone: version?.zone ?? 'YELLOW', languages: languages.join('\n'), allowUpload: allowed.includes('UPLOAD'), allowGit: allowed.includes('GIT_REF'), repository: String(git.repository ?? ''), branchTemplate: String(git.branchTemplate ?? 'drill/{subjectId}'), rubricVersion: version?.rubricVersion ?? '1.0', submissionContract: version?.submissionContract ?? 'contracts/submission-contract-v1.1.schema.json', submissionContractJson: version?.submissionContractDefinition ? JSON.stringify(version.submissionContractDefinition, null, 2) : '', evaluationEngineId: engine?.id ?? `${version?.challengeId ?? 'challenge'}-evaluator`, evaluationEngineVersion: engine?.version ?? '1.0.0', evaluationEngineMode: mode, enginePackage: engine?.package ?? null, enginePackageSummary: engine?.package ? `${engine.package.fileName ?? '引擎包'} · ${engine.package.packageHash.slice(0, 12)}…` : '', executorId: engine?.executor?.id ?? '', executorParams: Object.fromEntries(Object.entries(engine?.executor?.params ?? {}).map(([key, value]) => [key, String(value ?? '')])), ...evaluationContracts(mode), agentInstructionPath: engine?.agent?.instructionPath ?? 'instruction.md', agentSkillPaths: (engine?.agent?.skillPaths ?? ['skills/evaluation']).join('\n') };
+  const defaults = evaluationContracts(mode);
+  return { id: version?.challengeId ?? '', title: version?.title ?? '', category: 'TRAINING', description: version?.description ?? '', objectives: (version?.objectives ?? []).join('\n'), requirements: (version?.requirements ?? []).join('\n'), constraints: (version?.constraints ?? []).join('\n'), deliverables: (version?.deliverables ?? []).join('\n'), tags: (version?.tags ?? []).join('\n'), estimatedMinutes: String(version?.estimatedMinutes ?? 45), zone: version?.zone ?? 'YELLOW', languages: languages.join('\n'), allowUpload: allowed.includes('UPLOAD'), allowGit: allowed.includes('GIT_REF'), repository: String(git.repository ?? ''), branchTemplate: String(git.branchTemplate ?? 'drill/{subjectId}'), rubricVersion: version?.rubricVersion ?? '1.0', submissionContract: version?.submissionContract ?? 'contracts/submission-contract-v1.1.schema.json', submissionContractJson: version?.submissionContractDefinition ? JSON.stringify(version.submissionContractDefinition, null, 2) : '', evaluationEngineId: engine?.id ?? `${version?.challengeId ?? 'challenge'}-evaluator`, evaluationEngineVersion: engine?.version ?? '1.0.0', evaluationEngineMode: mode, enginePackage: engine?.package ?? null, enginePackageSummary: engine?.package ? `${engine.package.fileName ?? '引擎包'} · ${engine.package.packageHash.slice(0, 12)}…` : '', executorId: engine?.executor?.id ?? '', executorParams: Object.fromEntries(Object.entries(engine?.executor?.params ?? {}).map(([key, value]) => [key, String(value ?? '')])), evaluationInputContract: engine?.input?.contractPath ?? defaults.evaluationInputContract, evaluationOutputContract: engine?.output?.contractPath ?? defaults.evaluationOutputContract, agentInstructionPath: engine?.agent?.instructionPath ?? 'instruction.md', agentSkillPaths: (engine?.agent?.skillPaths ?? ['skills/evaluation']).join('\n') };
 }
 
 export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
@@ -449,13 +474,24 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [builtInExecutors, setBuiltInExecutors] = useState<BuiltInExecutor[]>([]);
+  const [evaluationContractCatalog, setEvaluationContractCatalog] = useState<EvaluationContractOption[]>([]);
+  const [evaluationContractDetail, setEvaluationContractDetail] = useState<EvaluationContractDetail | null>(null);
+  const [evaluationContractDetailBusy, setEvaluationContractDetailBusy] = useState(false);
+  const [evaluationContractCopied, setEvaluationContractCopied] = useState(false);
   const [events, setEvents] = useState<EventConfig[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
   const [adminCapabilities, setAdminCapabilities] = useState<AdminCapabilityBundle | null>(null);
   const [capabilityOrgPath, setCapabilityOrgPath] = useState('');
+  const [capabilityEventId, setCapabilityEventId] = useState('');
   const [capabilitySubjectIds, setCapabilitySubjectIds] = useState<string[]>([]);
+  const [capabilityUserPage, setCapabilityUserPage] = useState<UserPage | null>(null);
+  const [capabilityUsersBusy, setCapabilityUsersBusy] = useState(false);
+  const [capabilityProfilePage, setCapabilityProfilePage] = useState(1);
+  const [capabilityProfileMode, setCapabilityProfileMode] = useState<'ALL' | 'SELECTED'>('ALL');
+  const [capabilityIncludeProfiles, setCapabilityIncludeProfiles] = useState(true);
+  const capabilityUsersRequestRef = useRef(0);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [audits, setAudits] = useState<Audit[]>([]);
   const [queue, setQueue] = useState<QueueStats | null>(null);
@@ -480,32 +516,141 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   const publishedVersions = useMemo(() => challenges.filter((challenge) => challenge.status !== 'ARCHIVED').flatMap((challenge) => challenge.versions.filter((version) => version.status === 'PUBLISHED')), [challenges]);
   const pendingSubmissions = useMemo(() => submissions.filter((submission) => ['WAITING_TRIGGER', 'WAITING_IMPORT', 'RECEIVED', 'QUEUED', 'RUNNING', 'FAILED'].includes(submission.state) || ['PENDING', 'QUEUED', 'RUNNING', 'FAILED'].includes(submission.gradingStatus ?? '')), [submissions]);
   const gradingSubmissions = useMemo(() => submissions.filter((submission) => pendingSubmissions.includes(submission) || Boolean(submission.resultId)), [submissions, pendingSubmissions]);
-  const capabilityUsers = useMemo(() => {
-    const prefix = capabilityOrgPath ? (capabilityOrgPath.endsWith('/') ? capabilityOrgPath : `${capabilityOrgPath}/`) : '';
-    return users.filter((user) => user.status === 'ACTIVE' && user.roles.includes('learner') && (!prefix || user.orgPath === prefix || user.orgPath.startsWith(prefix)));
-  }, [users, capabilityOrgPath]);
+  const capabilityUsers = capabilityUserPage?.items ?? [];
+
+  async function loadCapabilityUsers(page = 1, orgPath = capabilityOrgPath): Promise<void> {
+    const requestId = ++capabilityUsersRequestRef.current;
+    const params = new URLSearchParams({ page: String(page), pageSize: '20', role: 'learner', status: 'ACTIVE' });
+    if (orgPath) params.set('orgPath', orgPath);
+    setCapabilityUsersBusy(true);
+    try {
+      const loaded = await request<UserPage>(`/users?${params.toString()}`);
+      if (requestId === capabilityUsersRequestRef.current) setCapabilityUserPage(loaded);
+    } catch (error) {
+      if (requestId === capabilityUsersRequestRef.current) setMessage(error instanceof Error ? error.message : '鍛樺伐鍊欓€夊垪琛ㄥ姞杞藉け璐?');
+    } finally {
+      if (requestId === capabilityUsersRequestRef.current) setCapabilityUsersBusy(false);
+    }
+  }
 
   async function refresh() {
-    const [loadedOverview, loadedChallenges, loadedEvents, loadedSubmissions, loadedUsers, loadedOrgUnits, loadedCapabilities, loadedAnnouncements, loadedAudits, loadedQueue, loadedRuntime] = await Promise.all([
-      request<Overview>('/admin/overview'), request<Challenge[]>('/challenges'), request<EventConfig[]>('/events'), request<Submission[]>('/submissions'), request<AdminUser[]>('/users'), request<OrgUnit[]>('/org-units'), request<AdminCapabilityBundle>('/admin/capabilities'), request<Announcement[]>('/announcements'), request<Audit[]>('/audits'), request<QueueStats>('/admin/grading-queue'), adminAccess.level === 'GLOBAL' ? request<CodeAgentRuntimeConfig>('/admin/code-agent-runtime') : Promise.resolve(null),
+    const capabilityUserParams = new URLSearchParams({ page: '1', pageSize: '20', role: 'learner', status: 'ACTIVE' });
+    if (capabilityOrgPath) capabilityUserParams.set('orgPath', capabilityOrgPath);
+    const [loadedOverview, loadedChallenges, loadedEvents, loadedSubmissionPage, loadedUsers, loadedCapabilityUsers, loadedOrgUnits, loadedCapabilities, loadedAnnouncements, loadedAuditPage, loadedQueue, loadedRuntime] = await Promise.all([
+      request<Overview>('/admin/overview'), request<Challenge[]>('/challenges'), request<EventConfig[]>('/events'), request<SubmissionPage>('/submissions?page=1&pageSize=100'), request<UserPage>('/users?page=1&pageSize=100'), request<UserPage>(`/users?${capabilityUserParams.toString()}`), request<OrgUnit[]>('/org-units'), request<AdminCapabilityBundle>('/admin/capabilities'), request<Announcement[]>('/announcements'), request<AuditPage>('/audits?page=1&pageSize=100'), request<QueueStats>('/admin/grading-queue'), adminAccess.level === 'GLOBAL' ? request<CodeAgentRuntimeConfig>('/admin/code-agent-runtime') : Promise.resolve(null),
     ]);
     setOverview(loadedOverview);
     setChallenges(loadedChallenges);
     // The executor catalogue ships with the platform; a failure here must not
     // break the rest of the console.
     void request<BuiltInExecutor[]>('/evaluation-executors').then(setBuiltInExecutors).catch(() => setBuiltInExecutors([]));
+    // Contract choices are Git-pinned metadata. Keep this request independent
+    // from the main refresh so an optional catalogue read cannot turn a
+    // successful administrator mutation into a visible failure.
+    void request<EvaluationContractOption[]>('/evaluation-contracts').then(setEvaluationContractCatalog).catch(() => undefined);
     setEvents(loadedEvents);
-    setSubmissions(loadedSubmissions);
-    setUsers(loadedUsers);
+    setSubmissions(loadedSubmissionPage.items);
+    // v0.7 users and capability candidates are returned through stable
+    // server-side page envelopes; the capability picker never downloads the
+    // full employee directory.
+    setUsers(loadedUsers.items);
+    setCapabilityUserPage(loadedCapabilityUsers);
+    setCapabilityEventId('');
+    setCapabilityProfilePage(1);
+    setCapabilityProfileMode('ALL');
+    setCapabilityIncludeProfiles(true);
     setOrgUnits(loadedOrgUnits);
     setAdminCapabilities(loadedCapabilities);
     setAnnouncements(loadedAnnouncements);
-    setAudits(loadedAudits);
+    setAudits(loadedAuditPage.items);
     setQueue(loadedQueue);
     setCodeAgentRuntime(loadedRuntime);
     const firstActiveChallenge = loadedChallenges.find((challenge) => challenge.status !== 'ARCHIVED') ?? loadedChallenges[0];
     if (!selectedChallengeId && firstActiveChallenge) setSelectedChallengeId(firstActiveChallenge.id);
     if (!participantEventId && loadedEvents[0]) setParticipantEventId(loadedEvents[0].id);
+  }
+
+  async function openEvaluationContractDetail(contract: EvaluationContractOption): Promise<void> {
+    setEvaluationContractDetailBusy(true);
+    setEvaluationContractCopied(false);
+    try {
+      const detail = await request<EvaluationContractDetail>(`/evaluation-contracts/${encodeURIComponent(contract.id)}`);
+      setEvaluationContractDetail(detail);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '评测约束详情加载失败');
+    } finally {
+      setEvaluationContractDetailBusy(false);
+    }
+  }
+
+  function closeEvaluationContractDetail(): void {
+    setEvaluationContractDetail(null);
+    setEvaluationContractCopied(false);
+  }
+
+  async function copyTextToClipboard(value: string): Promise<void> {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return;
+      } catch {
+        // Local HTTP pages and embedded browsers may expose the API but reject
+        // it without a secure clipboard permission; use the DOM fallback below.
+      }
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand('copy');
+    textarea.remove();
+    if (!copied) throw new Error('浏览器未允许复制到剪贴板');
+  }
+
+  function evaluationContractAiPrompt(detail: EvaluationContractDetail): string {
+    return [
+      '你是 AI 训战平台的赛题设计助手。请严格根据下面这份已发布的评测约束，为我设计可落地、可审计的赛题评测配置。',
+      `约束类型：${evaluationContractKindLabel(detail.kind)}`,
+      `约束名称：${detail.label}`,
+      `适用评测方式：${detail.modes.map(evaluationContractModeLabel).join('、')}`,
+      `Schema 路径：${detail.path}`,
+      `Schema 版本：${detail.schemaVersion}`,
+      '',
+      '约束说明：',
+      detail.description,
+      '',
+      '请依次输出：',
+      '1. 你理解的赛题目标、学员交付物和评测流程；',
+      '2. evaluationEngine 配置草稿；输入/输出约束必须使用 Git 目录中已有的路径、版本、字段和枚举值，不得创建新的 contractPath；',
+      '3. rubric/criteria 设计、每个评分点的证据来源、平台可重算的总分规则；',
+      '4. 需要管理员确认的参数，以及可能导致 Schema 校验失败的风险。',
+      '',
+      'Schema：',
+      '```json',
+      prettyJson(detail.schema),
+      '```',
+      '',
+      '已校验示例：',
+      '```json',
+      prettyJson(detail.example),
+      '```',
+      '',
+      '仓库中的编写说明：',
+      detail.guide,
+    ].join('\n');
+  }
+
+  async function copyEvaluationContractForAi(detail: EvaluationContractDetail): Promise<void> {
+    try {
+      await copyTextToClipboard(evaluationContractAiPrompt(detail));
+      setEvaluationContractCopied(true);
+      setMessage('评测约束详情已复制，可直接粘贴给 AI 出题');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '复制失败，请手动选择详情内容');
+    }
   }
 
   useEffect(() => { void refresh().catch((error: Error) => setMessage(error.message)); }, []);
@@ -516,15 +661,23 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     try { await action(); setMessage(success); await refresh(); return true; } catch (error) { setMessage(error instanceof Error ? error.message : '操作失败，请稍后重试'); return false; } finally { setBusy(false); }
   }
 
-  async function loadAdminCapabilities(mode: 'ALL' | 'SELECTED', includeProfiles = mode === 'ALL' && !capabilityOrgPath) {
+  async function loadAdminCapabilities(mode: 'ALL' | 'SELECTED', includeProfiles = mode === 'ALL' && !capabilityOrgPath, profilePage = 1) {
     if (mode === 'SELECTED' && !capabilitySubjectIds.length) {
       setMessage('请选择参训员工');
       return;
     }
     const params = new URLSearchParams();
     if (capabilityOrgPath) params.set('orgPath', capabilityOrgPath);
+    if (capabilityEventId) params.set('eventId', capabilityEventId);
     if (mode === 'SELECTED') params.set('subjectIds', capabilitySubjectIds.join(','));
     params.set('includeProfiles', String(includeProfiles));
+    params.set('page', String(profilePage));
+    params.set('pageSize', '20');
+    params.set('historyPage', '1');
+    params.set('historyPageSize', '20');
+    setCapabilityProfilePage(profilePage);
+    setCapabilityProfileMode(mode);
+    setCapabilityIncludeProfiles(includeProfiles);
     setBusy(true);
       setMessage('正在加载群体能力画像…');
     try {
@@ -532,7 +685,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
       const loaded = await request<AdminCapabilityBundle>(`/admin/capabilities${query ? `?${query}` : ''}`);
       setAdminCapabilities(loaded);
       setSection('capabilities');
-      setMessage(mode === 'ALL' ? '已加载所选范围的平均画像' : `已加载 ${loaded.selectedCount} 人的平均画像`);
+      setMessage(mode === 'ALL' ? (capabilityEventId ? '已加载所选训战的 AI 评测画像' : '已加载所选范围的平均画像') : `已加载 ${loaded.selectedCount} 人的平均画像`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '群体能力画像加载失败');
     } finally {
@@ -545,7 +698,20 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   }
 
   function selectAllCapabilityUsers() {
-    setCapabilitySubjectIds(capabilityUsers.map((user) => user.id));
+    setCapabilitySubjectIds((current) => [...new Set([...current, ...capabilityUsers.map((user) => user.id)])]);
+  }
+
+  function handleCapabilityOrgPathChange(path: string) {
+    setCapabilityOrgPath(path);
+    setCapabilitySubjectIds([]);
+    setCapabilityProfilePage(1);
+    void loadCapabilityUsers(1, path);
+  }
+
+  function handleCapabilityEventChange(eventId: string) {
+    setCapabilityEventId(eventId);
+    setCapabilitySubjectIds([]);
+    setCapabilityProfilePage(1);
   }
 
   function submissionContractFromDraft(form: ChallengeDraft): Record<string, unknown> | undefined {
@@ -560,7 +726,9 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     const upload = form.allowUpload ? { formats: ['zip'], maxBytes: 50 * 1024 * 1024, maxFiles: 2000 } : undefined;
     const git = form.allowGit && form.repository ? { provider: 'GITLAB', repository: form.repository, branchTemplate: form.branchTemplate || 'drill/{subjectId}', pinAt: 'SUBMIT', credentialRef: 'gitlab-grader-readonly' } : undefined;
     const submissionContractDefinition = submissionContractFromDraft(form);
-    const contracts = evaluationContracts(form.evaluationEngineMode);
+    const inputContract = evaluationContractCatalog.find((item) => item.kind === 'INPUT' && item.modes.includes(form.evaluationEngineMode) && item.path === form.evaluationInputContract);
+    const outputContract = evaluationContractCatalog.find((item) => item.kind === 'OUTPUT' && item.modes.includes(form.evaluationEngineMode) && item.path === form.evaluationOutputContract);
+    if (!inputContract || !outputContract) throw new Error('请选择当前评测方式对应的 Git 评测约束');
     return {
     id: `${challengeId}@${versionNumber}`, challengeId, version: versionNumber, title: form.title.trim(), description: sanitizeRichText(form.description).trim(), objectives: lines(form.objectives), requirements: lines(form.requirements), constraints: lines(form.constraints), deliverables: lines(form.deliverables), tags: lines(form.tags), estimatedMinutes: Number(form.estimatedMinutes) || 45, zone: form.zone, languagePolicy: { mode: 'fixed', languages: lines(form.languages) }, deliveryPolicy: { allowedSources, ...(upload ? { upload } : {}), ...(git ? { git } : {}) }, rubricVersion: form.rubricVersion || '1.0', submissionContract: form.submissionContract.trim(), ...(submissionContractDefinition ? { submissionContractDefinition } : {}), status: 'DRAFT',
       evaluationEngine: {
@@ -577,8 +745,8 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
           },
         } : {}),
         ...(form.evaluationEngineMode !== 'EXTERNAL_CLI' ? { agent: { instructionPath: form.agentInstructionPath.trim(), skillPaths: lines(form.agentSkillPaths) } } : {}),
-        input: { format: 'JSON', schemaVersion: form.evaluationEngineMode === 'EXTERNAL_CLI' ? '1.0' : '1.1', contractPath: contracts.evaluationInputContract },
-        output: { format: 'JSON', schemaVersion: '1.0', contractPath: contracts.evaluationOutputContract },
+        input: { format: 'JSON', schemaVersion: inputContract.schemaVersion, contractPath: inputContract.path },
+        output: { format: 'JSON', schemaVersion: outputContract.schemaVersion, contractPath: outputContract.path },
       },
     };
   }
@@ -589,12 +757,14 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     if (!richTextPreview(challengeForm.description)) { setMessage('请填写赛题详情'); return; }
     if (!challengeForm.allowUpload && !challengeForm.allowGit) { setMessage('至少选择一种提交方式'); return; }
     if (!lines(challengeForm.languages).length) { setMessage('至少填写一种支持的编程语言'); return; }
+    if (!evaluationContractCatalog.length) { setMessage('评测约束目录尚未加载，请稍后重试'); return; }
     if (challengeForm.allowGit && !/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+$/.test(challengeForm.repository.trim())) { setMessage('Git 仓库路径格式不正确'); return; }
     try { submissionContractFromDraft(challengeForm); } catch (error) { setMessage(error instanceof Error ? error.message : '交付目录规范格式不正确'); return; }
     if (!localEngineComplete(challengeForm)) { setMessage(challengeForm.evaluationEngineMode === 'PACKAGED' ? '请先上传评测引擎包' : '请选择内置执行器并填写其必填参数'); return; }
-    const version = buildVersion(challengeForm, challengeForm.id.trim(), 1);
-    await runAction(() => request('/challenges', { method: 'POST', body: JSON.stringify({ id: challengeForm.id.trim(), ownerOrgPath: '/', origin: challengeForm.category === 'HARD_PROBLEM' ? 'BOUNTY' : 'OFFICIAL', category: challengeForm.category, status: 'DRAFT', versions: [version], actorId: 'admin-local' }) }), '赛题草稿已创建');
-    setChallengeForm(null);
+    let version: ChallengeVersion;
+    try { version = buildVersion(challengeForm, challengeForm.id.trim(), 1); } catch (error) { setMessage(error instanceof Error ? error.message : '评测约束配置不完整'); return; }
+    const saved = await runAction(() => request('/challenges', { method: 'POST', body: JSON.stringify({ id: challengeForm.id.trim(), ownerOrgPath: '/', origin: challengeForm.category === 'HARD_PROBLEM' ? 'BOUNTY' : 'OFFICIAL', category: challengeForm.category, status: 'DRAFT', versions: [version], actorId: 'admin-local' }) }), '赛题草稿已创建');
+    if (saved) setChallengeForm(null);
   }
 
   function localEngineComplete(form: ChallengeDraft): boolean {
@@ -638,22 +808,50 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     if (!versionForm || !selectedChallenge) return;
     if (!richTextPreview(versionForm.description)) { setMessage('请填写赛题详情'); return; }
     if (!lines(versionForm.languages).length) { setMessage('至少填写一种支持的编程语言'); return; }
+    if (!evaluationContractCatalog.length) { setMessage('评测约束目录尚未加载，请稍后重试'); return; }
     if (versionForm.allowGit && !/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+$/.test(versionForm.repository.trim())) { setMessage('Git 仓库路径格式不正确'); return; }
     try { submissionContractFromDraft(versionForm); } catch (error) { setMessage(error instanceof Error ? error.message : '交付目录规范格式不正确'); return; }
     if (!localEngineComplete(versionForm)) { setMessage(versionForm.evaluationEngineMode === 'PACKAGED' ? '请先上传评测引擎包' : '请选择内置执行器并填写其必填参数'); return; }
+    let saved = false;
     if (versionEditId) {
       const current = selectedChallenge.versions.find((item) => item.id === versionEditId);
       if (!current) return;
-      const version = buildVersion(versionForm, selectedChallenge.id, current.version);
+      let version: ChallengeVersion;
+      try { version = buildVersion(versionForm, selectedChallenge.id, current.version); } catch (error) { setMessage(error instanceof Error ? error.message : '评测约束配置不完整'); return; }
       const { id: _id, challengeId: _challengeId, version: _version, status: _status, ...patch } = version;
-      await runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionEditId}`, { method: 'PATCH', body: JSON.stringify({ ...patch, actorId: 'admin-local' }) }), '赛题草稿已保存');
+      saved = await runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionEditId}`, { method: 'PATCH', body: JSON.stringify({ ...patch, actorId: 'admin-local' }) }), '赛题草稿已保存');
     } else {
       const nextNumber = Math.max(...selectedChallenge.versions.map((version) => version.version), 0) + 1;
-      const version = buildVersion(versionForm, selectedChallenge.id, nextNumber);
-      await runAction(() => request(`/challenges/${selectedChallenge.id}/versions`, { method: 'POST', body: JSON.stringify({ ...version, actorId: 'admin-local' }) }), `v${nextNumber} 草稿已创建`);
+      let version: ChallengeVersion;
+      try { version = buildVersion(versionForm, selectedChallenge.id, nextNumber); } catch (error) { setMessage(error instanceof Error ? error.message : '评测约束配置不完整'); return; }
+      saved = await runAction(() => request(`/challenges/${selectedChallenge.id}/versions`, { method: 'POST', body: JSON.stringify({ ...version, actorId: 'admin-local' }) }), `v${nextNumber} 草稿已创建`);
     }
-    setVersionForm(null);
-    setVersionEditId('');
+    if (saved) {
+      setVersionForm(null);
+      setVersionEditId('');
+    }
+  }
+
+  /** Open the safe challenge editing flow. Published versions stay immutable;
+   * editing one creates the next draft version, while an existing draft is
+   * edited in place. */
+  function editChallenge(challenge: Challenge) {
+    if (challenge.status === 'ARCHIVED') {
+      setMessage('请先恢复赛题，再进行编辑');
+      return;
+    }
+    const latest = challenge.versions.slice().sort((left, right) => right.version - left.version)[0];
+    if (!latest) {
+      setMessage('该赛题暂无可编辑版本');
+      return;
+    }
+    const draft = challenge.versions.slice().sort((left, right) => right.version - left.version).find((version) => version.status === 'DRAFT');
+    setChallengeView('active');
+    setSelectedChallengeId(challenge.id);
+    setChallengeForm(null);
+    setVersionEditId(draft?.id ?? '');
+    setVersionForm(draftFromVersion(draft ?? latest));
+    setMessage(draft ? '已打开赛题草稿编辑器' : '已基于最新发布版本创建编辑草稿，保存后将生成新版本');
   }
 
   async function saveEvent() {
@@ -680,6 +878,11 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     }
     const body = JSON.stringify({ actorId: 'admin-local' });
     await runAction(() => request(`/events/${event.id}/${action}`, { method: 'POST', body }), action === 'close' ? '场次已结束' : '评测结果已公布');
+  }
+
+  async function deleteEvent(event: EventConfig) {
+    if (!window.confirm(`确认删除训战“${event.id}”吗？已有提交的训战不能删除。`)) return;
+    await runAction(() => request(`/events/${event.id}`, { method: 'DELETE' }), '训战已删除');
   }
 
   function toggleGradingSelection(submissionId: string) {
@@ -816,14 +1019,15 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
         {message && <div className="admin-message">{message}</div>}
         {section === 'overview' && <OverviewSection overview={overview} challenges={challenges} events={events} submissions={submissions} onSection={setSection} />}
         {section === 'organization' && <OrganizationSection users={users} orgUnits={orgUnits} adminAccess={adminAccess} busy={busy} onSaved={refresh} onMessage={setMessage} />}
-        {section === 'challenges' && <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">赛题库</p><h2>赛题库</h2></div><button className="primary compact" onClick={() => { setChallengeView('active'); setChallengeForm(blankChallenge()); }}>＋ 新建赛题</button></div>{challengeForm && <ChallengeEditor form={challengeForm} setForm={setChallengeForm} onCancel={() => setChallengeForm(null)} onSave={() => void saveChallenge()} onUploadPackage={(file) => uploadEnginePackage(file, challengeForm, setChallengeForm)} executors={builtInExecutors} busy={busy} title="创建赛题草稿" />}{versionForm && selectedChallenge && <ChallengeEditor form={versionForm} setForm={setVersionForm} onCancel={() => { setVersionForm(null); setVersionEditId(''); }} onSave={() => void saveVersion()} onUploadPackage={(file) => uploadEnginePackage(file, versionForm, setVersionForm)} executors={builtInExecutors} busy={busy} title={versionEditId ? `编辑 ${selectedChallenge.id} 草稿` : `创建 ${selectedChallenge.id} 新版本`} />}{!challengeForm && !versionForm && <ChallengeList challenges={visibleChallenges} view={challengeView} activeCount={challenges.filter((challenge) => challenge.status !== 'ARCHIVED').length} trashCount={challenges.filter((challenge) => challenge.status === 'ARCHIVED').length} onViewChange={setChallengeView} selectedId={selectedChallengeId} onSelect={setSelectedChallengeId} onPublish={(id) => void runAction(() => request(`/challenges/${id}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已发布')} onTrash={(id) => void runAction(() => request(`/challenges/${id}/trash`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已移入垃圾箱')} onRestore={(id) => void runAction(() => request(`/challenges/${id}/restore`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已恢复')} />}{selectedChallenge && !challengeForm && !versionForm && <ChallengeDetail challenge={selectedChallenge} events={events} onNewVersion={() => { setVersionEditId(''); setVersionForm(draftFromVersion(selectedChallenge.versions[selectedChallenge.versions.length - 1])); }} onEditVersion={(version) => { setVersionEditId(version.id); setVersionForm(draftFromVersion(version)); }} onCategoryChange={(category) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ category, actorId: 'admin-local' }) }), '赛题类型已更新')} onSolutionVisibilityChange={(solutionVisibility) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ solutionVisibility, actorId: 'admin-local' }) }), '交付件展示策略已更新')} onPublish={(versionId) => void runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionId}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题版本已发布')} />}</section>}
-        {section === 'events' && <EventsSection events={events} challenges={challenges} overview={overview} users={users} orgUnits={orgUnits} eventForm={eventForm} setEventForm={setEventForm} eventEditId={eventEditId} onNew={() => { setEventEditId(''); setEventForm(blankEvent(publishedVersions[0]?.id ?? '', challenges)); }} onEdit={(event) => { setEventEditId(event.id); setEventForm(draftFromEvent(event)); }} onCreate={() => void saveEvent()} onAction={(event, action) => void eventAction(event, action)} busy={busy} />}
+        {section === 'challenges' && <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">赛题库</p><h2>赛题库</h2></div><button className="primary compact" onClick={() => { setChallengeView('active'); setChallengeForm(blankChallenge()); }}>＋ 新建赛题</button></div>{challengeForm && <ChallengeEditor form={challengeForm} setForm={setChallengeForm} onCancel={() => setChallengeForm(null)} onSave={() => void saveChallenge()} onUploadPackage={(file) => uploadEnginePackage(file, challengeForm, setChallengeForm)} executors={builtInExecutors} contracts={evaluationContractCatalog} onViewContractDetail={(contract) => void openEvaluationContractDetail(contract)} busy={busy} title="创建赛题草稿" />}{versionForm && selectedChallenge && <ChallengeEditor form={versionForm} setForm={setVersionForm} onCancel={() => { setVersionForm(null); setVersionEditId(''); }} onSave={() => void saveVersion()} onUploadPackage={(file) => uploadEnginePackage(file, versionForm, setVersionForm)} executors={builtInExecutors} contracts={evaluationContractCatalog} onViewContractDetail={(contract) => void openEvaluationContractDetail(contract)} busy={busy} title={versionEditId ? `编辑 ${selectedChallenge.id} 草稿` : `创建 ${selectedChallenge.id} 新版本`} />}{!challengeForm && !versionForm && <ChallengeList challenges={visibleChallenges} view={challengeView} activeCount={challenges.filter((challenge) => challenge.status !== 'ARCHIVED').length} trashCount={challenges.filter((challenge) => challenge.status === 'ARCHIVED').length} onViewChange={setChallengeView} selectedId={selectedChallengeId} onSelect={setSelectedChallengeId} onEdit={editChallenge} onPublish={(id) => void runAction(() => request(`/challenges/${id}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已发布')} onTrash={(id) => { if (!window.confirm(`确认删除赛题“${id}”吗？删除后可在回收站恢复。`)) return; void runAction(() => request(`/challenges/${id}`, { method: 'DELETE' }), '赛题已移入回收站'); }} onRestore={(id) => void runAction(() => request(`/challenges/${id}/restore`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已恢复')} />}{selectedChallenge && !challengeForm && !versionForm && <ChallengeDetail challenge={selectedChallenge} events={events} onNewVersion={() => { setVersionEditId(''); setVersionForm(draftFromVersion(selectedChallenge.versions[selectedChallenge.versions.length - 1])); }} onEditVersion={(version) => { setVersionEditId(version.id); setVersionForm(draftFromVersion(version)); }} onCategoryChange={(category) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ category, actorId: 'admin-local' }) }), '赛题类型已更新')} onSolutionVisibilityChange={(solutionVisibility) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ solutionVisibility, actorId: 'admin-local' }) }), '交付件展示策略已更新')} onPublish={(versionId) => void runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionId}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题版本已发布')} />}</section>}
+        {section === 'events' && <EventsSection events={events} challenges={challenges} overview={overview} users={users} orgUnits={orgUnits} eventForm={eventForm} setEventForm={setEventForm} eventEditId={eventEditId} onNew={() => { setEventEditId(''); setEventForm(blankEvent(publishedVersions[0]?.id ?? '', challenges)); }} onEdit={(event) => { setEventEditId(event.id); setEventForm(draftFromEvent(event)); }} onDelete={(event) => void deleteEvent(event)} onCreate={() => void saveEvent()} onAction={(event, action) => void eventAction(event, action)} busy={busy} />}
         {section === 'participants' && <ParticipantSection events={events} eventId={participantEventId} setEventId={setParticipantEventId} text={participantText} setText={setParticipantText} onLoad={(id) => void loadParticipants(id)} onSave={() => void saveParticipants()} busy={busy} />}
-        {section === 'capabilities' && <CapabilityAdminSection data={adminCapabilities} users={capabilityUsers} orgUnits={orgUnits} orgPath={capabilityOrgPath} selectedIds={capabilitySubjectIds} onOrgPathChange={(path) => { setCapabilityOrgPath(path); setCapabilitySubjectIds([]); }} onToggle={toggleCapabilitySubject} onSelectAll={selectAllCapabilityUsers} onClear={() => setCapabilitySubjectIds([])} onViewAll={() => void loadAdminCapabilities('ALL')} onViewSelected={() => void loadAdminCapabilities('SELECTED')} busy={busy} />}
+        {section === 'capabilities' && <CapabilityAdminSection data={adminCapabilities} events={events} challenges={challenges} users={capabilityUsers} userPageInfo={capabilityUserPage?.pageInfo ?? null} usersBusy={capabilityUsersBusy} orgUnits={orgUnits} orgPath={capabilityOrgPath} eventId={capabilityEventId} selectedIds={capabilitySubjectIds} onOrgPathChange={handleCapabilityOrgPathChange} onEventIdChange={handleCapabilityEventChange} onUsersPageChange={(page) => void loadCapabilityUsers(page)} onToggle={toggleCapabilitySubject} onSelectAll={selectAllCapabilityUsers} onClear={() => setCapabilitySubjectIds([])} onViewAll={() => void loadAdminCapabilities('ALL')} onViewSelected={() => void loadAdminCapabilities('SELECTED')} profilePage={capabilityProfilePage} onProfilePageChange={(page) => void loadAdminCapabilities(capabilityProfileMode, capabilityIncludeProfiles, page)} busy={busy} />}
         {section === 'grading' && <GradingSection submissions={gradingSubmissions} events={events} challenges={challenges} users={users} queue={queue} selectedIds={selectedGradingIds} importText={importText} setImportText={setImportText} onToggle={toggleGradingSelection} onSelectEvent={selectEventSubmissions} onClearEvent={clearEventSubmissions} onPrepareInput={(eventId) => void prepareEvaluationInput(eventId)} onStartSelected={(eventId) => void startSelectedGrading(eventId)} onSubmission={(submission) => void submissionAction(submission)} onRegrade={(submission) => void regradeSubmission(submission)} onDownload={(submission) => void downloadSubmissionArtifact(submission).catch((error) => setMessage(error instanceof Error ? error.message : '交付件下载失败'))} onImport={importResult} busy={busy} />}
         {section === 'evaluation-runtime' && codeAgentRuntime && <CodeAgentRuntimeSection config={codeAgentRuntime} busy={busy} onSave={(input) => void saveCodeAgentRuntime(input)} />}
         {section === 'announcements' && <AnnouncementSection announcements={announcements} form={announcementForm} setForm={setAnnouncementForm} onCreate={() => void createAnnouncement()} onDelete={(id) => void runAction(() => request(`/announcements/${id}`, { method: 'DELETE', body: JSON.stringify({ actorId: 'admin-local' }) }), '公告已删除')} busy={busy} />}
         {section === 'audit' && <AuditSection audits={audits} />}
+        {evaluationContractDetail && <EvaluationContractDetailDialog detail={evaluationContractDetail} busy={evaluationContractDetailBusy} copied={evaluationContractCopied} onClose={closeEvaluationContractDetail} onCopy={() => void copyEvaluationContractForAi(evaluationContractDetail)} />}
       </section>
     </div>
   </main>;
@@ -850,12 +1054,13 @@ type ChallengeListProps = {
   onViewChange: (view: 'active' | 'trash') => void;
   selectedId: string;
   onSelect: (id: string) => void;
+  onEdit: (challenge: Challenge) => void;
   onPublish: (id: string) => void;
   onTrash: (id: string) => void;
   onRestore: (id: string) => void;
 };
 
-function ChallengeList({ challenges, view, activeCount, trashCount, onViewChange, selectedId, onSelect, onPublish, onTrash, onRestore }: ChallengeListProps) {
+function ChallengeList({ challenges, view, activeCount, trashCount, onViewChange, selectedId, onSelect, onEdit, onPublish, onTrash, onRestore }: ChallengeListProps) {
   const emptyText = view === 'trash' ? '垃圾箱为空' : '暂无赛题';
   return <div className="panel admin-table-card">
     <div className="admin-table-toolbar">
@@ -876,7 +1081,7 @@ function ChallengeList({ challenges, view, activeCount, trashCount, onViewChange
           <td>{sources}</td>
           <td><small>{challenge.status === 'ARCHIVED' ? '已移入垃圾箱' : latest?.status === 'PUBLISHED' ? '已对外开放' : '等待发布'}</small></td>
           <td><div className="row-actions">
-            {view === 'trash' ? <button className="small restore" onClick={(event) => { event.stopPropagation(); onRestore(challenge.id); }}>恢复赛题</button> : <>{challenge.status !== 'PUBLISHED' && <button className="small" onClick={(event) => { event.stopPropagation(); onPublish(challenge.id); }}>发布</button>}<button className="small danger" onClick={(event) => { event.stopPropagation(); onTrash(challenge.id); }}>移入垃圾箱</button></>}
+            {view === 'trash' ? <button className="small restore" onClick={(event) => { event.stopPropagation(); onRestore(challenge.id); }}>恢复赛题</button> : <>{<button className="small" onClick={(event) => { event.stopPropagation(); onEdit(challenge); }}>编辑</button>}{challenge.status !== 'PUBLISHED' && <button className="small" onClick={(event) => { event.stopPropagation(); onPublish(challenge.id); }}>发布</button>}<button className="small danger" onClick={(event) => { event.stopPropagation(); onTrash(challenge.id); }}>删除赛题</button></>}
             <button className="small" onClick={(event) => { event.stopPropagation(); onSelect(challenge.id); }}>{view === 'trash' ? '查看题面' : '查看详情'}</button>
           </div></td>
         </tr>;
@@ -895,7 +1100,7 @@ function ChallengeDetail({ challenge, events, onNewVersion, onEditVersion, onCat
   useEffect(() => {
     const eventId = challenge.board?.type === 'HARD_PROBLEM' ? challenge.board.submissionEventId : undefined;
     if (!eventId) { setHardSubmissions([]); return; }
-    void request<Submission[]>(`/submissions?eventId=${encodeURIComponent(eventId)}`).then(setHardSubmissions).catch(() => setHardSubmissions([]));
+    void request<SubmissionPage>(`/submissions?eventId=${encodeURIComponent(eventId)}&page=1&pageSize=100`).then((page) => setHardSubmissions(page.items)).catch(() => setHardSubmissions([]));
   }, [challenge.board?.submissionEventId, challenge.board?.type]);
   async function resolveLatestHardSubmission() {
     if (challenge.board?.type !== 'HARD_PROBLEM' || challenge.board.status !== 'OPEN' || !hardSubmissions[0]) return;
@@ -932,44 +1137,58 @@ function ChallengeDetail({ challenge, events, onNewVersion, onEditVersion, onCat
   </section>;
 }
 
-function CapabilityAdminSection({ data, users, orgUnits, orgPath, selectedIds, onOrgPathChange, onToggle, onSelectAll, onClear, onViewAll, onViewSelected, busy }: {
+function CapabilityAdminSection({ data, events, challenges, users, userPageInfo, usersBusy, orgUnits, orgPath, eventId, selectedIds, onOrgPathChange, onEventIdChange, onUsersPageChange, onToggle, onSelectAll, onClear, onViewAll, onViewSelected, profilePage, onProfilePageChange, busy }: {
   data: AdminCapabilityBundle | null;
+  events: EventConfig[];
+  challenges: Challenge[];
   users: AdminUser[];
+  userPageInfo: UserPage['pageInfo'] | null;
+  usersBusy: boolean;
   orgUnits: OrgUnit[];
   orgPath: string;
+  eventId: string;
   selectedIds: string[];
   onOrgPathChange: (path: string) => void;
+  onEventIdChange: (eventId: string) => void;
+  onUsersPageChange: (page: number) => void;
   onToggle: (subjectId: string) => void;
   onSelectAll: () => void;
   onClear: () => void;
   onViewAll: () => void;
   onViewSelected: () => void;
+  profilePage: number;
+  onProfilePageChange: (page: number) => void;
   busy: boolean;
 }) {
   const selectedSet = new Set(selectedIds);
   const orgName = (path: string | null) => path ? (orgUnits.find((unit) => unit.path === path)?.name ?? path) : '全组织';
+  const eventName = (id: string | null) => {
+    if (!id) return '';
+    const event = events.find((item) => item.id === id);
+    return event ? `${versionTitle(event.challengeVersion, challenges)} · ${event.id}` : id;
+  };
+  const loadedEventName = eventName(data?.selection.eventId ?? null);
+  const selectedEventName = eventName(eventId);
   const domainStatus = (percent: number | null) => percent === null ? '待评估' : percent >= 85 ? '优势' : percent >= 60 ? '稳定' : '待提升';
-  const profilePageSize = 10;
-  const [profilePage, setProfilePage] = useState(1);
-  const profileCount = data?.profiles.length ?? 0;
-  const profileTotalPages = Math.max(1, Math.ceil(profileCount / profilePageSize));
+  const profilePageSize = data?.profilePageInfo.pageSize ?? 20;
+  const profileCount = data?.profilePageInfo.total ?? 0;
+  const profileTotalPages = Math.max(1, data?.profilePageInfo.totalPages ?? 1);
   const profilePageStart = Math.max(1, Math.min(profilePage - 2, profileTotalPages - 4));
   const profilePageNumbers = Array.from({ length: Math.min(5, profileTotalPages) }, (_, index) => profilePageStart + index);
-  const visibleProfiles = data?.profiles.slice((profilePage - 1) * profilePageSize, profilePage * profilePageSize) ?? [];
+  const visibleProfiles = data?.profiles ?? [];
   const profilePlaceholderCount = profileTotalPages > 1 ? Math.max(0, profilePageSize - visibleProfiles.length) : 0;
-  useEffect(() => { setProfilePage(1); }, [data?.generatedAt]);
-  useEffect(() => { setProfilePage((current) => Math.min(current, profileTotalPages)); }, [profileTotalPages]);
   return <section className="admin-section capability-admin-section">
     <div className="admin-section-heading"><div><p className="kicker">人员分析</p><h2>AI 能力画像</h2></div><span className="last-sync">{data ? `更新于 ${formatDate(data.generatedAt)}` : '加载中…'}</span></div>
     <section className="panel capability-admin-filter">
-      <div className="capability-admin-filter-head"><div><strong>选择画像范围</strong><small>部门范围与参训人员</small></div><span className="status-pill">当前已选 {selectedIds.length} 人</span></div>
-      <div className="capability-admin-filter-controls"><label>部门<select value={orgPath} onChange={(event) => onOrgPathChange(event.target.value)}><option value="">全组织（所有部门）</option>{orgUnits.filter((unit) => unit.path !== '/').sort((a, b) => a.path.localeCompare(b.path)).map((unit) => <option key={unit.id} value={unit.path}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><div className="capability-admin-actions"><button className="quiet" onClick={onSelectAll} disabled={busy || !users.length}>选择当前范围全部</button><button className="quiet" onClick={onClear} disabled={busy || !selectedIds.length}>清除选择</button><button className="primary compact" onClick={onViewAll} disabled={busy}>{busy ? '加载中…' : `查看${orgName(orgPath)}整体`}</button><button className="primary compact" onClick={onViewSelected} disabled={busy || !selectedIds.length}>查看所选 {selectedIds.length} 人</button></div></div>
-      <div className="capability-user-picker">{users.map((user) => <label className="capability-user-check" key={user.id}><input type="checkbox" checked={selectedSet.has(user.id)} onChange={() => onToggle(user.id)} /><span><strong>{displayPersonName(user.name)}</strong><small>{user.employeeNo} · {orgName(user.orgPath)}</small></span></label>)}{!users.length && <div className="empty compact-empty">暂无在职员工</div>}</div>
+      <div className="capability-admin-filter-head"><div><strong>选择画像范围</strong><small>训战 / 部门范围与参训人员</small></div><span className="status-pill">当前已选 {selectedIds.length} 人</span></div>
+       <div className="capability-admin-filter-controls"><label>训战<select value={eventId} onChange={(event) => onEventIdChange(event.target.value)}><option value="">全部训战</option>{events.slice().sort((a, b) => a.id.localeCompare(b.id)).map((event) => <option key={event.id} value={event.id}>{versionTitle(event.challengeVersion, challenges)} · {event.id}</option>)}</select><small className="field-hint">选择后只统计该训战已有提交的员工及其 AI 评测；也可继续叠加部门或人员筛选。</small></label><label>部门<select value={orgPath} onChange={(event) => onOrgPathChange(event.target.value)}><option value="">全组织（所有部门）</option>{orgUnits.filter((unit) => unit.path !== '/').sort((a, b) => a.path.localeCompare(b.path)).map((unit) => <option key={unit.id} value={unit.path}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><div className="capability-admin-actions"><button className="quiet" onClick={onSelectAll} disabled={busy || usersBusy || !users.length}>选择当前页全部</button><button className="quiet" onClick={onClear} disabled={busy || !selectedIds.length}>清除选择</button><button className="primary compact" onClick={onViewAll} disabled={busy}>{busy ? '加载中…' : `查看${selectedEventName ? `${selectedEventName} ` : ''}${orgName(orgPath)}整体`}</button><button className="primary compact" onClick={onViewSelected} disabled={busy || !selectedIds.length}>查看所选 {selectedIds.length} 人</button></div></div>
+       <div className="capability-user-picker">{users.map((user) => <label className="capability-user-check" key={user.id}><input type="checkbox" checked={selectedSet.has(user.id)} onChange={() => onToggle(user.id)} /><span><strong>{displayPersonName(user.name)}</strong><small>{user.employeeNo} · {orgName(user.orgPath)}</small></span></label>)}{!users.length && <div className="empty compact-empty">{usersBusy ? '正在加载员工…' : '暂无在职员工'}</div>}</div>
+       {userPageInfo && <div className="table-pagination capability-user-pagination"><span>候选员工第 {userPageInfo.page} / {Math.max(1, userPageInfo.totalPages)} 页 · 共 {userPageInfo.total} 人</span><div><button className="small" disabled={usersBusy || !userPageInfo.hasPrevious} onClick={() => onUsersPageChange(userPageInfo.page - 1)}>上一页</button><button className="small" disabled={usersBusy || !userPageInfo.hasNext} onClick={() => onUsersPageChange(userPageInfo.page + 1)}>下一页</button></div></div>}
     </section>
     {!data ? <div className="panel empty">能力画像加载中…</div> : <>
-      <div className="admin-stat-grid capability-admin-stats"><AdminStat label="统计人数" value={data.selectedCount} hint={`${data.totalCandidates} 名范围内员工`} tone="blue" /><AdminStat label="已完成评估" value={data.gradedUsers} hint="完成过至少一场已公布评估" tone="green" /><AdminStat label="综合平均分" value={data.aggregate.overallAverage ?? '—'} hint={data.selection.mode === 'ALL' ? `${orgName(data.selection.orgPath)}整体` : '当前选定人员'} tone="violet" /><AdminStat label="综合中位数" value={data.aggregate.overallMedian ?? '—'} hint="按员工综合成绩计算" tone="orange" /><AdminStat label="综合百分位" value={data.aggregate.overallPercentile === null || data.aggregate.overallPercentile === undefined ? '—' : `${data.aggregate.overallPercentile}%`} hint="当前群体成绩分布" tone="orange" /></div>
-      <section className="panel capability-admin-aggregate"><div className="admin-card-heading"><div><p className="kicker">群体画像</p><h3>{data.selection.mode === 'ALL' ? `${orgName(data.selection.orgPath)}能力画像` : '选定人员能力画像'}</h3><small className="capability-admin-average-note">平均值、中位数和百分位均按在职员工的有效评估记录计算。</small></div><span className="dot-label">{data.selectedCount} 人</span></div><div className="capability-admin-aggregate-grid">{data.aggregate.dimensions.map((dimension) => <div className="capability-admin-aggregate-row" key={dimension.key}><div><strong>{dimension.label}</strong><small>{dimension.evaluatedUsers} 人 · 中位数 {dimension.median ?? '—'} · {dimension.percentile ?? '—'} 百分位</small></div><i><span style={{ width: `${dimension.percent ?? 0}%` }} /></i><b>{dimension.percent === null ? '—' : dimension.percent}</b></div>)}</div><div className="capability-admin-domain-grid">{data.aggregate.domains.map((domain) => <div className="capability-admin-domain" key={domain.key}><div><strong>{domain.label}</strong><small>{domain.evaluatedUsers} 人 · 中位数 {domain.median ?? '—'}</small></div><b>{domain.percent === null ? '—' : domain.percent}</b><span><i style={{ width: `${domain.percent ?? 0}%` }} /></span></div>)}</div><div className="capability-admin-skill-average"><div className="mini-heading"><div><p className="kicker">16 项评分点</p><h3>评分点画像</h3></div><span>均值 / 中位数</span></div><div className="capability-admin-skill-grid">{data.aggregate.skills.map((skill) => <div className="capability-admin-skill-average-cell" key={skill.key}><strong>{skill.key}</strong><span>{skill.label}</span><b>{skill.percent === null ? '—' : skill.percent}</b><small>{skill.evaluatedUsers} 人 · 中位数 {skill.median ?? '—'}</small></div>)}</div></div></section>
-       {data.profiles.length > 0 && <><div className="capability-admin-detail-title"><div><p className="kicker">个人画像</p><h3>{data.selection.mode === 'ALL' ? `${orgName(data.selection.orgPath)}个人画像` : '所选人员个人画像'}</h3></div></div><div className="capability-admin-profile-list">{visibleProfiles.map(({ subject, profile }) => { const personName = displayPersonName(subject.name); return <article className="panel capability-admin-person" key={subject.id}><div className="capability-admin-person-head"><div className="capability-admin-avatar">{personName.slice(0, 1)}</div><div><strong>{personName}</strong><small>{subject.employeeNo} · {orgName(subject.orgPath)}</small></div><div className="capability-admin-person-score"><b>{profile.summary.overallAverage ?? '—'}</b><span>{profile.summary.gradedSubmissions} 场</span></div></div><div className="capability-admin-person-dimensions">{profile.dimensions.map((dimension) => <div key={dimension.key}><span>{dimension.label}</span><i><b style={{ width: `${dimension.percent ?? 0}%` }} /></i><strong>{dimension.percent === null ? '—' : dimension.percent}</strong></div>)}</div><div className="capability-admin-person-domains">{profile.domains.map((domain) => <div key={domain.key}><span title={domain.label}>{domain.shortLabel ?? domain.label}</span><i><b style={{ width: `${domain.percent ?? 0}%` }} /></i><strong>{domain.percent === null ? '—' : domain.percent}</strong></div>)}</div><div className="capability-admin-skills">{profile.skills.map((skill) => <span className={`admin-skill admin-skill-${(skill.averageLevel ?? 'n').toLowerCase()}`} key={skill.criterionKey} title={skill.name}>{skill.criterionKey}<b>{skill.averageLevel ?? '—'}</b></span>)}</div></article>; })}{Array.from({ length: profilePlaceholderCount }, (_, index) => <article className="panel capability-admin-person capability-admin-person-placeholder" key={`profile-placeholder-${index}`} aria-hidden="true" />)}</div><div className="table-pagination capability-profile-pagination"><span>第 {profilePage} / {profileTotalPages} 页 · 共 {profileCount} 人</span><div><button className="small" disabled={profilePage <= 1} onClick={() => setProfilePage((current) => Math.max(1, current - 1))}>上一页</button>{profilePageNumbers.map((number) => <button className={`small page-number${profilePage === number ? ' active' : ''}`} key={number} onClick={() => setProfilePage(number)}>{number}</button>)}<button className="small" disabled={profilePage >= profileTotalPages} onClick={() => setProfilePage((current) => Math.min(profileTotalPages, current + 1))}>下一页</button></div></div></>}
+      <div className="admin-stat-grid capability-admin-stats"><AdminStat label="统计人数" value={data.selectedCount} hint={`${data.totalCandidates} 名范围内员工`} tone="blue" /><AdminStat label="已完成评估" value={data.gradedUsers} hint={data.selection.eventId ? '该训战中完成 AI 评测' : '完成过至少一场已公布评估'} tone="green" /><AdminStat label="综合平均分" value={data.aggregate.overallAverage ?? '—'} hint={data.selection.eventId ? `${loadedEventName} AI 评测` : data.selection.mode === 'ALL' ? `${orgName(data.selection.orgPath)}整体` : '当前选定人员'} tone="violet" /><AdminStat label="综合中位数" value={data.aggregate.overallMedian ?? '—'} hint="按员工综合成绩计算" tone="orange" /><AdminStat label="综合百分位" value={data.aggregate.overallPercentile === null || data.aggregate.overallPercentile === undefined ? '—' : `${data.aggregate.overallPercentile}%`} hint="当前群体成绩分布" tone="orange" /></div>
+      <section className="panel capability-admin-aggregate"><div className="admin-card-heading"><div><p className="kicker">群体画像</p><h3>{data.selection.eventId ? `${loadedEventName} AI 评测画像` : data.selection.mode === 'ALL' ? `${orgName(data.selection.orgPath)}能力画像` : '选定人员能力画像'}</h3><small className="capability-admin-average-note">{data.selection.eventId ? '以下聚合只使用该训战的提交结果；没有评测结果的员工会保留为空画像。' : '平均值、中位数和百分位均按在职员工的有效评估记录计算。'}</small></div><span className="dot-label">{data.selectedCount} 人</span></div><div className="capability-admin-aggregate-grid">{data.aggregate.dimensions.map((dimension) => <div className="capability-admin-aggregate-row" key={dimension.key}><div><strong>{dimension.label}</strong><small>{dimension.evaluatedUsers} 人 · 中位数 {dimension.median ?? '—'} · {dimension.percentile ?? '—'} 百分位</small></div><i><span style={{ width: `${dimension.percent ?? 0}%` }} /></i><b>{dimension.percent === null ? '—' : dimension.percent}</b></div>)}</div><div className="capability-admin-domain-grid">{data.aggregate.domains.map((domain) => <div className="capability-admin-domain" key={domain.key}><div><strong>{domain.label}</strong><small>{domain.evaluatedUsers} 人 · 中位数 {domain.median ?? '—'}</small></div><b>{domain.percent === null ? '—' : domain.percent}</b><span><i style={{ width: `${domain.percent ?? 0}%` }} /></span></div>)}</div><div className="capability-admin-skill-average"><div className="mini-heading"><div><p className="kicker">16 项评分点</p><h3>评分点画像</h3></div><span>均值 / 中位数</span></div><div className="capability-admin-skill-grid">{data.aggregate.skills.map((skill) => <div className="capability-admin-skill-average-cell" key={skill.key}><strong>{skill.key}</strong><span>{skill.label}</span><b>{skill.percent === null ? '—' : skill.percent}</b><small>{skill.evaluatedUsers} 人 · 中位数 {skill.median ?? '—'}</small></div>)}</div></div></section>
+       {data.profiles.length > 0 && <><div className="capability-admin-detail-title"><div><p className="kicker">个人画像</p><h3>{data.selection.eventId ? `${loadedEventName}个人 AI 评测` : data.selection.mode === 'ALL' ? `${orgName(data.selection.orgPath)}个人画像` : '所选人员个人画像'}</h3></div></div><div className="capability-admin-profile-list">{visibleProfiles.map(({ subject, profile }) => { const personName = displayPersonName(subject.name); return <article className="panel capability-admin-person" key={subject.id}><div className="capability-admin-person-head"><div className="capability-admin-avatar">{personName.slice(0, 1)}</div><div><strong>{personName}</strong><small>{subject.employeeNo} · {orgName(subject.orgPath)}</small></div><div className="capability-admin-person-score"><b>{profile.summary.overallAverage ?? '—'}</b><span>{profile.summary.gradedSubmissions} 场 AI 评测</span></div></div><div className="capability-admin-person-dimensions">{profile.dimensions.map((dimension) => <div key={dimension.key}><span>{dimension.label}</span><i><b style={{ width: `${dimension.percent ?? 0}%` }} /></i><strong>{dimension.percent === null ? '—' : dimension.percent}</strong></div>)}</div><div className="capability-admin-person-domains">{profile.domains.map((domain) => <div key={domain.key}><span title={domain.label}>{domain.shortLabel ?? domain.label}</span><i><b style={{ width: `${domain.percent ?? 0}%` }} /></i><strong>{domain.percent === null ? '—' : domain.percent}</strong></div>)}</div><div className="capability-admin-skills">{profile.skills.map((skill) => <span className={`admin-skill admin-skill-${(skill.averageLevel ?? 'n').toLowerCase()}`} key={skill.criterionKey} title={skill.name}>{skill.criterionKey}<b>{skill.averageLevel ?? '—'}</b></span>)}</div></article>; })}{Array.from({ length: profilePlaceholderCount }, (_, index) => <article className="panel capability-admin-person capability-admin-person-placeholder" key={`profile-placeholder-${index}`} aria-hidden="true" />)}</div><div className="table-pagination capability-profile-pagination"><span>第 {profilePage} / {profileTotalPages} 页 · 共 {profileCount} 人</span><div><button className="small" disabled={profilePage <= 1 || busy} onClick={() => onProfilePageChange(Math.max(1, profilePage - 1))}>上一页</button>{profilePageNumbers.map((number) => <button className={`small page-number${profilePage === number ? ' active' : ''}`} key={number} disabled={busy} onClick={() => onProfilePageChange(number)}>{number}</button>)}<button className="small" disabled={profilePage >= profileTotalPages || busy} onClick={() => onProfilePageChange(Math.min(profileTotalPages, profilePage + 1))}>下一页</button></div></div></>}
     </>}
   </section>;
 }
@@ -1137,9 +1356,13 @@ function DeliveryContractEditor({ value, onChange }: { value: string; onChange: 
   </div>;
 }
 
-function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, executors, busy, title }: { form: ChallengeDraft; setForm: (form: ChallengeDraft) => void; onCancel: () => void; onSave: () => void; onUploadPackage: (file: File) => Promise<void>; executors: BuiltInExecutor[]; busy: boolean; title: string }) {
+function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, executors, contracts, onViewContractDetail, busy, title }: { form: ChallengeDraft; setForm: (form: ChallengeDraft) => void; onCancel: () => void; onSave: () => void; onUploadPackage: (file: File) => Promise<void>; executors: BuiltInExecutor[]; contracts: EvaluationContractOption[]; onViewContractDetail: (contract: EvaluationContractOption) => void; busy: boolean; title: string }) {
   const update = <K extends keyof ChallengeDraft>(key: K, value: ChallengeDraft[K]) => setForm({ ...form, [key]: value });
   const creatingChallenge = title === '创建赛题草稿';
+  const inputContracts = contracts.filter((item) => item.kind === 'INPUT' && item.modes.includes(form.evaluationEngineMode));
+  const outputContracts = contracts.filter((item) => item.kind === 'OUTPUT' && item.modes.includes(form.evaluationEngineMode));
+  const selectedInput = inputContracts.find((item) => item.path === form.evaluationInputContract) ?? contracts.find((item) => item.kind === 'INPUT' && item.path === form.evaluationInputContract);
+  const selectedOutput = outputContracts.find((item) => item.path === form.evaluationOutputContract) ?? contracts.find((item) => item.kind === 'OUTPUT' && item.path === form.evaluationOutputContract);
   return <section className="panel admin-editor">
     <div className="admin-card-heading"><div><p className="kicker">题面编辑</p><h3>{title}</h3></div><button className="quiet" onClick={onCancel}>取消</button></div>
     <div className="form-grid">
@@ -1165,11 +1388,17 @@ function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, exe
          <label>引擎版本<input value={form.evaluationEngineVersion} onChange={(event) => update('evaluationEngineVersion', event.target.value)} /></label>
          <label>执行方式<select value={form.evaluationEngineMode} onChange={(event) => { const mode = event.target.value as ChallengeDraft['evaluationEngineMode']; setForm({ ...form, evaluationEngineMode: mode, ...evaluationContracts(mode) }); }}><option value="EXTERNAL_CLI">外部评测结果导入</option><option value="PLATFORM_LOCAL">Code Agent + 内置执行器</option><option value="PACKAGED">Code Agent + 引擎包</option></select></label>
          <div className="evaluation-contract-summary span-2">
-           <div><strong>评测协议</strong><span>{form.evaluationEngineMode === 'EXTERNAL_CLI' ? '评测任务 → 评测结果' : 'Code Agent 批次 → 评测结果'}</span></div>
-           <dl>
-             <div><dt>输入</dt><dd className="mono-value">{form.evaluationInputContract}</dd></div>
-             <div><dt>输出</dt><dd className="mono-value">{form.evaluationOutputContract}</dd></div>
-           </dl>
+           <div><strong>评测约束</strong><span>{form.evaluationEngineMode === 'EXTERNAL_CLI' ? '评测任务 → 评测结果' : 'Code Agent 批次 → 评测结果'}</span></div>
+           <div className="form-grid">
+             <label>输入约束<div className="evaluation-contract-select-row"><select value={form.evaluationInputContract} onChange={(event) => update('evaluationInputContract', event.target.value)} disabled={!inputContracts.length}>
+               {!selectedInput && form.evaluationInputContract && <option value={form.evaluationInputContract}>当前约束（需切换）</option>}
+               {inputContracts.map((item) => <option key={item.id} value={item.path}>{item.label}</option>)}
+             </select>{selectedInput && <button type="button" className="small contract-detail-button" onClick={() => onViewContractDetail(selectedInput)}>查看详情</button>}</div><small className="field-hint">{selectedInput?.description ?? '请选择 Git 约束目录中的输入约束'} 示例：{selectedInput?.examplePath ?? '—'}；编写说明：{selectedInput?.guidePath ?? '—'}</small></label>
+             <label>输出约束<div className="evaluation-contract-select-row"><select value={form.evaluationOutputContract} onChange={(event) => update('evaluationOutputContract', event.target.value)} disabled={!outputContracts.length}>
+               {!selectedOutput && form.evaluationOutputContract && <option value={form.evaluationOutputContract}>当前约束（需切换）</option>}
+               {outputContracts.map((item) => <option key={item.id} value={item.path}>{item.label}</option>)}
+             </select>{selectedOutput && <button type="button" className="small contract-detail-button" onClick={() => onViewContractDetail(selectedOutput)}>查看详情</button>}</div><small className="field-hint">{selectedOutput?.description ?? '请选择 Git 约束目录中的输出约束'} 示例：{selectedOutput?.examplePath ?? '—'}；编写说明：{selectedOutput?.guidePath ?? '—'}</small></label>
+           </div>
          </div>
          {form.evaluationEngineMode !== 'EXTERNAL_CLI' && <>
            <label>评测指令路径<input className="mono-value" value={form.agentInstructionPath} onChange={(event) => update('agentInstructionPath', event.target.value)} /><small className="field-hint">相对于评测引擎根目录。</small></label>
@@ -1181,6 +1410,22 @@ function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, exe
      </div>
     <div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy} onClick={onSave}>{busy ? '保存中…' : '保存草稿'}</button></div>
   </section>;
+}
+
+function EvaluationContractDetailDialog({ detail, busy, copied, onClose, onCopy }: { detail: EvaluationContractDetail; busy: boolean; copied: boolean; onClose: () => void; onCopy: () => void }) {
+  const schemaText = prettyJson(detail.schema);
+  const exampleText = prettyJson(detail.example);
+  return <div className="evaluation-contract-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="panel evaluation-contract-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="evaluation-contract-detail-title">
+      <div className="admin-card-heading"><div><p className="kicker">评测约束详情</p><h3 id="evaluation-contract-detail-title">{detail.label}</h3></div><button type="button" className="quiet" onClick={onClose}>关闭</button></div>
+      <div className="evaluation-contract-detail-meta"><span className="contract-kind-badge">{evaluationContractKindLabel(detail.kind)}</span><span>版本 {detail.schemaVersion}</span><span>适用：{detail.modes.map(evaluationContractModeLabel).join('、')}</span><code>{detail.path}</code></div>
+      <p className="evaluation-contract-detail-description">{detail.description}</p>
+      <div className="evaluation-contract-copy-row"><button type="button" className="primary compact" disabled={busy} onClick={onCopy}>{copied ? '已复制 AI 出题提示' : '复制给 AI 出题'}</button><span>包含 Schema、已校验示例和编写说明，可直接粘贴到 AI 对话。</span></div>
+      <details className="evaluation-contract-code" open><summary>Schema（固定版本）</summary><pre>{schemaText}</pre></details>
+      <details className="evaluation-contract-code" open><summary>示例（已通过 Schema 校验）</summary><pre>{exampleText}</pre></details>
+      <details className="evaluation-contract-guide"><summary>编写说明</summary><pre>{detail.guide}</pre></details>
+    </section>
+  </div>;
 }
 
 function ParticipantSection({ events, eventId, setEventId, text, setText, onLoad, onSave, busy }: { events: EventConfig[]; eventId: string; setEventId: (value: string) => void; text: string; setText: (value: string) => void; onLoad: (eventId: string) => void; onSave: () => void; busy: boolean }) {
@@ -1198,8 +1443,8 @@ function EventEditorLegacy({ form, setForm, challenges, onCancel, onSave, busy }
   return <section className="panel admin-editor"><div className="admin-card-heading"><div><p className="kicker">场次草稿</p><h3>创建训战场次</h3></div><button className="quiet" onClick={onCancel}>取消</button></div><div className="form-grid"><label>场次 ID<input value={form.id} onChange={(event) => update('id', event.target.value)} /></label><label>赛题版本<select value={form.challengeVersion} onChange={(event) => { const challengeVersion = event.target.value; setForm({ ...form, challengeVersion, trigger: engineSupportsPlatformExecution(challengeVersion, challenges) ? form.trigger : 'IMPORT' }); }}>{versions.map((version) => <option key={version.id} value={version.id}>{version.title} · v{version.version}</option>)}</select></label><label>提交方式<select value={form.submissionSource} onChange={(event) => update('submissionSource', event.target.value as Source)}><option value="UPLOAD">上传 ZIP</option><option value="GIT_REF">Git 仓库路径</option></select></label><label>评测方式<select value={form.trigger} onChange={(event) => { const trigger = event.target.value as Trigger; setForm({ ...form, trigger, pinAt: trigger === 'AUTO' ? 'SUBMIT' : form.pinAt }); }}>{engineSupportsPlatformExecution(form.challengeVersion, challenges) && <><option value="AUTO">自动评测</option><option value="MANUAL">手动触发</option></>}<option value="IMPORT">线下评测</option></select>{!engineSupportsPlatformExecution(form.challengeVersion, challenges) && <small className="field-hint">该赛题的评测引擎为管理员本地命令，只能使用线下结果录入。</small>}</label><label>结果公布<select value={form.reveal} onChange={(event) => update('reveal', event.target.value as EventDraft['reveal'])}><option value="IMMEDIATE">评测后公布</option><option value="ON_RELEASE">公布后可见</option></select></label><label>场次类型<select value={form.mode} onChange={(event) => update('mode', event.target.value as EventDraft['mode'])}><option value="WINDOW">开放窗口</option><option value="LIVE">集中训战</option></select></label><label>开始时间<input type="datetime-local" value={form.startsAt} onChange={(event) => update('startsAt', event.target.value)} /></label><label>结束时间<input type="datetime-local" value={form.endsAt} onChange={(event) => update('endsAt', event.target.value)} /></label>{form.submissionSource === 'GIT_REF' && <><label>Git 仓库路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label><label>Git 版本固定时点<select value={form.pinAt} disabled={form.trigger === 'AUTO'} onChange={(event) => update('pinAt', event.target.value as EventDraft['pinAt'])}><option value="SUBMIT">提交时锁定</option><option value="DEADLINE">截止时锁定</option></select><small className="field-hint">自动评测在提交时锁定版本。</small></label></>}</div><div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy || !versions.length} onClick={onSave}>{busy ? '创建中…' : '创建场次'}</button></div></section>;
 }
 
-function EventsSection({ events, challenges, overview, users, orgUnits, eventForm, setEventForm, eventEditId, onNew, onEdit, onCreate, onAction, busy }: { events: EventConfig[]; challenges: Challenge[]; overview: Overview | null; users: AdminUser[]; orgUnits: OrgUnit[]; eventForm: EventDraft | null; setEventForm: (form: EventDraft | null) => void; eventEditId: string; onNew: () => void; onEdit: (event: EventConfig) => void; onCreate: () => void; onAction: (event: EventConfig, action: 'start-grading' | 'close' | 'reveal') => void; busy: boolean }) {
-  return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">训战管理</p><h2>训战管理</h2></div><button className="primary compact" onClick={onNew}>＋ 新建训战</button></div>{eventForm && <EventEditor form={eventForm} setForm={setEventForm} challenges={challenges} users={users} orgUnits={orgUnits} editing={Boolean(eventEditId)} onCancel={() => setEventForm(null)} onSave={onCreate} busy={busy} />}{!eventForm && <div className="event-admin-list">{events.map((event) => { const stat = overview?.eventStats.find((item) => item.eventId === event.id); return <article className="panel event-admin-card" key={event.id}><div className="event-admin-main"><div className="event-badge">{event.submissionSource === 'GIT_REF' ? '⌘' : '↑'}</div><div><div className="event-admin-title"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><span className={`status-badge status-${event.status.toLowerCase()}`}>{statusLabel(event.status)}</span></div><small>{modeLabel(event.mode)} · {sourceLabel(event.submissionSource)} · {triggerLabel(event.trigger)} · {revealLabel(event.reveal)}</small><div className="event-admin-schedule"><strong>开放时间</strong><span>{eventScheduleLabel(event)}</span></div><div className="event-admin-meta"><span>{accessScopeLabel(event)}</span><span>{stat?.submissionCount ?? 0} 份提交</span><span>{stat?.pendingCount ?? 0} 待处理</span>{event.deliveryConfig?.repository && <span>{event.deliveryConfig.repository}</span>}</div></div></div><div className="event-admin-actions">{event.status !== 'RELEASED' && <button className="small" disabled={busy} onClick={() => onEdit(event)}>配置训战</button>}{event.status === 'OPEN' && (event.trigger === 'MANUAL' || event.trigger === 'IMPORT') && <button className="small" disabled={busy} onClick={() => onAction(event, 'start-grading')}>选择评测提交</button>}{event.status === 'OPEN' && <button className="small danger" disabled={busy} onClick={() => onAction(event, 'close')}>结束训战</button>}{event.status === 'CLOSED' && <button className="small" disabled={busy} onClick={() => onAction(event, 'reveal')}>公布结果</button>}</div></article>; })}{!events.length && <div className="panel empty">暂无训战</div>}</div>}</section>;
+function EventsSection({ events, challenges, overview, users, orgUnits, eventForm, setEventForm, eventEditId, onNew, onEdit, onDelete, onCreate, onAction, busy }: { events: EventConfig[]; challenges: Challenge[]; overview: Overview | null; users: AdminUser[]; orgUnits: OrgUnit[]; eventForm: EventDraft | null; setEventForm: (form: EventDraft | null) => void; eventEditId: string; onNew: () => void; onEdit: (event: EventConfig) => void; onDelete: (event: EventConfig) => void; onCreate: () => void; onAction: (event: EventConfig, action: 'start-grading' | 'close' | 'reveal') => void; busy: boolean }) {
+  return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">训战管理</p><h2>训战管理</h2></div><button className="primary compact" onClick={onNew}>＋ 新建训战</button></div>{eventForm && <EventEditor form={eventForm} setForm={setEventForm} challenges={challenges} users={users} orgUnits={orgUnits} editing={Boolean(eventEditId)} onCancel={() => setEventForm(null)} onSave={onCreate} busy={busy} />}{!eventForm && <div className="event-admin-list">{events.map((event) => { const stat = overview?.eventStats.find((item) => item.eventId === event.id); const hasSubmissions = (stat?.submissionCount ?? 0) > 0; return <article className="panel event-admin-card" key={event.id}><div className="event-admin-main"><div className="event-badge">{event.submissionSource === 'GIT_REF' ? '⌘' : '↑'}</div><div><div className="event-admin-title"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><span className={`status-badge status-${event.status.toLowerCase()}`}>{statusLabel(event.status)}</span></div><small>{modeLabel(event.mode)} · {sourceLabel(event.submissionSource)} · {triggerLabel(event.trigger)} · {revealLabel(event.reveal)}</small><div className="event-admin-schedule"><strong>开放时间</strong><span>{eventScheduleLabel(event)}</span></div><div className="event-admin-meta"><span>{accessScopeLabel(event)}</span><span>{stat?.submissionCount ?? 0} 份提交</span><span>{stat?.pendingCount ?? 0} 待处理</span>{event.deliveryConfig?.repository && <span>{event.deliveryConfig.repository}</span>}</div></div></div><div className="event-admin-actions">{event.status !== 'RELEASED' && <button className="small" disabled={busy} onClick={() => onEdit(event)}>编辑训战</button>}{event.status !== 'RELEASED' && <button className="small danger" disabled={busy || hasSubmissions} title={hasSubmissions ? '已有提交的训战不能删除' : '删除训战'} onClick={() => onDelete(event)}>删除训战</button>}{event.status === 'OPEN' && (event.trigger === 'MANUAL' || event.trigger === 'IMPORT') && <button className="small" disabled={busy} onClick={() => onAction(event, 'start-grading')}>选择评测提交</button>}{event.status === 'OPEN' && <button className="small danger" disabled={busy} onClick={() => onAction(event, 'close')}>结束训战</button>}{event.status === 'CLOSED' && <button className="small" disabled={busy} onClick={() => onAction(event, 'reveal')}>公布结果</button>}</div></article>; })}{!events.length && <div className="panel empty">暂无训战</div>}</div>}</section>;
 }
 
 function EventEditor({ form, setForm, challenges, users, orgUnits, editing, onCancel, onSave, busy }: { form: EventDraft; setForm: (form: EventDraft | null) => void; challenges: Challenge[]; users: AdminUser[]; orgUnits: OrgUnit[]; editing: boolean; onCancel: () => void; onSave: () => void; busy: boolean }) {
@@ -1346,6 +1591,7 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
   const [deletingUnitId, setDeletingUnitId] = useState('');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
+  const [serverUserPage, setServerUserPage] = useState<UserPage | null>(null);
   const [saving, setSaving] = useState(false);
   const orgById = new Map(orgUnits.map((unit) => [unit.id, unit]));
   const unitTrail = (unit: OrgUnit, includeSelf = true) => {
@@ -1381,18 +1627,21 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
     const userUnit = orgById.get(user.orgUnitId);
     return Boolean(userUnit && (userUnit.path === unit.path || userUnit.path.startsWith(unit.path)));
   };
-  const usersInScope = users.filter((user) => {
+  const localUsersInScope = users.filter((user) => {
     if (selectedOrgId === '__unassigned__') return !orgById.has(user.orgUnitId);
     return selectedUnit ? unitContainsUser(selectedUnit, user) : true;
   });
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN');
-  const filteredUsers = usersInScope.filter((user) => {
+  const localFilteredUsers = localUsersInScope.filter((user) => {
     if (!normalizedQuery) return true;
     const department = orgById.get(user.orgUnitId)?.name ?? user.departmentHint ?? '';
     return [user.name, user.employeeNo, department].some((value) => value.toLocaleLowerCase('zh-CN').includes(normalizedQuery));
   });
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
-  const pageUsers = filteredUsers.slice((page - 1) * pageSize, page * pageSize);
+  const serverPaging = selectedOrgId !== '__unassigned__';
+  const filteredUsers = serverPaging && serverUserPage ? serverUserPage.items : localFilteredUsers;
+  const totalPages = serverPaging && serverUserPage ? Math.max(1, serverUserPage.pageInfo.totalPages) : Math.max(1, Math.ceil(localFilteredUsers.length / pageSize));
+  const totalUsers = serverPaging && serverUserPage ? serverUserPage.pageInfo.total : localFilteredUsers.length;
+  const pageUsers = serverPaging && serverUserPage ? serverUserPage.items : localFilteredUsers.slice((page - 1) * pageSize, page * pageSize);
   const pageStart = Math.max(1, Math.min(page - 2, totalPages - 4));
   const pageNumbers = Array.from({ length: Math.min(5, totalPages) }, (_, index) => pageStart + index);
   const unassignedCount = users.filter((user) => !orgById.has(user.orgUnitId)).length;
@@ -1418,6 +1667,17 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
 
   useEffect(() => { setPage((current) => Math.min(current, totalPages)); }, [totalPages]);
   useEffect(() => { setPage(1); }, [selectedOrgId, query]);
+  useEffect(() => {
+    if (!serverPaging) { setServerUserPage(null); return; }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (selectedUnit && selectedUnit.level > 0) params.set('orgPath', selectedUnit.path);
+      if (query.trim()) params.set('query', query.trim());
+      void request<UserPage>(`/users?${params.toString()}`).then((next) => { if (active) setServerUserPage(next); }).catch(() => { if (active) setServerUserPage(null); });
+    }, 150);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [page, pageSize, query, selectedOrgId, selectedUnit?.path, serverPaging, users]);
   useEffect(() => { if (selectedOrgId !== '__unassigned__' && !orgById.has(selectedOrgId)) setSelectedOrgId(rootUnitId); }, [orgUnits, selectedOrgId, rootUnitId]);
 
   const save = async (action: () => Promise<unknown>, success: string): Promise<boolean> => {
@@ -1496,9 +1756,9 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
       <section className="panel admin-card organization-users-card">
         <div className="admin-card-heading organization-users-heading"><div><p className="kicker">员工管理</p><h3>{editingId ? '配置员工' : '员工列表'}</h3></div><label className="employee-search"><span>搜索</span><input aria-label="搜索员工" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="姓名、工号或部门" /></label></div>
         {editingId && <div className="employee-editor"><div className="edit-user-summary">{(() => { const user = users.find((item) => item.id === editingId); return user ? <><strong>{displayPersonName(user.name)}</strong><span>{user.employeeNo}</span></> : null; })()}</div><div className="form-grid"><label>所属部门<select value={userForm.orgUnitId} onChange={(event) => setUserForm({ ...userForm, orgUnitId: event.target.value })}>{adminAccess.level === 'GLOBAL' && <option value="">未配置部门</option>}{manageableUnits.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><fieldset><legend>角色</legend><div className="checkbox-list">{roleOptions.map((role) => <label className="check-label" key={role.value}><input type="checkbox" checked={userForm.roles.includes(role.value)} onChange={() => toggleRole(role.value)} />{role.label}</label>)}</div></fieldset></div><div className="editor-actions"><button className="secondary-button" onClick={clearEdit}>取消</button><button className="primary compact" disabled={busy || saving} onClick={submitUser}>保存配置</button></div></div>}
-        <div className="employee-list-toolbar"><div><strong>{selectedLabel}</strong><span>{filteredUsers.length} 人</span></div>{(selectedOrgId !== rootUnitId || query) && <button className="small" onClick={() => { setSelectedOrgId(rootUnitId); setQuery(''); }}>清除筛选</button>}</div>
+        <div className="employee-list-toolbar"><div><strong>{selectedLabel}</strong><span>{totalUsers} 人</span></div>{(selectedOrgId !== rootUnitId || query) && <button className="small" onClick={() => { setSelectedOrgId(rootUnitId); setQuery(''); }}>清除筛选</button>}</div>
         <div className="admin-table-wrap organization-user-table"><table className="admin-table"><thead><tr><th>员工</th><th>部门</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>{pageUsers.map((user) => { const department = departmentFor(user); const configurable = canConfigureUser(user); return <tr key={user.id}><td><strong>{displayPersonName(user.name)}</strong><small>{user.employeeNo}</small></td><td><div className="department-cell"><strong>{department.name}</strong><small>{department.meta}</small></div></td><td><div className="role-list">{roleLabels(user.roles).map((role) => <span className="role-tag" key={role}>{role}</span>)}</div></td><td><span className={`status-badge status-${user.status.toLowerCase()}`}>{user.status === 'ACTIVE' ? '在职' : '已停用'}</span></td><td>{configurable ? <button className="small" onClick={() => edit(user)}>配置</button> : <span className="organization-action-note">权限受限</span>}</td></tr>; })}</tbody></table>{!pageUsers.length && <div className="empty">暂无员工</div>}</div>
-        <div className="table-pagination"><span>第 {page} / {totalPages} 页 · 共 {filteredUsers.length} 人</span><div><button className="small" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</button>{pageNumbers.map((number) => <button className={`small page-number${page === number ? ' active' : ''}`} key={number} onClick={() => setPage(number)}>{number}</button>)}<button className="small" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>下一页</button></div></div>
+        <div className="table-pagination"><span>第 {page} / {totalPages} 页 · 共 {totalUsers} 人</span><div><button className="small" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</button>{pageNumbers.map((number) => <button className={`small page-number${page === number ? ' active' : ''}`} key={number} onClick={() => setPage(number)}>{number}</button>)}<button className="small" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>下一页</button></div></div>
       </section>
       <aside className="organization-side">
         <section className="panel admin-card organization-departments-card">

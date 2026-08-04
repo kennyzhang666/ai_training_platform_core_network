@@ -33,8 +33,10 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const code = typeof body.code === 'string' ? body.code : status >= 500 ? 'INTERNAL_ERROR' : `HTTP_${status}`;
     const requestId = typeof request?.id === 'string' ? request.id : undefined;
     if (!isHttpException || status >= 500) {
-      const details = exception instanceof Error ? exception.stack ?? exception.message : String(exception);
-      this.logger.error(`request ${requestId ?? '-'} failed`, details);
+      // Keep operational logs structured and deliberately omit exception
+      // messages/stacks: grader stderr, object-store URLs and database errors
+      // can contain source, credentials or connection details.
+      this.logger.error(JSON.stringify({ event: 'request.failed', requestId: requestId ?? null, status, code, errorType: exception instanceof Error ? exception.constructor.name : typeof exception }));
     }
     const details = Object.fromEntries(Object.entries(body).filter(([key]) => !['code', 'message', 'statusCode', 'error'].includes(key)));
     const payload = { code, message, ...(requestId ? { requestId } : {}), ...(Object.keys(details).length ? { details } : {}) };

@@ -3,8 +3,9 @@ import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import Ajv2020, { ValidateFunction } from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
-import { ArtifactEntry, ArtifactStore } from './artifact-store';
+import { ArtifactEntry } from './artifact-store';
 import { ChallengeVersion, SubmissionContractDefinition, SubmissionContractItem } from './domain';
+import { OBJECT_STORAGE, ObjectStorage } from './object-storage';
 
 export interface SubmissionContractIssue {
   code: string;
@@ -192,7 +193,7 @@ export function validateSubmissionEntries(rawEntries: ArtifactEntry[], contract:
 export class SubmissionContractService {
   private readonly validators: Record<'1.0' | '1.1', ValidateFunction>;
 
-  constructor(@Inject(ArtifactStore) private readonly artifacts: ArtifactStore) {
+  constructor(@Inject(OBJECT_STORAGE) private readonly artifacts: Pick<ObjectStorage, 'inspectArchive'>) {
     const ajv = new Ajv2020({ allErrors: true, strict: false });
     addFormats(ajv);
     this.validators = {

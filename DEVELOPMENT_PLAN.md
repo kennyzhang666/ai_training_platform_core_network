@@ -1,8 +1,8 @@
 # AI 能力训战平台开发总览
 
-> 当前版本：`v0.6.1`
-> 更新日期：2026-08-03
-> 当前阶段：核心业务闭环已可在本地验收，尚未达到生产部署标准
+> 当前版本：`v0.7.0`
+> 更新日期：2026-08-04
+> 当前阶段：v0.7.0 生产数据与身份底座代码已发布；临时真实 PostgreSQL/S3-compatible、容量基线、安全扫描和备份恢复已验收，目标环境的身份网关、Worker 身份、对象存储策略与发布回滚门禁仍待执行
 > 文档职责：项目架构、整体设计、版本沿革、当前边界、后续路线和 Codex 交接入口
 
 ## 1. 如何使用和维护本文档
@@ -60,8 +60,8 @@ NestJS + Fastify Platform API
   |-- 评测批次租约与结果幂等录入
   |-- 报告、画像、公告与审计
   |
-  |-- PlatformStore ------> 当前：JSON 文件；目标：PostgreSQL/Prisma
-  |-- ArtifactStore ------> 当前：本地目录；目标：对象存储
+  |-- PlatformStore ------> 开发：文件适配器；生产：PostgreSQL/Prisma 规范化表（快照信封仅作迁移兼容）
+  |-- ObjectStorage ------> 开发：本地目录；生产：S3-compatible 对象存储
   |-- GitSnapshotter -----> 当前：受控本地 Git；目标：GitLab 适配器
   |
   v
@@ -90,7 +90,7 @@ Platform API 校验、重算、幂等保存
 | `scripts/code-agent-local-bridge.mjs` | 本地 Code Agent 批次协议适配器，仅用于联调和验收 |
 | `executors/` | 随平台发布的内置评测执行器 |
 | `challenges/` | 示例赛题、版本化引擎包、instruction 和 Skills |
-| `services/platform-api/prisma/` | 生产关系模型和版本化迁移契约；当前运行时尚未接入 |
+| `services/platform-api/prisma/` | 生产关系模型和版本化迁移契约；PostgreSQL 运行时已接入，快照信封仅作兼容 |
 | `docs/` | 稳定的专项协议、架构决策和能力模型说明 |
 | `tmp/` | 本地运行数据、交付件和临时工作区，不进入版本库 |
 
@@ -167,7 +167,7 @@ Platform API 校验、重算、幂等保存
 管理员在评测中心进入某一训战，查看每名员工的不可变提交，并精确勾选一人或多人发起评测。当前主流程为：
 
 1. API 为选中提交创建 `GradingRun`，再创建一个不可拆分的 `EvaluationBatch`；
-2. 批次冻结赛题版本、引擎版本、运行配置、输入/输出契约和提交快照；
+2. 批次冻结赛题版本、引擎版本、运行配置、输入/输出约束和提交快照；
 3. Worker 通过租约领取完整批次，定期心跳；租约过期后未完成批次重新排队；
 4. Worker 在隔离目录物化引擎、`instruction.md`、Skills、Schema 和所有交付件；
 5. Worker 使用 `shell: false` 调用管理员配置或主机兜底的 Code Agent 命令；
@@ -179,7 +179,7 @@ Platform API 校验、重算、幂等保存
 
 - `AUTO`：提交后自动创建待领取任务；
 - `MANUAL`：管理员精确选择提交并发起批次；
-- `IMPORT`：管理员在线下完成评测后导入同一输出契约；
+- `IMPORT`：管理员在线下完成评测后导入同一输出约束；
 - 三者最终都经过同一个可信结果录入边界。
 
 完整 ABI、目录布局、命令占位符和结果索引见 `docs/evaluation-engine-protocol.md`。
@@ -195,11 +195,11 @@ Platform API 校验、重算、幂等保存
 - 客观指标、提交和 commit 时间线；
 - 八个 AI 能力域及证据覆盖度；
 - 个人趋势、蓝区/黄区分布、部门中位数和百分位；
-- 管理员按部门或指定员工集合查看聚合平均画像，而不是逐人卡片。
+- 管理员按部门、训战或指定员工集合查看聚合平均画像；选择训战时只汇总该训战的提交与 AI 评测结果，并保留个人明细卡片。
 
 员工只能看到按训战揭晓策略开放的结果；管理员在权限范围内可进行运营和复核。
 
-## 5. 当前实现状态（v0.6.1）
+## 5. 当前实现状态（v0.7.0）
 
 ### 5.1 已可本地验收
 
@@ -210,7 +210,7 @@ Platform API 校验、重算、幂等保存
 - 管理员按训战和员工精确选择提交，创建 Code Agent 评测批次；
 - Worker 租约、心跳、批次恢复、交付件下载、引擎和 Agent 资产物化；
 - 结构化结果导入、Schema 校验、分数重算、可信身份覆盖和幂等保存；
-- 单场详细报告、四维/16 点/八能力域画像及组织聚合画像；
+- 单场详细报告、四维/16 点/八能力域画像及组织聚合画像；管理员能力画像支持按训战筛选全体提交者的 AI 评测聚合；
 - 部门、员工角色、训战名单、公告和审计管理；
 - 全局管理员与部门管理员的组织范围隔离；
 - 组织新增、编辑和安全删除；员工配置分页、固定页面高度和可读部门路径；
@@ -219,16 +219,63 @@ Platform API 校验、重算、幂等保存
 
 ### 5.2 当前适配器和限制
 
-当前版本是“无需外部依赖即可验收”的开发实现，不应直接暴露到生产网络：
+当前代码仍可“无需外部依赖即可验收”，但尚未完成目标环境生产发布门禁，不应直接暴露到生产网络：
 
-- 数据运行时仍由 `PlatformStore` 写入 `tmp/platform-data.json`，Prisma 仅作为生产模型契约；
-- 交付包和引擎包仍保存在本地文件系统；浏览器上传使用 JSON base64；
+- 开发环境仍可由 `PlatformStore` 写入 `tmp/platform-data.json`；生产配置下由 PostgreSQL/Prisma 规范化表作为运行时事实来源；
+- 交付包和引擎包开发环境仍可落本地目录；生产上传、读取和 Worker 物化走 S3-compatible `ObjectStorage`；PostgreSQL 模式的上传会话落在 `UploadSession`，文件适配器仍只用于本地开发；
 - 身份认证仍以开发请求头为主，SSO 同步接口不等于完整的生产登录会话；
 - 本地 Git 适配器只访问 `LOCAL_GIT_ROOT`，尚未接入真实 GitLab；
 - Code Agent 本地 bridge 用确定性评测器验证协议，真实 Agent、沙箱和凭据治理由部署环境提供；
 - Web 仍集中在两个较大的 TSX 文件中，尚未进行路由、模块和设计组件拆分；
-- 员工、画像等分页主要在前端完成，生产数据量需要服务端分页；
-- 日志、指标、告警、备份、灾备、数据保留和容量压测尚未生产化。
+- 员工、提交、审计和管理端列表已接入服务端分页；个人画像历史和管理端能力聚合也已提供分页契约与前端接入；PostgreSQL 下提交/审计使用规范化表查询，画像聚合仍需后续容量验证；
+- 日志、指标、告警、数据保留和容量压测尚未生产化；本轮已补齐可在目标数据库执行的备份/恢复命令和回归入口，真实演练仍待目标环境。
+
+### 5.3 v0.7.0 发布状态（2026-08-04）
+
+本轮已按 `docs/v0.7-development-manual.md` 落地以下代码纵切面：
+
+- W0/W1：Repository/Unit of Work 边界、Prisma 组织/人员/审计适配器、人员服务端分页、角色与 SSO 同事务审计；
+- W2：LOCAL/OIDC/TRUSTED_GATEWAY 身份模式、JWT/JWKS 与网关签名校验、Nest 全局身份 Guard；
+- W3/W4：新增不可变字段迁移、规范化 PostgreSQL Repository/Unit of Work、运行/批次租约 CAS、结果幂等与事务回滚路径；
+- W5：本地与 S3-compatible 对象存储的两阶段上传、大小/哈希/对象归属校验、过期清理及 Worker 物化闭环；
+- W6：提交、审计和管理端人员列表的分页响应及前端服务端分页接入；补齐个人画像历史分页、画像趋势分页和管理端能力聚合分页，候选人员选择器改为服务端分页并增加请求序列保护；
+- 管理端写操作回归：修复用户编辑成功后刷新提交/审计列表因 `PlatformReadService` 依赖未显式注入而返回 500、进而被前端误报失败的问题，并为全部刷新接口增加回归覆盖；
+- 评测输入/输出约束配置纵切面：新增 Git 版本化约束目录和示例，管理端按评测方式以下拉选择输入/输出约束；可点击查看固定 Schema、示例和编写说明，并一键复制 AI 出题提示；服务端启动时校验 Schema/示例并在赛题写入时拒绝目录外路径；新增约束详情 OpenAPI 接口和 AI 配置说明。
+- 训战能力画像纵切面：`/admin/capabilities` 增加 `eventId` 契约与权限校验，服务端按训战过滤提交、评测、能力域和群体聚合，管理端增加训战下拉并展示该训战的全体提交者 AI 评测画像。
+- 赛题/训战管理闭环：管理端提供赛题编辑（草稿原地修改、已发布版本创建新版本）与回收站删除/恢复；训战支持编辑和安全删除，已公布、系统管理或已有提交的训战拒绝删除并写入审计。
+- W7：备份/恢复命令覆盖规范化表、迁移脚本、生产环境禁止静默回退到文件适配器；已提供迁移、导入 dry-run、备份/恢复命令和回归入口。
+- CI：GitLab pipeline 增加隔离 PostgreSQL 16 service，等待数据库就绪后运行正式迁移路径的 `test:integration:postgres`。
+- PostgreSQL 集成测试进一步覆盖同一 SSO 工号首次建档、同级组织名称、运行幂等键、批次/运行租约 CAS 和 10 次重复结果回调的并发竞争；所有记录使用后缀隔离并在 finally 清理。
+- SSO 首次建档重试同时处理唯一冲突与 repeatable-read 写冲突（`P2002`/`P2034`），并保持每次同步的审计事实。
+- 生产身份契约在 OpenAPI 中同时声明 OIDC Bearer 与可信网关签名头；OIDC 畸形签名按 401 认证失败处理，JSON 导入按组织层级满足自引用外键，交付件下载会再次核对内容哈希。
+- 上传会话响应的 `subjectId` 已纳入 OpenAPI required 字段，并由契约测试锁定实际控制器返回形状。
+
+本轮新增的数据库事实变更为：`0009_upload_sessions`（上传会话）、`0010_platform_snapshot_revision`（快照版本 CAS）、`0011_org_unit_name_scope` 和 `0012_org_unit_root_name_scope`（同级组织名称唯一约束，含根组织并发场景）、`0013_submission_current_pointers`（提交当前运行/结果指针与历史结果关系分离）、`0014_capacity_query_indexes`（员工、提交和审计高基数分页索引）。HTTP 请求在成功响应前等待 PostgreSQL 持久化完成；组织、人员和审计写入通过同一事务提交，并同步快照版本，避免旧实例静默覆盖新数据。提交和审计高基数列表在 PostgreSQL 读服务中使用数据库分页及组织范围过滤。
+
+本地真实 PostgreSQL 验证记录：使用临时 PostgreSQL 16.4 独立实例从空库成功部署 14 个迁移；`POSTGRES_INTEGRATION=true pnpm --filter @ai-training/platform-api test:integration:postgres` 通过（1/1）；JSON 正式导入、v2 备份、故意修改后的恢复、以及 PostgreSQL 模式 API 的员工分页和组织/人员/审计同事务 HTTP 验收通过。带真实 ZIP 二进制的 PostgreSQL HTTP 闭环也已通过：上传、启动评测、服务端结果契约校验和结果入库均进入 `GRADED`。临时 MinIO S3-compatible endpoint 的生产配置 HTTP 验收也已通过：原始二进制上传、确认幂等、staging 篡改拒绝和 API 重启后的上传会话恢复均有记录。上述 PostgreSQL 记录形成于本轮新增并发断言之前；并发扩展已进入 CI 集成入口，当前工作区没有可用数据库可重新执行。
+
+另补充生产执行边界回归：当 `EMBEDDED_EVALUATION_WORKER=false` 时，已废弃的单运行执行入口立即返回 `CODE_AGENT_WORKER_REQUIRED`，运行保持 `QUEUED`，API 不会在进程内执行评测引擎。
+
+可观测性最低实现也已落地：`GET /api/v1/metrics` 只向全局管理员返回进程级聚合请求/延迟指标，路由标签有数量上限且不记录敏感输入。指标拦截器保留异常过滤器设置的 4xx 客户端错误，仅把错误路径上未设置状态的响应归为 5xx，并用已知路由参数错误回归验证错误率不会失真。
+生产 OIDC 配置同时校验 `OIDC_ISSUER` 与 `OIDC_JWKS_URL` 的 URL 格式和 HTTPS 要求，避免身份边界因明文或畸形配置启动；两类配置错误均返回稳定启动错误。
+JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键、日期、提交快照哈希、批次 run/submission 配对及完成/失败集合、结果归属和当前/历史指针，并以失败退出码拒绝坏图谱。
+
+上传清理也已接入 API 生命周期：过期 staging 会按 `OBJECT_STORAGE_CLEANUP_INTERVAL_SECONDS` 周期幂等清理，生产对象存储生命周期规则仍是最终兜底。S3-compatible 工厂会区分未启用的 Prisma UploadSession provider 与真正的 PostgreSQL 持久化，文件 Repository + S3 的本地联调不会误走不可用的数据库会话。
+
+异常日志已收敛为结构化失败事件，仅保留请求 ID、状态码、稳定错误码和异常类型，避免评测 stderr、对象存储 URL 或数据库细节进入日志。
+
+`v0.7.0` 代码版本已发布。代码门禁已覆盖文件适配器、模拟/真实 S3-compatible、身份校验、临时隔离 PostgreSQL、容量基线和安全扫描；目标环境上线前仍需完成最终验收，并保留以下边界：
+
+- `PlatformSnapshot` 仍保留作迁移/回滚兼容信封；生产启动优先从规范化表加载，W1 组织/人员/审计已走领域 Repository，W3/W4 HTTP 写入已走请求级 Unit of Work；
+- W3/W4 的低卡读取、上传授权和提交主体校验在 PostgreSQL 模式下使用请求内最新事务图；生产配置显式拒绝 `EMBEDDED_EVALUATION_WORKER=true`，避免 API 进程执行学员交付件。
+- 当前 PostgreSQL 适配器对尚未拆分为窄领域 Repository 的部分仍以 `PlatformStore` 完整状态同步；快照版本 CAS 会拒绝旧实例覆盖，但这仍不是高可用多副本方案，后续需要继续拆分并补容量证据；
+- PostgreSQL 请求级读取/写入和窄 Repository transaction 使用 repeatable-read 快照，revision CAS 仍是跨实例冲突的最终保护；这不替代后续多副本容量与故障演练。
+- 使用 10 万员工、10 万提交和 100 万审计的合成数据完成查询计划复核；新增 `0014_capacity_query_indexes`，提交列表先读取排序键再按页回表，避免为深分页加载全部 JSON/历史列。临时实例 30 次并发 count+page 样本的 P50/P95：员工 13.54/18.19ms、提交 83.81/92.94ms、审计 149.30/172.82ms；这些是本地基线，不是目标环境 SLA；
+- PostgreSQL 模式的 S3 上传会话已落 `UploadSession`，可跨 API 重启和实例恢复；文件适配器仍为本地进程状态，生产对象存储还需在目标环境验证预签名/凭据、清理和故障重试；
+- 真实目标 S3-compatible endpoint、网关 OIDC/JWKS 和生产 Worker 身份尚未在本工作区提供；本地已用真实 S3 协议兼容服务完成生产配置 HTTP 验收，目标凭据、网络策略、生命周期和故障重试仍需复验；
+- 本地已完成 10 万/100 万规模容量与查询计划基线、14 迁移版本的备份/恢复回滚演练，以及 `pnpm audit --registry=https://registry.npmjs.org --audit-level=high`（无已知高危漏洞）；目标环境仍需按同一清单复测并留存生产证据；
+- v2 备份恢复在打开数据库事务前完成图谱预检，避免将明显损坏的备份带入目标库清空/写入阶段。
+- 根目录、Web 和 API 版本号已同步为 `0.7.0`；目标环境的对象存储策略、身份网关/Worker 服务身份、备份恢复和回滚门禁仍需复验。
 
 ## 6. 版本沿革
 
@@ -244,6 +291,7 @@ Platform API 校验、重算、幂等保存
 | `v0.5.0` | 2026-08-02 | 评测改为独立 Worker 拉取任务；内置执行器可选择；AUTO/MANUAL/IMPORT 共用契约。 |
 | `v0.6.0` | 2026-08-03 | 完成多员工 Code Agent 批次协议、赛题级交付目录契约、评测环境配置和评测中心详情流程。 |
 | `v0.6.1` | 2026-08-03 | 修复浏览器人员配置失败和 CORS 方法限制；补齐组织编辑、安全删除、权限边界与回归测试；重建持续维护的开发交接文档。 |
+| `v0.7.0` | 2026-08-04 | 发布生产数据与身份底座纵切面、规范化 PostgreSQL 迁移、W1 组织/人员 Repository、持久化上传会话、CAS 写入保护及备份恢复演练；目标环境上线门禁仍待执行。 |
 
 ## 7. 后续开发路线
 
@@ -251,13 +299,13 @@ Platform API 校验、重算、幂等保存
 
 ### 7.1 v0.7.0：生产数据与身份底座（最高优先级）
 
-目标：移除单机文件和浏览器身份头对正式环境的依赖。
+目标：移除单机文件和浏览器身份头对正式环境的依赖。本轮已完成代码候选与本地适配器级证据，剩余工作集中在真实 PostgreSQL、对象存储和目标环境发布门禁。
 
-- 实现 `PlatformRepository` 边界，将 `PlatformStore` 的持久化职责迁移到 Prisma/PostgreSQL；
+- 实现 `PlatformRepository` 边界，将 `PlatformStore` 的持久化职责迁移到 Prisma/PostgreSQL（W1 组织/人员/审计已完成，其他高频领域继续迁移）；
 - 为提交、评测运行、批次租约、结果导入和审计增加数据库事务与唯一约束；
 - 接入真实内部 SSO 网关会话或 OIDC/JWT Guard，保留按工号首次建档逻辑；
 - 对员工、提交、审计、画像实现服务端分页、筛选和稳定排序；
-- 将 ArtifactStore 替换为对象存储，上传改为流式/预签名方式；
+- 将 ArtifactStore 替换为对象存储，上传改为流式/预签名方式（S3 两阶段上传与 PostgreSQL 会话持久化已完成适配器级实现）；
 - 建立迁移、备份、恢复和种子数据隔离流程。
 
 验收证据：PostgreSQL 集成测试、并发唯一性测试、SSO 越权矩阵、对象存储集成测试、迁移回滚演练记录。
@@ -304,13 +352,12 @@ Platform API 校验、重算、幂等保存
 
 ## 8. 下一位 Codex 的推荐起点
 
-若没有新的用户优先级，下一纵切面从 **v0.7.0 的 PostgreSQL Repository 与服务端员工分页** 开始：
+当前代码纵切面已经覆盖 PostgreSQL Repository/Unit of Work、服务端员工分页、赛题/训战与提交/评测的关键约束、对象存储物化和规范化备份恢复；本地临时 PostgreSQL 已完成迁移、集成、导入和恢复演练，容量与安全基线也已记录。下一步不再重复 W1 迁移，而是进入发布环境门禁与剩余领域收口：
 
-1. 先为 `PlatformStore` 提取最小 Repository 接口，不一次重写全部领域逻辑；
-2. 选择“组织与人员”作为首个纵切面：组织读取、员工分页、角色更新、审计同事务；
-3. 先补 OpenAPI 分页参数、返回契约和 PostgreSQL 集成测试；
-4. 保留文件适配器供快速本地测试，通过配置选择实现；
-5. 验收后再迁移赛题/训战和提交/评测，不并行制造两套状态机。
+1. 在目标环境接入真实 S3 兼容对象存储，验证上传确认、哈希、下载物化、Worker 清理和故障重试（本地 MinIO 生产配置验收已完成）；
+2. 接入真实 OIDC/JWKS 与 Worker 服务身份，执行组织/角色/场次访问矩阵及审计留存验收；
+3. 在目标环境复验 PostgreSQL 迁移、JSON 导入、备份恢复、并发租约，并补容量压测和安全扫描；
+4. 复核 OpenAPI、Schema、迁移、CHANGELOG 和回滚清单后，在目标环境完成 v0.7.0 的身份、对象存储、Worker 和回滚门禁。
 
 开始任务前还应检查：
 
@@ -391,6 +438,8 @@ git diff --check
 
 - `CHANGELOG.md`：逐版本详细变更；
 - `contracts/openapi.yaml`：HTTP API 事实来源；
+- `contracts/evaluation-contract-catalog.json`：Git 固定的评测输入/输出下拉目录；
+- `docs/evaluation-contract-authoring.md`：管理员与 AI 开发赛题时的契约选择、示例和配置说明；
 - `docs/evaluation-engine-protocol.md`：评测引擎、Worker 与 Code Agent ABI；
 - `docs/submission-contract.md`：赛题交付目录规范；
 - `docs/capability-model.md`：四维、16 点与八能力域计算模型；

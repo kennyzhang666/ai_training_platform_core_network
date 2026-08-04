@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { EnginePackageManifest, ResolvedEngine, SubmissionRecord } from './domain';
-import { ArtifactStore } from './artifact-store';
+import { OBJECT_STORAGE, ObjectStorage } from './object-storage';
 import { EnginePackageStore } from './engine-package-store';
 import { ExecutorRegistry } from './executor-registry';
 import { GradingExecutionRequest, GradingExecutor } from './grading-executor';
@@ -59,7 +59,7 @@ export class EngineRunner implements GradingExecutor {
   private readonly launcher = resolve(process.env.ENGINE_SANDBOX_LAUNCHER ?? join(this.projectRoot, 'sandbox', 'launch.py'));
 
   constructor(
-    @Inject(ArtifactStore) private readonly artifacts: ArtifactStore,
+    @Inject(OBJECT_STORAGE) private readonly objects: ObjectStorage,
     @Inject(EnginePackageStore) private readonly packages: EnginePackageStore,
     @Inject(ExecutorRegistry) private readonly executors: ExecutorRegistry,
   ) {}
@@ -109,9 +109,9 @@ export class EngineRunner implements GradingExecutor {
     const workspace = join(sandbox, 'workspace');
     mkdirSync(workspace, { recursive: true });
     if (submission.snapshot.artifactUri) {
-      const archive = this.artifacts.localPath(submission.snapshot.artifactUri);
+      const materialized = await this.objects.materialize(submission.snapshot.artifactUri, submission.snapshot.artifactName);
       try {
-        await execFileAsync(this.python(), ['-c', ZIP_EXTRACT_SUBMISSION, archive, workspace], {
+        await execFileAsync(this.python(), ['-c', ZIP_EXTRACT_SUBMISSION, materialized.path, workspace], {
           cwd: this.projectRoot,
           maxBuffer: 2 * 1024 * 1024,
           timeout: 60_000,
@@ -121,6 +121,8 @@ export class EngineRunner implements GradingExecutor {
       } catch (error) {
         const details = error as { stderr?: string };
         throw new BadRequestException({ code: 'ARTIFACT_EXTRACT_FAILED', message: `交付件解包失败: ${(details.stderr ?? '').slice(-500)}` });
+      } finally {
+        await materialized.cleanup();
       }
       return workspace;
     }

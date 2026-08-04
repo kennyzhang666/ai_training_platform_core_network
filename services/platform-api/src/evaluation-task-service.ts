@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { relative, resolve } from 'node:path';
-import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Optional } from '@nestjs/common';
 import { EvaluationTask, GradingRun, StoredResult } from './domain';
 import { PlatformStore } from './store';
 import { ExecutorRegistry } from './executor-registry';
+import { PostgresDomainUnitOfWork } from './postgres-domain-unit-of-work';
 
 const LEASE_SECONDS = Number(process.env.EVALUATION_LEASE_SECONDS ?? 900);
 const MAX_LEASE_BATCH = Number(process.env.EVALUATION_LEASE_MAX_BATCH ?? 20);
@@ -22,6 +23,7 @@ export class EvaluationTaskService {
   constructor(
     @Inject(PlatformStore) private readonly store: PlatformStore,
     @Inject(ExecutorRegistry) private readonly executors: ExecutorRegistry,
+    @Optional() @Inject(PostgresDomainUnitOfWork) private readonly domainUnitOfWork?: PostgresDomainUnitOfWork,
   ) {}
 
   /** Return runs whose lease has lapsed to the queue before handing out work. */
@@ -37,9 +39,9 @@ export class EvaluationTaskService {
     return reclaimed;
   }
 
-  private taskFor(run: GradingRun, workerId: string, leaseSeconds: number): EvaluationTask | undefined {
-    const submission = this.store.getSubmission(run.submissionId);
-    const context = this.store.gradingContextForSubmission(submission);
+  private taskFor(store: PlatformStore, run: GradingRun, workerId: string, leaseSeconds: number): EvaluationTask | undefined {
+    const submission = store.getSubmission(run.submissionId);
+    const context = store.gradingContextForSubmission(submission);
     // EXTERNAL_CLI challenges are never queued for a worker; they are evaluated
     // offline and imported by an administrator.
     if (context.engine.mode !== 'PLATFORM_LOCAL' && context.engine.mode !== 'PACKAGED') return undefined;
@@ -49,7 +51,7 @@ export class EvaluationTaskService {
     for (const [key, value] of Object.entries(manifest.assets ?? {})) {
       if (value) assets[key] = value;
     }
-    const lease = this.store.acquireLease(run.id, workerId, leaseSeconds);
+    const lease = store.acquireLease(run.id, workerId, leaseSeconds);
     return {
       runId: run.id,
       leaseId: lease.leaseId,
@@ -76,7 +78,7 @@ export class EvaluationTaskService {
       challenge: context.challenge,
       subject: {
         id: submission.subjectId,
-        name: this.store.getUser(submission.subjectId).name,
+        name: store.getUser(submission.subjectId).name,
         orgPath: submission.orgPathSnapshot,
       },
       submission: {
@@ -109,7 +111,7 @@ export class EvaluationTaskService {
       try { this.store.assertGradingRunScope(run.id, actorId); } catch { continue; }
       let task: EvaluationTask | undefined;
       try {
-        task = this.taskFor(run, workerId, LEASE_SECONDS);
+        task = this.taskFor(this.store, run, workerId, LEASE_SECONDS);
       } catch (error) {
         // A misconfigured challenge must not block the queue for everyone else.
         this.store.failRun(run.id, error instanceof Error ? error.message : String(error));
@@ -123,6 +125,39 @@ export class EvaluationTaskService {
       tasks.push(task);
     }
     return tasks;
+  }
+
+  /** PostgreSQL request path: lease and all state transitions share one UoW. */
+  async leasePersistent(workerId: string, limit = 1, executorIds: string[] = [], actorId = 'w00123'): Promise<EvaluationTask[]> {
+    if (!this.domainUnitOfWork?.isPostgres) return this.lease(workerId, limit, executorIds, actorId);
+    return this.domainUnitOfWork.run((store) => {
+      if (!workerId.trim()) throw new BadRequestException({ code: 'WORKER_ID_REQUIRED', message: '评测环境必须声明 workerId' });
+      const now = Date.now();
+      for (const run of store.systemRuns()) {
+        if (run.status !== 'RUNNING' || !run.leaseExpiresAt || Date.parse(run.leaseExpiresAt) > now) continue;
+        store.releaseLease(run.id, '评测任务租约超时，已重新排队');
+      }
+      const wanted = Math.max(1, Math.min(limit, MAX_LEASE_BATCH));
+      const tasks: EvaluationTask[] = [];
+      for (const run of store.systemRuns()) {
+        if (tasks.length >= wanted || run.status !== 'QUEUED' || run.evaluationBatchId) continue;
+        try { store.assertGradingRunScope(run.id, actorId); } catch { continue; }
+        let task: EvaluationTask | undefined;
+        try {
+          task = this.taskFor(store, run, workerId, LEASE_SECONDS);
+        } catch (error) {
+          store.failRun(run.id, error instanceof Error ? error.message : String(error));
+          continue;
+        }
+        if (!task) continue;
+        if (executorIds.length && !executorIds.includes(task.engine.id)) {
+          store.releaseLease(run.id);
+          continue;
+        }
+        tasks.push(task);
+      }
+      return tasks;
+    });
   }
 
   private assertLease(runId: string, leaseId: string, actorId: string): GradingRun {
@@ -140,14 +175,47 @@ export class EvaluationTaskService {
     return { leaseExpiresAt: this.store.extendLease(run.id, LEASE_SECONDS) };
   }
 
+  async heartbeatPersistent(runId: string, leaseId: string, actorId = 'w00123'): Promise<{ leaseExpiresAt: string }> {
+    if (!this.domainUnitOfWork?.isPostgres) return this.heartbeat(runId, leaseId, actorId);
+    return this.domainUnitOfWork.run((store) => {
+      store.assertGradingRunScope(runId, actorId);
+      const run = store.getRun(runId);
+      if (run.status === 'GRADED') throw new ConflictException({ code: 'TASK_ALREADY_COMPLETED', message: '该评测任务已完成' });
+      if (!run.leaseId || run.leaseId !== leaseId) throw new ConflictException({ code: 'TASK_LEASE_INVALID', message: '租约已失效，任务可能已被重新分配' });
+      return { leaseExpiresAt: store.extendLease(run.id, LEASE_SECONDS) };
+    });
+  }
+
   complete(runId: string, leaseId: string, result: Record<string, unknown>, actorId = 'w00123'): StoredResult {
     this.assertLease(runId, leaseId, actorId);
     return this.store.completeRun(runId, result);
   }
 
+  async completePersistent(runId: string, leaseId: string, result: Record<string, unknown>, actorId = 'w00123'): Promise<StoredResult> {
+    if (!this.domainUnitOfWork?.isPostgres) return this.complete(runId, leaseId, result, actorId);
+    return this.domainUnitOfWork.run((store) => {
+      store.assertGradingRunScope(runId, actorId);
+      const run = store.getRun(runId);
+      if (run.status === 'GRADED') throw new ConflictException({ code: 'TASK_ALREADY_COMPLETED', message: '该评测任务已完成' });
+      if (!run.leaseId || run.leaseId !== leaseId) throw new ConflictException({ code: 'TASK_LEASE_INVALID', message: '租约已失效，任务可能已被重新分配' });
+      return store.completeRun(runId, result);
+    });
+  }
+
   fail(runId: string, leaseId: string, reason: string, actorId = 'w00123'): GradingRun {
     this.assertLease(runId, leaseId, actorId);
     return this.store.failRun(runId, reason || '评测环境未给出失败原因');
+  }
+
+  async failPersistent(runId: string, leaseId: string, reason: string, actorId = 'w00123'): Promise<GradingRun> {
+    if (!this.domainUnitOfWork?.isPostgres) return this.fail(runId, leaseId, reason, actorId);
+    return this.domainUnitOfWork.run((store) => {
+      store.assertGradingRunScope(runId, actorId);
+      const run = store.getRun(runId);
+      if (run.status === 'GRADED') throw new ConflictException({ code: 'TASK_ALREADY_COMPLETED', message: '该评测任务已完成' });
+      if (!run.leaseId || run.leaseId !== leaseId) throw new ConflictException({ code: 'TASK_LEASE_INVALID', message: '租约已失效，任务可能已被重新分配' });
+      return store.failRun(runId, reason || '评测环境未给出失败原因');
+    });
   }
 
   /** Local repository path of a built-in executor, for a worker on this host. */

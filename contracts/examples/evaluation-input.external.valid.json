@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-08-04T09:00:00.000Z",
+  "event": {
+    "id": "event-example-external",
+    "challengeVersion": "example-parking@1",
+    "rubricVersion": "1.0",
+    "trigger": "IMPORT",
+    "submissionSource": "UPLOAD",
+    "reveal": "IMMEDIATE"
+  },
+  "challenge": {
+    "id": "example-parking",
+    "title": "示例：停车费计算",
+    "version": 1,
+    "evaluationEngine": {
+      "id": "example-external-evaluator",
+      "version": "1.0.0",
+      "mode": "EXTERNAL_CLI",
+      "input": {
+        "format": "JSON",
+        "schemaVersion": "1.0",
+        "contractPath": "contracts/evaluation-input.schema.json"
+      },
+      "output": {
+        "format": "JSON",
+        "schemaVersion": "1.0",
+        "contractPath": "contracts/evaluation-result.schema.json"
+      }
+    }
+  },
+  "submissions": [
+    {
+      "submissionId": "submission-example-001",
+      "subject": {
+        "id": "example-person-001",
+        "name": "示例学员",
+        "orgPath": "/example/"
+      },
+      "snapshot": {
+        "sourceType": "UPLOAD",
+        "snapshotHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifactHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "submittedAt": "2026-08-04T08:55:00.000Z"
+      },
+      "grading": {
+        "runId": "run-example-001",
+        "idempotencyKey": "0123456789abcdef0123456789abcdef",
+        "triggerType": "IMPORT"
+      }
+    }
+  ]
+}

@@ -10,13 +10,13 @@
 |---|---|---|---|
 | `PLATFORM_LOCAL` | 仓库 `executors/<id>/` | 自动评测、管理员发起评测 | `executor`、`agent` |
 | `PACKAGED` | 出题人上传的不可变 ZIP | 自动评测、管理员发起评测 | `package`、`agent` |
-| `EXTERNAL_CLI` | 管理员在线下自行运行 | 线下结果录入 | 输入、输出契约 |
+| `EXTERNAL_CLI` | 管理员在线下自行运行 | 线下结果录入 | 输入、输出约束 |
 
 GitLab CI 自动评测不在当前实现范围内。后续适配器复用同一批次、快照和结果契约，不改变赛题配置模型。
 
 ## 契约如何配置
 
-赛题编辑页不再要求管理员手工填写一组含义相近的“输入路径”和“输出路径”。平台把契约分成三层：
+赛题编辑页不再要求管理员手工填写一组含义相近的“输入路径”和“输出路径”。管理端把它们显示为“输入约束”和“输出约束”，平台把契约分成三层：
 
 | 契约 | 配置位置 | 作用 | 在线评测路径 |
 |---|---|---|---|
@@ -36,6 +36,8 @@ GitLab CI 自动评测不在当前实现范围内。后续适配器复用同一�
 并在 `batch-manifest.json` 的 `contracts.input` / `contracts.output` 中写入源路径、批次内绝对路径和 SHA-256。Code Agent 应读取清单中的物化路径，不应自行推测平台仓库位置。
 
 `instruction.md` 和 Skills 路径使用评测引擎根目录作为基准：内置执行器对应 `executors/<executorId>/`，引擎包对应上传 ZIP 的根目录。每个 Skills 目录必须包含 `SKILL.md`。线下结果录入继续使用 `contracts/evaluation-input.schema.json` 生成清单，输出仍使用统一结果契约。
+
+赛题版本编辑器不接受管理员手填契约路径，而是读取 Git 中的 `contracts/evaluation-contract-catalog.json` 生成输入/输出约束下拉选项。点击“查看详情”可检查固定 Schema、示例和编写说明；点击“复制给 AI 出题”可把这些内容连同约束规则复制到剪贴板。公开选项只包含与当前评测方式匹配的约束；`engine-invocation.schema.json` 等 Worker 内部调用约束仍由平台物化和校验，不作为赛题公开配置。开发赛题时可先阅读目录中的 Schema、`examplePath` 示例和 `docs/evaluation-contract-authoring.md`，再让 AI 生成配置草稿，最终仍由服务端白名单和 Schema 校验决定是否可保存。
 
 ## 平台发起评测
 

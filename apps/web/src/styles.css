@@ -1473,3 +1473,25 @@ h1, h2, h3, h4,
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+.evaluation-contract-select-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.evaluation-contract-select-row select { flex: 1 1 auto; min-width: 0; }
+.contract-detail-button { flex: 0 0 auto; white-space: nowrap; }
+.evaluation-contract-detail-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgb(13 25 42 / 48%); }
+.evaluation-contract-detail-dialog { display: grid; gap: 12px; width: min(980px, 100%); max-height: calc(100vh - 40px); padding: 20px; overflow: auto; box-shadow: 0 18px 60px rgb(13 25 42 / 26%); }
+.evaluation-contract-detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--ui-muted); font-family: var(--ui-mono); font-size: 9px; }
+.evaluation-contract-detail-meta code { max-width: 100%; overflow: hidden; color: var(--ui-ink); text-overflow: ellipsis; white-space: nowrap; }
+.contract-kind-badge { padding: 3px 6px; border: 1px solid var(--ui-line); border-radius: 5px; color: var(--ui-blue); background: var(--ui-blue-soft); font-family: inherit; font-weight: 800; }
+.evaluation-contract-detail-description { margin: 0; color: var(--ui-text); font-size: 11px; line-height: 1.6; }
+.evaluation-contract-copy-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; border: 1px solid var(--ui-line); background: var(--ui-surface); }
+.evaluation-contract-copy-row span { color: var(--ui-muted); font-size: 9px; }
+.evaluation-contract-code, .evaluation-contract-guide { min-width: 0; border-top: 1px solid var(--ui-line); padding-top: 10px; }
+.evaluation-contract-code summary, .evaluation-contract-guide summary { cursor: pointer; color: var(--ui-ink); font-size: 10px; font-weight: 800; }
+.evaluation-contract-code pre, .evaluation-contract-guide pre { max-height: 280px; margin: 9px 0 0; padding: 11px; overflow: auto; border: 1px solid var(--ui-line); border-radius: 5px; color: var(--ui-text); background: var(--ui-surface); font-family: var(--ui-mono); font-size: 9px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.evaluation-contract-guide pre { max-height: 220px; font-family: inherit; }
+
+@media (max-width: 680px) {
+  .evaluation-contract-detail-backdrop { padding: 8px; }
+  .evaluation-contract-detail-dialog { max-height: calc(100vh - 16px); padding: 14px; }
+  .evaluation-contract-copy-row { align-items: flex-start; flex-direction: column; }
+}

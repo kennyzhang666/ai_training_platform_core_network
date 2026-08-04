@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-training-platform.local/contracts/evaluation-contract-catalog.schema.json",
+  "title": "Evaluation Contract Catalog",
+  "description": "平台随 Git 发布的评测输入/输出约束目录。管理员只能选择 visibility=PUBLIC 的约束。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "contracts"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "contracts": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/contract" }
+    }
+  },
+  "$defs": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "visibility", "modes", "schemaVersion", "path", "label", "description", "examplePath", "guidePath"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9.-]{2,95}$" },
+        "kind": { "enum": ["INPUT", "OUTPUT"] },
+        "visibility": { "enum": ["PUBLIC", "INTERNAL"] },
+        "modes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["EXTERNAL_CLI", "PLATFORM_LOCAL", "PACKAGED"] }
+        },
+        "schemaVersion": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$" },
+        "path": { "type": "string", "pattern": "^contracts/[A-Za-z0-9_.-]+\\.schema\\.json$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "examplePath": { "type": "string", "pattern": "^contracts/examples/[A-Za-z0-9_.-]+\\.json$" },
+        "guidePath": { "type": "string", "pattern": "^(docs|contracts)/[A-Za-z0-9_./-]+\\.(md|txt)$" }
+      }
+    }
+  }
+}

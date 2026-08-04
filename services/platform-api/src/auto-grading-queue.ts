@@ -21,7 +21,11 @@ export class AutoGradingQueue implements OnModuleInit {
   constructor(
     @Inject(PlatformStore) private readonly store: PlatformStore,
     @Inject(GRADING_EXECUTOR) private readonly grader: GradingExecutor,
-  ) {}
+  ) {
+    if (process.env.NODE_ENV === 'production' && this.embedded) {
+      throw new Error('EMBEDDED_EVALUATION_WORKER=true is not allowed in production; use an external evaluation worker');
+    }
+  }
 
   onModuleInit(): void {
     if (!this.embedded) return;
