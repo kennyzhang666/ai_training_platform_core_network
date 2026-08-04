@@ -33,7 +33,7 @@ main { max-width: 1240px; margin: 0 auto; padding: 32px 24px 66px; }
 .welcome-copy { position: relative; z-index: 1; }.welcome h1, .page-heading h1, .profile-hero h1, .delivery-heading h1 { margin: 8px 0 10px; font-size: 30px; letter-spacing: -.055em; color: #12213a; }.welcome p:not(.kicker), .page-heading p:not(.kicker), .delivery-heading p:not(.kicker) { margin: 0; color: #68768a; font-size: 14px; line-height: 1.7; }
 .welcome-actions { display: flex; align-items: center; gap: 18px; margin-top: 24px; }.welcome-art { z-index: 1; display: grid; place-items: center; width: 166px; height: 166px; margin-right: 27px; border: 9px solid rgba(255,255,255,.75); border-radius: 50%; background: #dceeff; box-shadow: 0 0 0 1px #b9d9fb, 0 10px 28px rgba(49, 124, 198, .13); text-align: center; }.welcome-art span { color: #5d81aa; font-size: 11px; }.welcome-art strong { margin: 2px 0; color: #176bc2; font-size: 32px; letter-spacing: -.06em; }.welcome-art small { color: #6b88aa; font-size: 10px; }
 
-.primary { width: 100%; border: 0; border-radius: 9px; padding: 12px; color: #fff; background: #176bc2; font-weight: 800; box-shadow: 0 5px 13px rgba(23, 107, 194, .22); }.primary.compact { width: auto; padding: 10px 19px; }.primary:disabled { opacity: .55; cursor: wait; }.text-button, .back-link { border: 0; padding: 0; color: #3479bd; background: transparent; font-size: 12px; font-weight: 800; }.text-button:hover, .back-link:hover { color: #13599e; }
+.primary { width: 100%; border: 0; border-radius: 9px; padding: 12px; color: #fff; background: #176bc2; font-weight: 800; box-shadow: 0 5px 13px rgba(23, 107, 194, .22); }.primary.compact { width: auto; padding: 10px 19px; }.primary:disabled { opacity: .55; cursor: not-allowed; }.text-button, .back-link { border: 0; padding: 0; color: #3479bd; background: transparent; font-size: 12px; font-weight: 800; }.text-button:hover, .back-link:hover { color: #13599e; }
 
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 18px 0; }.stat-card { min-height: 104px; padding: 20px 18px; display: flex; align-items: center; gap: 12px; }.stat-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; font-size: 18px; font-weight: 800; }.stat-icon.blue { color: #2672c4; background: #e4f1ff; }.stat-icon.violet { color: #7865c4; background: #eeeaff; }.stat-icon.green { color: #13825e; background: #ddf7eb; }.stat-icon.orange { color: #bd7a14; background: #fff0d5; }.stat-card div { min-width: 0; }.stat-card strong { display: block; color: #1b2a43; font-size: 24px; letter-spacing: -.05em; }.stat-card div span, .stat-card em { display: block; color: #8592a4; font-size: 11px; font-style: normal; }.stat-card em { margin-left: auto; align-self: flex-end; color: #4d83bc; white-space: nowrap; }
 
@@ -5508,4 +5508,14 @@ label { font-size: 13px; }
   height: 100%;
   object-fit: cover;
   border-radius: inherit;
+}
+
+/* A disabled control is unavailable, not busy: show the standard blocked
+   pointer consistently across every form and admin action. */
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed !important;
 }

@@ -655,6 +655,11 @@ export class PlatformController {
     return this.domainUnitOfWork.run((store) => store.deleteChallenge(challengeId, this.requireAdmin(employeeId)));
   }
 
+  @Delete('/challenges/:challengeId/permanent')
+  async permanentlyDeleteChallenge(@Param('challengeId') challengeId: string, @Headers('x-employee-id') employeeId?: string) {
+    return this.domainUnitOfWork.run((store) => store.permanentlyDeleteChallenge(challengeId, this.requireAdmin(employeeId)));
+  }
+
   @Post('/challenges/:challengeId/archive')
   async archiveChallenge(@Param('challengeId') challengeId: string, @Body() _body: { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     return this.domainUnitOfWork.run((store) => store.archiveChallenge(challengeId, this.requireAdmin(employeeId)));

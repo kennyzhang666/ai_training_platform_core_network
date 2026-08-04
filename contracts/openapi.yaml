@@ -697,6 +697,25 @@ paths:
         '200': { description: 赛题已移入回收站，可通过恢复接口撤销 }
         '403': { description: 管理员无权操作该赛题 }
         '409': { description: 赛题仍有关联的开放训战 }
+  /api/v1/challenges/{challengeId}/permanent:
+    delete:
+      operationId: permanentlyDeleteChallenge
+      summary: 永久删除垃圾箱中的赛题
+      description: 仅允许删除已在垃圾箱中的赛题；存在关联训战时拒绝删除，以保护历史提交和评测证据。
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 赛题已永久删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermanentlyDeletedChallenge' }
+        '403': { description: 管理员无权操作该赛题 }
+        '404': { description: 赛题不存在 }
+        '409': { description: 赛题未在垃圾箱中或仍有关联训战 }
   /api/v1/challenges/{challengeId}/publish:
     post:
       operationId: publishChallenge
@@ -1823,6 +1842,13 @@ components:
         status: { type: string, enum: [DRAFT, PUBLISHED, ARCHIVED] }
         board: { $ref: '#/components/schemas/ChallengeBoard' }
         versions: { type: array, items: { $ref: '#/components/schemas/ChallengeVersion' } }
+    PermanentlyDeletedChallenge:
+      type: object
+      additionalProperties: false
+      required: [id, status]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [PURGED] }
     ChallengeCategory:
       type: string
       enum: [TRAINING, COMPETITION, HARD_PROBLEM]

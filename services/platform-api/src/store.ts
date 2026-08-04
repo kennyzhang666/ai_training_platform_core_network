@@ -2317,12 +2317,35 @@ export class PlatformStore {
   }
 
   /**
-   * Remove a challenge from the active library without destroying its
-   * versions or audit history.  The platform exposes this as DELETE while
-   * retaining the ARCHIVED state so an administrator can restore it later.
+   * Move a challenge to the trash without destroying its versions or audit
+   * history. The platform exposes this as DELETE for backwards compatibility;
+   * permanently deleting an archived item is a separate operation.
    */
   deleteChallenge(challengeId: string, actorId = 'admin-local'): Challenge {
     return this.archiveChallenge(challengeId, actorId);
+  }
+
+  permanentlyDeleteChallenge(challengeId: string, actorId = 'admin-local'): { id: string; status: 'PURGED' } {
+    const challenge = this.getChallengeForAdmin(challengeId, actorId);
+    if (challenge.status !== 'ARCHIVED') throw new ConflictException('only challenges in the trash can be permanently deleted');
+
+    const versionIds = new Set(challenge.versions.map((version) => version.id));
+    const linkedEvents = [...this.events.values()].filter((event) => versionIds.has(event.challengeVersion));
+    if (linkedEvents.length) {
+      throw new ConflictException(`challenge has linked training events: ${linkedEvents.map((event) => event.id).join(', ')}`);
+    }
+
+    const before = {
+      status: challenge.status,
+      archivedFrom: challenge.archivedFrom,
+      versions: challenge.versions.map((version) => ({ id: version.id, version: version.version })),
+    };
+    this.challenges.delete(challengeId);
+    this.hardProblems.delete(challengeId);
+    this.localDemoSeedEnabled = false;
+    this.audit(actorId, 'challenge.purge', `challenge:${challengeId}`, before, { status: 'PURGED' });
+    this.persist();
+    return { id: challengeId, status: 'PURGED' };
   }
 
   restoreChallenge(challengeId: string, actorId = 'admin-local'): Challenge {

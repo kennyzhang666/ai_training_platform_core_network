@@ -963,6 +963,25 @@ test('administrator workspace endpoints manage challenge versions and announceme
     assert.equal(restored.status, 201);
     assert.equal((await restored.json() as { status: string }).status, 'PUBLISHED');
 
+    const purgeChallenge = await fetch(`${baseUrl}/api/v1/challenges`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'admin-api-purge', ownerOrgPath: '/', origin: 'OFFICIAL', category: 'TRAINING', status: 'DRAFT', versions: [{
+          id: 'admin-api-purge@1', challengeId: 'admin-api-purge', version: 1, title: 'API 永久删除题', zone: 'YELLOW',
+          languagePolicy: { mode: 'fixed', languages: ['python'] }, deliveryPolicy: { allowedSources: ['UPLOAD'], upload: { formats: ['zip'] } },
+          rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'DRAFT',
+        }],
+      }),
+    });
+    assert.equal(purgeChallenge.status, 201);
+    const purgeArchived = await fetch(`${baseUrl}/api/v1/challenges/admin-api-purge`, { method: 'DELETE' });
+    assert.equal(purgeArchived.status, 200);
+    assert.equal((await purgeArchived.json() as { status: string }).status, 'ARCHIVED');
+    const purged = await fetch(`${baseUrl}/api/v1/challenges/admin-api-purge/permanent`, { method: 'DELETE' });
+    assert.equal(purged.status, 200);
+    assert.deepEqual(await purged.json() as { id: string; status: string }, { id: 'admin-api-purge', status: 'PURGED' });
+    assert.equal((await fetch(`${baseUrl}/api/v1/challenges/admin-api-purge`)).status, 404);
+
     const editableEvent = await fetch(`${baseUrl}/api/v1/events`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ id: 'admin-api-delete-event', challengeVersion: 'parking-fee-01@1', submissionSource: 'UPLOAD', trigger: 'IMPORT', reveal: 'IMMEDIATE' }),

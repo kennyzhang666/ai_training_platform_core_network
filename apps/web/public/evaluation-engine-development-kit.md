@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：0.8。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：0.8.1。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -13,7 +13,7 @@
 
 # 评测引擎开发指南
 
-> 版本：0.8
+> 版本：0.8.1
 > 用途：供评测引擎开发者和其他 AI 阅读。仓库内 contracts/ 是最终事实来源；本文档不包含员工信息、凭据或运行日志。
 
 ## 1. 平台边界
@@ -283,10 +283,10 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台开发总览
 
-> 当前版本：`v0.8.0`
+> 当前版本：`v0.8.1`
 > 更新日期：2026-08-05
-> 当前阶段：v0.8.0 评测运行环境、管理端可运营性和品牌体验代码已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
-> 发布范围：默认 OpenCode 运行配置与诊断、受控连通性测试、Worker 日志与 Agent 交互记录、独立评测引擎开发资料包、多人调部门、个人资料和本地多身份切换已纳入本版本。
+> 当前阶段：v0.8.1 管理端交互状态和赛题生命周期修复已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
+> 发布范围：在 v0.8.0 评测运行环境和管理运营纵切面基础上，补齐禁用控件鼠标反馈、垃圾箱赛题永久删除、审计保护和对应契约/回归测试。
 > 文档职责：项目架构、整体设计、版本沿革、当前边界、后续路线和 Codex 交接入口
 
 ## 1. 如何使用和维护本文档
@@ -483,7 +483,7 @@ Platform API 校验、重算、幂等保存
 
 员工只能看到按训战揭晓策略开放的结果；管理员在权限范围内可进行运营和复核。
 
-## 5. 当前实现状态（v0.8.0）
+## 5. 当前实现状态（v0.8.1）
 
 ### 5.1 已可本地验收
 
@@ -561,7 +561,7 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 - v2 备份恢复在打开数据库事务前完成图谱预检，避免将明显损坏的备份带入目标库清空/写入阶段。
 - 根目录、Web 和 API 版本号已同步为 `0.7.0`；目标环境的对象存储策略、身份网关/Worker 服务身份、备份恢复和回滚门禁仍需复验。
 
-### 5.4 v0.8.0 发布状态（2026-08-05）
+### 5.4 v0.8.0 发布状态（历史，2026-08-05）
 
 本轮围绕“评测环境可配置、运行可观测、管理可运营、品牌可识别”完成以下代码纵切面：
 
@@ -578,6 +578,16 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 
 版本验证记录：`pnpm lint`、`pnpm build`、`pnpm contract:test`、`pnpm grader:test`、`pnpm test`、`pnpm acceptance:local` 和 `git diff --check` 均应在发布前通过；本次发布还需确认根目录、Web、API 版本号一致且 Git 标签为 `v0.8.0`。
 
+### 5.5 v0.8.1 发布状态（2026-08-05）
+
+本次补丁版本聚焦管理端不可点击状态和赛题生命周期：
+
+- 所有 `button:disabled`、禁用表单控件和 `aria-disabled="true"` 控件统一显示 `not-allowed` 鼠标样式，移除禁用按钮的 `wait` 旋转光标，避免把“不可操作”和“正在处理”混淆；
+- 垃圾箱赛题新增永久删除 API `DELETE /api/v1/challenges/{challengeId}/permanent` 和管理端操作按钮；
+- 永久删除仅接受 `ARCHIVED` 赛题；如果赛题版本仍关联训战则返回 `409`，不删除历史提交、评测证据或关联关系；成功操作写入 `challenge.purge` 审计记录；
+- OpenAPI、独立评测资料包、中文错误提示和存储/API 回归测试已同步。
+
+版本验证记录：`pnpm --filter @ai-training/platform-api test`（123 项，122 通过、1 项显式跳过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm lint`、`pnpm --filter @ai-training/web build` 和 `git diff --check` 通过；根目录、Web、API 版本均为 `0.8.1`。
 ## 6. 版本沿革
 
 详细变更和修复见 `CHANGELOG.md`，这里仅保留交接所需的架构演进。
@@ -594,6 +604,7 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 | `v0.6.1` | 2026-08-03 | 修复浏览器人员配置失败和 CORS 方法限制；补齐组织编辑、安全删除、权限边界与回归测试；重建持续维护的开发交接文档。 |
 | `v0.7.0` | 2026-08-04 | 发布生产数据与身份底座纵切面、规范化 PostgreSQL 迁移、W1 组织/人员 Repository、持久化上传会话、CAS 写入保护及备份恢复演练；目标环境上线门禁仍待执行。 |
 | `v0.8.0` | 2026-08-05 | 发布正式评测运行环境纵切面、OpenCode 配置诊断与测试、Worker 日志/交互记录、独立评测引擎资料包、批量调部门和品牌体验更新；生产沙箱与目标环境门禁仍待复验。 |
+| `v0.8.1` | 2026-08-05 | 修复禁用控件鼠标反馈，新增垃圾箱赛题永久删除、关联训战保护、审计记录及对应契约和回归测试。 |
 
 ## 7. 后续开发路线
 
@@ -612,9 +623,9 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 
 验收证据：PostgreSQL 集成测试、并发唯一性测试、SSO 越权矩阵、对象存储集成测试、迁移回滚演练记录。
 
-### 7.2 v0.8.0：正式评测运行环境（已发布，2026-08-05）
+### 7.2 v0.8.x：正式评测运行环境（已发布，2026-08-05）
 
-v0.8.0 已完成运行配置、Worker 诊断、受控配置测试、日志目录、独立评测引擎资料包和管理端运行详情的代码纵切面。目标环境还需要继续完成以下部署级工作：
+v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录、独立评测引擎资料包、管理端运行详情和赛题生命周期管理的代码纵切面。目标环境还需要继续完成以下部署级工作：
 
 - Worker 使用服务身份和短期令牌，不再借用员工身份头；
 - Code Agent 命令在部署环境使用受控模板/注册表，禁止任意可执行文件和参数逃逸；
@@ -659,7 +670,7 @@ v0.8.0 已完成运行配置、Worker 诊断、受控配置测试、日志目录
 1. 在目标环境接入真实 S3 兼容对象存储，验证上传确认、哈希、下载物化、Worker 清理和故障重试（本地 MinIO 生产配置验收已完成）；
 2. 接入真实 OIDC/JWKS 与 Worker 服务身份，执行组织/角色/场次访问矩阵及审计留存验收；
 3. 在目标环境复验 PostgreSQL 迁移、JSON 导入、备份恢复、并发租约，并补容量压测和安全扫描；
-4. 复核 OpenAPI、Schema、迁移、CHANGELOG 和回滚清单后，在目标环境完成 v0.8.0 的身份、对象存储、Worker 沙箱和回滚门禁。
+4. 复核 OpenAPI、Schema、迁移、CHANGELOG 和回滚清单后，在目标环境完成 v0.8.x 的身份、对象存储、Worker 沙箱和回滚门禁。
 
 开始任务前还应检查：
 
@@ -743,7 +754,7 @@ git diff --check
 - `contracts/evaluation-contract-catalog.json`：Git 固定的评测输入/输出下拉目录；
 - `docs/evaluation-contract-authoring.md`：管理员与 AI 开发赛题时的契约选择、示例和配置说明；
 - `docs/evaluation-engine-protocol.md`：评测引擎、Worker 与 Code Agent ABI；
-- `docs/v0.8-development-manual.md`：v0.8.0 评测运行环境、Worker 可观测性和管理运营开发手册；
++ `docs/v0.8-development-manual.md`：v0.8.1 评测运行环境、Worker 可观测性和管理运营开发手册；
 - `docs/submission-contract.md`：赛题交付目录规范；
 - `docs/capability-model.md`：四维、16 点与八能力域计算模型；
 - `docs/architecture/grading-flow.md`：当前评测数据流；
@@ -759,7 +770,7 @@ git diff --check
 
 # 分组核心网AI能力提升平台
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.0`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.1`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
 
 ## 当前能力
 
@@ -776,6 +787,7 @@ git diff --check
 - 评测引擎开发指南与独立 Markdown/ZIP 资料包，可脱离代码仓库交给其他 AI 开发；
 - 员工昵称/头像、多人批量调部门、部门层级自动识别和本地多身份切换；
 - 服务端统一校验训战时间窗口，窗口外不可进入或提交。
+- 垃圾箱赛题支持带审计的永久删除；所有禁用控件统一显示禁止点击光标。
 
 当前数据、交付件、身份和 Git 均使用本地适配器，不能直接作为生产部署方案。完整架构、限制和版本沿革见开发总览。
 
@@ -848,7 +860,7 @@ pnpm acceptance:local
 - [`CHANGELOG.md`](CHANGELOG.md)：逐版本详细记录；
 - [`contracts/openapi.yaml`](contracts/openapi.yaml)：API 契约；
 - [`docs/evaluation-engine-protocol.md`](docs/evaluation-engine-protocol.md)：Worker、Code Agent 和评测引擎协议；
-- [`docs/v0.8-development-manual.md`](docs/v0.8-development-manual.md)：v0.8.0 评测运行环境与管理运营开发手册；
++ [`docs/v0.8-development-manual.md`](docs/v0.8-development-manual.md)：v0.8.1 评测运行环境与管理运营开发手册；
 - [`docs/submission-contract.md`](docs/submission-contract.md)：交付目录契约；
 - [`docs/capability-model.md`](docs/capability-model.md)：能力模型；
 - [`AI训战平台设计方案.html`](AI训战平台设计方案.html)：原始产品设计参考。
@@ -3294,6 +3306,25 @@ paths:
         '200': { description: 赛题已移入回收站，可通过恢复接口撤销 }
         '403': { description: 管理员无权操作该赛题 }
         '409': { description: 赛题仍有关联的开放训战 }
+  /api/v1/challenges/{challengeId}/permanent:
+    delete:
+      operationId: permanentlyDeleteChallenge
+      summary: 永久删除垃圾箱中的赛题
+      description: 仅允许删除已在垃圾箱中的赛题；存在关联训战时拒绝删除，以保护历史提交和评测证据。
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 赛题已永久删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermanentlyDeletedChallenge' }
+        '403': { description: 管理员无权操作该赛题 }
+        '404': { description: 赛题不存在 }
+        '409': { description: 赛题未在垃圾箱中或仍有关联训战 }
   /api/v1/challenges/{challengeId}/publish:
     post:
       operationId: publishChallenge
@@ -4420,6 +4451,13 @@ components:
         status: { type: string, enum: [DRAFT, PUBLISHED, ARCHIVED] }
         board: { $ref: '#/components/schemas/ChallengeBoard' }
         versions: { type: array, items: { $ref: '#/components/schemas/ChallengeVersion' } }
+    PermanentlyDeletedChallenge:
+      type: object
+      additionalProperties: false
+      required: [id, status]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [PURGED] }
     ChallengeCategory:
       type: string
       enum: [TRAINING, COMPETITION, HARD_PROBLEM]
@@ -6382,11 +6420,11 @@ W0/W1 及相关生产底座已随 v0.7.0 发布：
 
 --- BEGIN FILE: docs/v0.8-development-manual.md ---
 
-# v0.8.0 评测运行环境与管理运营开发手册
+# v0.8.1 评测运行环境与管理运营开发手册
 
-> 面向开发者：Luna 及后续参与 v0.8.0 的工程人员
-> 基线版本：`v0.7.0`
-> 文档状态：v0.8.0 已发布；目标环境沙箱、Worker 服务身份和回滚门禁仍需在内网复验
+> 面向开发者：Luna 及后续参与 v0.8.x 的工程人员
+> 基线版本：`v0.8.0`
+> 文档状态：v0.8.1 已发布；目标环境沙箱、Worker 服务身份和回滚门禁仍需在内网复验
 > 最后核对日期：2026-08-05
 
 ## 1. 使用方式
@@ -6402,7 +6440,7 @@ W0/W1 及相关生产底座已随 v0.7.0 发布：
 
 ## 2. 版本目标
 
-v0.8.0 让评测环境“能配置、能诊断、能测试、能追溯”，并补齐管理端日常运营能力：
+v0.8.1 延续 v0.8.0 的评测环境和管理运营能力，并补齐管理端交互状态与赛题生命周期：
 
 - 管理员可以恢复 OpenCode 默认启动命令和任务指令，查看平台配置与 Worker 本地配置来源；
 - 配置测试只在受控开发环境执行合成批次，不得让 API 进程在生产环境启动 Agent；
@@ -6411,6 +6449,7 @@ v0.8.0 让评测环境“能配置、能诊断、能测试、能追溯”，并�
 - 管理员可批量调整员工部门，员工可设置昵称和头像，姓名/工号仍由统一认证提供；
 - 本地开发可切换测试身份，生产构建默认隐藏该入口；
 - 网站品牌统一为“分组核心网AI能力提升平台”。
+- 所有禁用控件统一使用 `not-allowed` 鼠标样式；垃圾箱赛题支持带审计的永久删除，存在关联训战时保留并拒绝删除。
 
 ## 3. 纵切面与事实来源
 
@@ -6502,7 +6541,7 @@ git diff --check
 - 多人调部门失败时不会绕过组织范围，成功后员工列表和审计均刷新；
 - 训战开始前/结束后无法进入和提交；
 - 生产构建没有本地身份切换入口；
-- 根目录、Web、API 三个 `package.json` 均为 `0.8.0`，资料包版本为 `0.8`，`CHANGELOG.md` 和 `DEVELOPMENT_PLAN.md` 已同步。
+- 根目录、Web、API 三个 `package.json` 均为 `0.8.1`，资料包版本为 `0.8.1`，`CHANGELOG.md` 和 `DEVELOPMENT_PLAN.md` 已同步。
 
 ## 9. 未解决的生产门禁
 
@@ -6808,7 +6847,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {

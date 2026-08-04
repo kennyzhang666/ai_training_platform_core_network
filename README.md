@@ -1,6 +1,6 @@
 # 分组核心网AI能力提升平台
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.0`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.1`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
 
 ## 当前能力
 
@@ -17,6 +17,7 @@
 - 评测引擎开发指南与独立 Markdown/ZIP 资料包，可脱离代码仓库交给其他 AI 开发；
 - 员工昵称/头像、多人批量调部门、部门层级自动识别和本地多身份切换；
 - 服务端统一校验训战时间窗口，窗口外不可进入或提交。
+- 垃圾箱赛题支持带审计的永久删除；所有禁用控件统一显示禁止点击光标。
 
 当前数据、交付件、身份和 Git 均使用本地适配器，不能直接作为生产部署方案。完整架构、限制和版本沿革见开发总览。
 
@@ -89,7 +90,7 @@ pnpm acceptance:local
 - [`CHANGELOG.md`](CHANGELOG.md)：逐版本详细记录；
 - [`contracts/openapi.yaml`](contracts/openapi.yaml)：API 契约；
 - [`docs/evaluation-engine-protocol.md`](docs/evaluation-engine-protocol.md)：Worker、Code Agent 和评测引擎协议；
-- [`docs/v0.8-development-manual.md`](docs/v0.8-development-manual.md)：v0.8.0 评测运行环境与管理运营开发手册；
++ [`docs/v0.8-development-manual.md`](docs/v0.8-development-manual.md)：v0.8.1 评测运行环境与管理运营开发手册；
 - [`docs/submission-contract.md`](docs/submission-contract.md)：交付目录契约；
 - [`docs/capability-model.md`](docs/capability-model.md)：能力模型；
 - [`AI训战平台设计方案.html`](AI训战平台设计方案.html)：原始产品设计参考。

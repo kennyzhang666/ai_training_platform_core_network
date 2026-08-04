@@ -506,6 +506,42 @@ test('administrator can create a draft version, update it, publish it and archiv
   assert.ok(store.listAudits().some((item) => item.action === 'challenge.restore'));
 });
 
+test('administrator can permanently delete an archived challenge with no linked training event', () => {
+  const store = new PlatformStore(':memory:');
+  store.createChallenge({
+    id: 'admin-purge-01', ownerOrgPath: '/', origin: 'OFFICIAL', status: 'DRAFT', versions: [{
+      id: 'admin-purge-01@1', challengeId: 'admin-purge-01', version: 1, title: '永久删除测试题', zone: 'YELLOW',
+      languagePolicy: { mode: 'fixed', languages: ['python'] }, deliveryPolicy: { allowedSources: ['UPLOAD'], upload: { formats: ['zip'] } },
+      rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'DRAFT',
+    }],
+  }, 'admin-test');
+  store.deleteChallenge('admin-purge-01', 'admin-test');
+  const purged = store.permanentlyDeleteChallenge('admin-purge-01', 'admin-test');
+  assert.deepEqual(purged, { id: 'admin-purge-01', status: 'PURGED' });
+  assert.throws(() => store.getChallenge('admin-purge-01'), /not found/);
+  assert.ok(store.listAudits().some((item) => item.action === 'challenge.purge' && item.target === 'challenge:admin-purge-01'));
+});
+
+test('permanent challenge deletion only accepts trash items and preserves linked event integrity', () => {
+  const store = new PlatformStore(':memory:');
+  store.createChallenge({
+    id: 'admin-purge-linked', ownerOrgPath: '/', origin: 'OFFICIAL', status: 'DRAFT', versions: [{
+      id: 'admin-purge-linked@1', challengeId: 'admin-purge-linked', version: 1, title: '关联训战题', zone: 'YELLOW',
+      languagePolicy: { mode: 'fixed', languages: ['python'] }, deliveryPolicy: { allowedSources: ['UPLOAD'], upload: { formats: ['zip'] } },
+      rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'DRAFT',
+    }],
+  }, 'admin-test');
+  assert.throws(() => store.permanentlyDeleteChallenge('admin-purge-linked', 'admin-test'), /only challenges in the trash/);
+  store.publishChallenge('admin-purge-linked', 'admin-test');
+  store.createEvent({
+    id: 'event-admin-purge-linked', challengeVersion: 'admin-purge-linked@1', submissionSource: 'UPLOAD', trigger: 'IMPORT', reveal: 'IMMEDIATE', status: 'CLOSED',
+  }, 'admin-test');
+  store.deleteChallenge('admin-purge-linked', 'admin-test');
+  assert.throws(() => store.permanentlyDeleteChallenge('admin-purge-linked', 'admin-test'), /linked training events/);
+  assert.equal(store.getChallenge('admin-purge-linked').status, 'ARCHIVED');
+  assert.equal(store.getEvent('event-admin-purge-linked').status, 'CLOSED');
+});
+
 test('administrator can edit and delete an unused training event without losing audit or season integrity', () => {
   const store = new PlatformStore(':memory:');
   const event = store.createEvent({
