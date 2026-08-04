@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.1",
+  "id": "minimal-score-engine",
+  "version": "1.0.0",
+  "title": "最小独立评测引擎",
+  "description": "读取样例提交的 answer.txt，演示输入、评分、证据和结果契约。",
+  "runtime": {
+    "type": "python",
+    "entrypoint": "judge.py"
+  },
+  "agent": {
+    "instruction": "instruction.md",
+    "skills": ["skills/evaluation/SKILL.md"]
+  },
+  "limits": {
+    "wallClockSeconds": 60,
+    "memoryMB": 512,
+    "outputBytes": 4194304
+  }
+}

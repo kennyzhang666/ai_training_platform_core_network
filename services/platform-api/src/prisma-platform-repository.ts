@@ -77,6 +77,8 @@ export function mapUser(row: UserRow): AppUser {
     id: row.id,
     employeeNo: row.employeeNo,
     name: row.name,
+    ...(row.nickname ? { nickname: row.nickname } : {}),
+    ...(row.avatarDataUrl ? { avatarDataUrl: row.avatarDataUrl } : {}),
     orgUnitId: row.orgUnitId ?? '',
     orgPath: row.orgPath ?? '',
     ...(row.departmentHint ? { departmentHint: row.departmentHint } : {}),
@@ -224,6 +226,7 @@ class PrismaUserRepository implements UserRepository {
           OR: [
             { employeeNo: { contains: query.query.trim(), mode: 'insensitive' } },
             { name: { contains: query.query.trim(), mode: 'insensitive' } },
+            { nickname: { contains: query.query.trim(), mode: 'insensitive' } },
           ],
         }
         : {}),
@@ -293,6 +296,8 @@ class PrismaUserRepository implements UserRepository {
               },
             }
             : {}),
+          ...(patch.nickname !== undefined ? { nickname: patch.nickname } : {}),
+          ...(patch.avatarDataUrl !== undefined ? { avatarDataUrl: patch.avatarDataUrl } : {}),
         },
         include: { roleBindings: true },
       });

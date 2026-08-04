@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  appendFileSync,
   cpSync,
   existsSync,
   lstatSync,
@@ -44,15 +45,127 @@ const intervalSeconds = Math.max(1, Number(options.get('interval') ?? 5));
 const once = options.has('once');
 const engineCache = resolve(options.get('cache') ?? join(root, 'tmp', 'worker-engines'));
 const batchRoot = resolve(options.get('batch-root') ?? process.env.EVALUATION_BATCH_ROOT ?? join(root, 'tmp', 'evaluation-batches'));
+const logRoot = resolve(options.get('log-root') ?? process.env.EVALUATION_LOG_ROOT ?? join(root, 'tmp', 'evaluation-logs'));
 const keepBatches = options.has('keep-batches') || process.env.EVALUATION_KEEP_BATCHES === 'true';
 const python = process.env.PYTHON ?? (existsSync(join(root, '.venv', 'Scripts', 'python.exe')) ? join(root, '.venv', 'Scripts', 'python.exe') : 'python');
 const commandLineOverride = options.get('agent-command');
 const environmentCodeAgentCommand = process.env.CODE_AGENT_COMMAND;
+const DEFAULT_AGENT_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
+const DEFAULT_WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024;
+const configuredAgentOutputMaxBytes = Number(process.env.EVALUATION_AGENT_OUTPUT_MAX_BYTES ?? DEFAULT_AGENT_OUTPUT_MAX_BYTES);
+const agentOutputMaxBytes = Number.isFinite(configuredAgentOutputMaxBytes)
+  ? Math.max(16 * 1024, Math.min(64 * 1024 * 1024, Math.floor(configuredAgentOutputMaxBytes)))
+  : DEFAULT_AGENT_OUTPUT_MAX_BYTES;
+const configuredWorkerLogMaxBytes = Number(process.env.EVALUATION_WORKER_LOG_MAX_BYTES ?? DEFAULT_WORKER_LOG_MAX_BYTES);
+const workerLogMaxBytes = Number.isFinite(configuredWorkerLogMaxBytes)
+  ? Math.max(256 * 1024, Math.min(256 * 1024 * 1024, Math.floor(configuredWorkerLogMaxBytes)))
+  : DEFAULT_WORKER_LOG_MAX_BYTES;
+
+function safeLogSegment(value, fallback = 'unknown') {
+  const normalized = String(value ?? '').trim().replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+|\.+$/g, '').slice(0, 96);
+  return normalized || fallback;
+}
+
+function redactLogText(value, maxBytes = 8192) {
+  let text = String(value ?? '');
+  text = text
+    .replace(/((?:authorization|proxy-authorization)\s*[:=]\s*bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
+    .replace(/((?:authorization|proxy-authorization)\s+bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
+    .replace(/((?:"?(?:authorization|proxy-authorization|token|access[_-]?token|api[_-]?key|secret|password|cookie|credential)"?)\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
+    .replace(/((?:token|access[_-]?token|api[_-]?key|secret|password|cookie|credential)\s*[:=]\s*)[^\s,;]+/gi, '$1[REDACTED]')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{16,}|xox[baprs]-[A-Za-z0-9-]+)\b/g, '[REDACTED]');
+  const bytes = Buffer.byteLength(text, 'utf8');
+  if (bytes <= maxBytes) return text;
+  return `${Buffer.from(text, 'utf8').subarray(0, maxBytes).toString('utf8')}…[TRUNCATED]`;
+}
+
+let loggingUnavailable = false;
+function appendLogFile(path, content) {
+  if (loggingUnavailable) return;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    appendFileSync(path, content, 'utf8');
+  } catch (error) {
+    loggingUnavailable = true;
+    console.error(`[${workerId}] 日志目录不可写，后续日志仅输出到控制台: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+const workerLogDirectory = join(logRoot, safeLogSegment(workerId, 'worker'));
+const workerLogPath = join(workerLogDirectory, 'worker.log');
+function writeWorkerLog(event, details = {}) {
+  const line = `${JSON.stringify({
+    timestamp: new Date().toISOString(),
+    workerId: safeLogSegment(workerId, 'worker'),
+    event,
+    ...details,
+  })}\n`;
+  try {
+    if (existsSync(workerLogPath) && lstatSync(workerLogPath).size + Buffer.byteLength(line, 'utf8') > workerLogMaxBytes) {
+      writeFileSync(workerLogPath, `${JSON.stringify({ timestamp: new Date().toISOString(), workerId: safeLogSegment(workerId, 'worker'), event: 'worker.log_truncated', maxBytes: workerLogMaxBytes })}\n`, 'utf8');
+    }
+  } catch {
+    // appendLogFile below remains the single error-reporting path.
+  }
+  appendLogFile(workerLogPath, line);
+}
+
+function createBatchLog(task) {
+  const batchDirectory = join(workerLogDirectory, 'batches', safeLogSegment(task.batchId, 'batch'), safeLogSegment(task.leaseId, 'lease'));
+  const interactionPath = join(batchDirectory, 'interaction.jsonl');
+  const stdoutPath = join(batchDirectory, 'agent.stdout.log');
+  const stderrPath = join(batchDirectory, 'agent.stderr.log');
+  appendLogFile(stdoutPath, '');
+  appendLogFile(stderrPath, '');
+  const outputBytes = { stdout: 0, stderr: 0 };
+  const outputTruncated = { stdout: false, stderr: false };
+  const writeInteraction = (event, details = {}) => appendLogFile(interactionPath, `${JSON.stringify({
+    timestamp: new Date().toISOString(),
+    workerId: safeLogSegment(workerId, 'worker'),
+    batchId: task.batchId,
+    leaseId: task.leaseId,
+    event,
+    ...details,
+  })}\n`);
+  const appendAgentOutput = (stream, value) => {
+    const redacted = redactLogText(value, agentOutputMaxBytes);
+    const bytes = Buffer.byteLength(redacted, 'utf8');
+    const remaining = Math.max(0, agentOutputMaxBytes - outputBytes[stream]);
+    if (!remaining) {
+      if (!outputTruncated[stream]) {
+        outputTruncated[stream] = true;
+        writeInteraction('agent.output_truncated', { stream, maxBytes: agentOutputMaxBytes });
+      }
+      return;
+    }
+    const truncationMarker = '\n[TRUNCATED]\n';
+    const clipLimit = Math.max(0, remaining - Buffer.byteLength(truncationMarker, 'utf8'));
+    const clipped = bytes > remaining ? `${Buffer.from(redacted, 'utf8').subarray(0, clipLimit).toString('utf8')}${truncationMarker}` : redacted;
+    const path = stream === 'stdout' ? stdoutPath : stderrPath;
+    appendLogFile(path, clipped);
+    outputBytes[stream] += Buffer.byteLength(clipped, 'utf8');
+    if (bytes > remaining) outputTruncated[stream] = true;
+    writeInteraction('agent.output', {
+      stream,
+      bytes: Buffer.byteLength(clipped, 'utf8'),
+      preview: redactLogText(value, 4096),
+      truncated: bytes > remaining,
+    });
+  };
+  return {
+    directory: batchDirectory,
+    writeInteraction,
+    appendAgentOutput,
+    paths: { interaction: interactionPath, stdout: stdoutPath, stderr: stderrPath },
+  };
+}
+
 let codeAgentArgs;
 try {
   codeAgentArgs = JSON.parse(options.get('agent-args-json') ?? process.env.CODE_AGENT_ARGS_JSON ?? '[]');
   if (!Array.isArray(codeAgentArgs) || codeAgentArgs.some((value) => typeof value !== 'string')) throw new Error('must be a JSON string array');
 } catch (error) {
+  writeWorkerLog('worker.config_error', { reason: redactLogText(error instanceof Error ? error.message : String(error), 1000) });
   throw new Error(`CODE_AGENT_ARGS_JSON 配置错误: ${error.message}`);
 }
 
@@ -311,11 +424,23 @@ function resolveCodeAgentInvocation(task, manifestPath, cwd) {
   return null;
 }
 
-function runCodeAgent(task, manifestPath, cwd, timeoutMs) {
+function runCodeAgent(task, manifestPath, cwd, timeoutMs, batchLog) {
   const invocation = resolveCodeAgentInvocation(task, manifestPath, cwd);
   if (!invocation) {
     throw new Error('未配置 CODE_AGENT_COMMAND；请将它指向实现 Code Agent batch bridge 契约的可执行文件');
   }
+  const promptIndex = invocation.args.findIndex((value) => value === '--prompt' || value === '-p' || value.startsWith('--prompt='));
+  const prompt = promptIndex >= 0
+    ? (invocation.args[promptIndex].startsWith('--prompt=') ? invocation.args[promptIndex].slice('--prompt='.length) : invocation.args[promptIndex + 1])
+    : null;
+  batchLog.writeInteraction('agent.start', {
+    command: redactLogText(invocation.command, 1024),
+    args: invocation.args.map((value) => redactLogText(value, 4096)),
+    prompt: prompt ? redactLogText(prompt, 8192) : null,
+    workingDirectory: redactLogText(cwd, 2048),
+    manifestPath: redactLogText(manifestPath, 2048),
+    timeoutSeconds: Math.ceil(timeoutMs / 1000),
+  });
   return new Promise((resolvePromise, reject) => {
     const child = spawn(invocation.command, invocation.args, {
       cwd,
@@ -331,22 +456,38 @@ function runCodeAgent(task, manifestPath, cwd, timeoutMs) {
       if (settled) return;
       settled = true;
       child.kill('SIGKILL');
+      batchLog.writeInteraction('agent.timeout', { timeoutSeconds: Math.ceil(timeoutMs / 1000) });
       reject(new Error(`Code Agent bridge 批次执行超时（${Math.ceil(timeoutMs / 1000)} 秒）`));
     }, timeoutMs);
-    child.stdout.on('data', (chunk) => { if (stdout.length < 1024 * 1024) stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { if (stderr.length < 1024 * 1024) stderr += chunk.toString(); });
+    child.stdout.on('data', (chunk) => {
+      const value = chunk.toString();
+      if (stdout.length < agentOutputMaxBytes) stdout += value.slice(0, agentOutputMaxBytes - stdout.length);
+      batchLog.appendAgentOutput('stdout', value);
+    });
+    child.stderr.on('data', (chunk) => {
+      const value = chunk.toString();
+      if (stderr.length < agentOutputMaxBytes) stderr += value.slice(0, agentOutputMaxBytes - stderr.length);
+      batchLog.appendAgentOutput('stderr', value);
+    });
     child.on('error', (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      batchLog.writeInteraction('agent.error', { reason: redactLogText(error.message, 2000) });
       reject(error);
     });
     child.on('exit', (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      batchLog.writeInteraction('agent.exit', {
+        code: code ?? null,
+        signal: signal ?? null,
+        stdoutBytes: Buffer.byteLength(stdout, 'utf8'),
+        stderrBytes: Buffer.byteLength(stderr, 'utf8'),
+      });
       if (code === 0) resolvePromise({ stdout, stderr });
-      else reject(new Error(`Code Agent bridge 退出（code=${code ?? 'null'}, signal=${signal ?? 'none'}）: ${stderr.trim().slice(-1000)}`));
+      else reject(new Error(`Code Agent bridge 退出（code=${code ?? 'null'}, signal=${signal ?? 'none'}）: ${redactLogText(stderr.trim().slice(-1000), 1000)}`));
     });
   });
 }
@@ -354,6 +495,14 @@ function runCodeAgent(task, manifestPath, cwd, timeoutMs) {
 async function runBatch(task) {
   mkdirSync(batchRoot, { recursive: true });
   const directory = mkdtempSync(join(batchRoot, `${task.batchId}-`));
+  const batchLog = createBatchLog(task);
+  batchLog.writeInteraction('batch.start', {
+    submissions: task.submissions.length,
+    engine: `${task.engine.id}@${task.engine.version}`,
+    batchDirectory: redactLogText(directory, 2048),
+    logDirectory: redactLogText(batchLog.directory, 2048),
+  });
+  writeWorkerLog('batch.start', { batchId: task.batchId, leaseId: task.leaseId, submissions: task.submissions.length, engine: `${task.engine.id}@${task.engine.version}` });
   let heartbeat;
   try {
     const materializedEngine = await materializeEngine(task, join(directory, 'engine'));
@@ -404,12 +553,23 @@ async function runBatch(task) {
       resultIndexPath,
     };
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    batchLog.writeInteraction('batch.manifest_ready', {
+      manifestPath: redactLogText(manifestPath, 2048),
+      resultIndexPath: redactLogText(resultIndexPath, 2048),
+      instructionPath: redactLogText(instructionPath, 2048),
+      skillCount: skillPaths.length,
+    });
     const heartbeatMs = Math.max(15_000, Number(process.env.EVALUATION_HEARTBEAT_SECONDS ?? 60) * 1000);
     heartbeat = setInterval(() => {
       void call(`/evaluation-batches/${task.batchId}/heartbeat`, {
         method: 'POST',
         body: JSON.stringify({ leaseId: task.leaseId }),
-      }).catch((error) => console.error(`[${workerId}] 批次心跳失败 ${task.batchId}: ${error.message}`));
+      }).catch((error) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        console.error(`[${workerId}] 批次心跳失败 ${task.batchId}: ${reason}`);
+        batchLog.writeInteraction('batch.heartbeat_failed', { reason: redactLogText(reason, 2000) });
+        writeWorkerLog('batch.heartbeat_failed', { batchId: task.batchId, leaseId: task.leaseId, reason: redactLogText(reason, 2000) });
+      });
     }, heartbeatMs);
     const defaultBatchTimeoutSeconds = Math.max(300, Math.min(
       21_600,
@@ -424,7 +584,8 @@ async function runBatch(task) {
     if (!Number.isFinite(batchTimeoutSeconds) || batchTimeoutSeconds <= 0) {
       throw new Error('CODE_AGENT_BATCH_TIMEOUT_SECONDS 必须是正数');
     }
-    await runCodeAgent(task, manifestPath, directory, batchTimeoutSeconds * 1000);
+    batchLog.writeInteraction('batch.timeout_configured', { timeoutSeconds: batchTimeoutSeconds, heartbeatSeconds: Math.ceil(heartbeatMs / 1000) });
+    await runCodeAgent(task, manifestPath, directory, batchTimeoutSeconds * 1000, batchLog);
     if (!existsSync(resultIndexPath)) throw new Error('Code Agent 未生成批次结果索引');
     const perResultLimit = Math.max(1024, Number(task.engine.limits?.outputBytes ?? 5 * 1024 * 1024));
     const resultIndexLimit = Math.min(
@@ -460,8 +621,13 @@ async function runBatch(task) {
       }
       return { runId: item.runId, result: output };
     });
+    batchLog.writeInteraction('batch.results_validated', { results: results.length, failures: (index.failures ?? []).length });
+    writeWorkerLog('batch.agent_completed', { batchId: task.batchId, leaseId: task.leaseId, results: results.length, failures: (index.failures ?? []).length });
     return { directory, results, failures: index.failures ?? [] };
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    batchLog.writeInteraction('batch.failed', { reason: redactLogText(reason, 4000) });
+    writeWorkerLog('batch.failed', { batchId: task.batchId, leaseId: task.leaseId, reason: redactLogText(reason, 2000) });
     if (!keepBatches) rmSync(directory, { recursive: true, force: true });
     throw error;
   } finally {
@@ -470,13 +636,16 @@ async function runBatch(task) {
 }
 
 async function pump() {
+  writeWorkerLog('lease.request', { api: redactLogText(api, 1024), limit: Number(options.get('batches') ?? 1) });
   const response = await call('/evaluation-batches:lease', {
     method: 'POST',
     body: JSON.stringify({ workerId, limit: Number(options.get('batches') ?? 1) }),
   });
   const { batches } = await response.json();
+  writeWorkerLog('lease.response', { count: batches.length });
   for (const task of batches) {
     console.log(`[${workerId}] 领取批次 ${task.batchId} · ${task.submissions.length} 份提交 · ${task.engine.id}@${task.engine.version}`);
+    writeWorkerLog('batch.leased', { batchId: task.batchId, leaseId: task.leaseId, submissions: task.submissions.length, engine: `${task.engine.id}@${task.engine.version}` });
     let output;
     try {
       output = await runBatch(task);
@@ -486,10 +655,12 @@ async function pump() {
       });
       const summary = await completed.json();
       console.log(`[${workerId}] 完成批次 ${task.batchId} · 成功 ${summary.accepted?.length ?? 0} · 失败 ${summary.rejected?.length ?? 0}`);
+      writeWorkerLog('batch.completed', { batchId: task.batchId, leaseId: task.leaseId, accepted: summary.accepted?.length ?? 0, rejected: summary.rejected?.length ?? 0 });
       if (!keepBatches) rmSync(output.directory, { recursive: true, force: true });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.error(`[${workerId}] 批次失败 ${task.batchId}: ${reason}`);
+      writeWorkerLog('batch.failure_reported', { batchId: task.batchId, leaseId: task.leaseId, reason: redactLogText(reason, 2000) });
       await call(`/evaluation-batches/${task.batchId}/fail`, {
         method: 'POST',
         body: JSON.stringify({ leaseId: task.leaseId, reason }),
@@ -499,10 +670,21 @@ async function pump() {
   return batches.length;
 }
 
-console.log(`[${workerId}] 评测 Worker 已启动 · API ${api}${once ? ' · 单次模式' : ` · 轮询 ${intervalSeconds}s`}`);
+console.log(`[${workerId}] 评测 Worker 已启动 · API ${redactLogText(api, 1024)} · 日志 ${redactLogText(workerLogDirectory, 1024)}${once ? ' · 单次模式' : ` · 轮询 ${intervalSeconds}s`}`);
+writeWorkerLog('worker.start', {
+  api: redactLogText(api, 1024),
+  once,
+  intervalSeconds,
+  batchRoot: redactLogText(batchRoot, 1024),
+  logRoot: redactLogText(logRoot, 1024),
+  logDirectory: redactLogText(workerLogDirectory, 1024),
+  keepBatches,
+  agentOutputMaxBytes,
+});
 do {
   const handled = await pump().catch((error) => {
     console.error(`[${workerId}] 领取批次失败: ${error.message}`);
+    writeWorkerLog('worker.pump_error', { reason: redactLogText(error instanceof Error ? error.message : String(error), 2000) });
     return 0;
   });
   if (once) break;

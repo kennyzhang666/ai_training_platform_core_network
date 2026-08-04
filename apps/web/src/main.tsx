@@ -3,6 +3,11 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { AdminWorkspace } from './admin';
 import { richTextPreview, sanitizeRichText } from './rich-text';
+import { Icon } from './icons';
+import webPackage from '../package.json';
+
+const PLATFORM_VERSION = `v${webPackage.version}`;
+const BRAND_LOGO_URL = `${import.meta.env.BASE_URL}brand-logo.png`;
 
 type View = 'home' | 'challenges' | 'hard-problems' | 'hard-problem-detail' | 'challenge-detail' | 'delivery' | 'profile' | 'report' | 'detailed-report' | 'admin';
 type SubmissionSource = 'UPLOAD' | 'GIT_REF';
@@ -100,19 +105,31 @@ type SubmissionPage = { items: Submission[]; pageInfo: { page: number; pageSize:
 type ProfileHistoryPage = { items: Array<{ submissionId: string; eventId: string; total: number; points?: number; resultId: string; createdAt: string }>; pageInfo: { page: number; pageSize: number; total: number; totalPages: number; hasNext: boolean; hasPrevious: boolean } };
 
 type Profile = {
-  subject: { id: string; name: string; employeeNo: string; orgPath: string; roles: string[]; roleBindings?: Array<{ role: string; scopeOrgPath: string }> };
+  subject: { id: string; name: string; nickname?: string; avatarDataUrl?: string; employeeNo: string; orgPath: string; roles: string[]; roleBindings?: Array<{ role: string; scopeOrgPath: string }> };
   stats: { submissions: number; graded: number; average: number | null; best: number | null; totalPoints?: number };
   history: Array<{ submissionId: string; eventId: string; total: number; points?: number; resultId: string; createdAt: string }>;
   historyPageInfo?: ProfileHistoryPage['pageInfo'];
 };
 
-type LeaderRow = { rank: number; subjectId: string; total: number; submissions: number };
+type LeaderRow = {
+  rank: number;
+  nickname: string;
+  score?: number;
+  points?: number;
+  total: number;
+  submissions: number;
+  isSelf?: boolean;
+  /** Identity fields are returned by the API only for administrators. */
+  subjectId?: string;
+  name?: string;
+  employeeNo?: string;
+};
 type CapabilityDimension = { key: string; label: string; description: string; score: number | null; max: number | null; percent: number | null; latestPercent: number | null; bestPercent: number | null; delta: number | null; evaluatedCount: number; peerMedianPercent?: number | null; peerCount?: number; vsPeerMedian?: number | null; samples: Array<{ submissionId: string; eventId: string; createdAt: string; score: number; max: number; percent: number }> };
 type CapabilityDomain = { key: string; label: string; shortLabel: string; description: string; evidenceMode: 'derived' | 'direct'; criterionKeys: string[]; evidenceKeys: string[]; score: number | null; max: number | null; percent: number | null; latestPercent: number | null; bestPercent: number | null; delta: number | null; sampleCount: number; evidenceCount: number; peerMedianPercent?: number | null; peerCount?: number; vsPeerMedian?: number | null; status: string; samples: Array<{ submissionId: string; eventId: string; createdAt: string; score: number; max: number; percent: number; criterionKeys: string[] }> };
 type CapabilityProfile = {
   subjectId: string;
   capabilityCatalogVersion?: string;
-  summary: { gradedSubmissions: number; overallAverage: number | null; latestTotal: number | null; delta: number | null; strongestDimension: string | null; focusDimension: string | null; strongestDomain?: string | null; focusDomain?: string | null; capabilityCatalogVersion?: string; totalCapabilityDomains?: number; evaluatedCapabilityDomains?: number; zoneStats?: { YELLOW: number; BLUE: number }; totalSkillItems?: number; evaluatedSkillItems?: number; departmentAverage?: number | null; departmentMedian?: number | null; departmentPercentile?: number | null };
+  summary: { gradedSubmissions: number; overallAverage: number | null; latestTotal: number | null; delta: number | null; strongestDimension: string | null; focusDimension: string | null; strongestDomain?: string | null; focusDomain?: string | null; capabilityCatalogVersion?: string; totalCapabilityDomains?: number; evaluatedCapabilityDomains?: number; zoneStats?: { YELLOW: number; BLUE: number }; totalSkillItems?: number; evaluatedSkillItems?: number; departmentAverage?: number | null; departmentMedian?: number | null; departmentPercentile?: number | null; departmentStatsVisible?: boolean };
   dimensions: CapabilityDimension[];
   domains: CapabilityDomain[];
   capabilityDomains?: CapabilityDomain[];
@@ -123,6 +140,7 @@ type CapabilityProfile = {
   trend: Array<{ submissionId: string; eventId: string; createdAt: string; total: number | null; zone?: 'YELLOW' | 'BLUE'; dimensionPercentages: Record<string, number | null>; domainPercentages?: Record<string, number | null> }>;
   zoneStats?: { YELLOW: number; BLUE: number };
   departmentComparison?: { orgPath: string; participantCount: number; average: number | null; median: number | null; percentile: number | null };
+  departmentStatsVisible?: boolean;
   lastUpdated: string | null;
 };
 type Report = {
@@ -147,7 +165,7 @@ type Report = {
   };
   report?: {
     event?: { rank: number | null; percentile: number | null; average: number | null; median?: number | null; participantCount: number };
-    department?: { orgPath: string; rank: number | null; percentile: number | null; average: number | null; median: number | null; participantCount: number };
+    department?: { orgPath: string; rank: number | null; percentile: number | null; average: number | null; median: number | null; participantCount: number; departmentStatsVisible?: boolean };
     summary?: { score: number | null; status: string | null; grade: string | null; evaluatedDimensions: number; totalDimensions: number; passRate: number | null; findingCount: number; diagnosticCount: number; durationMs: number | null };
     submission?: { id: string; eventId: string; subjectId: string; state: string; createdAt: string; sourceType: string; snapshotHash: string; artifactHash?: string; artifactUri?: string; repository?: string; branch?: string; commitSha?: string; submittedAt: string; challengeVersion?: string; rubricVersion?: string };
     timeline?: { submittedAt: string; createdAt: string; startedAt?: string | null; finishedAt?: string | null };
@@ -176,10 +194,22 @@ function DeliveryContractNotice({ version }: { version: ChallengeVersion }) {
 
 const API = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:3000/api/v1';
 const DEFAULT_EMPLOYEE_ID = import.meta.env.VITE_EMPLOYEE_ID ?? 'w00123';
+const ENABLE_LOCAL_IDENTITY_SWITCHER = import.meta.env.DEV || import.meta.env.VITE_LOCAL_IDENTITY_SWITCHER === 'true';
+const LOCAL_IDENTITY_OPTIONS = [
+  { employeeNo: 'w00123', label: '平台管理员', role: '全局管理员' },
+  { employeeNo: 'w00124', label: '参训员工 A', role: '普通员工' },
+  { employeeNo: 'w00126', label: '参训员工 B', role: '普通员工' },
+  { employeeNo: 'w00133', label: '导师', role: '导师' },
+];
 
 function localEmployeeId(): string {
   if (typeof window === 'undefined') return DEFAULT_EMPLOYEE_ID;
   return window.localStorage.getItem('ai-training.employeeId') ?? DEFAULT_EMPLOYEE_ID;
+}
+
+function switchLocalIdentity(employeeNo: string): void {
+  window.localStorage.setItem('ai-training.employeeId', employeeNo);
+  window.location.reload();
 }
 
 function displayPersonName(name?: string): string {
@@ -187,6 +217,14 @@ function displayPersonName(name?: string): string {
   if (name === '本地开发用户') return '平台管理员';
   if (name === '本地部门管理员') return '部门管理员';
   return name.replace(/^本地学员\s*/, '参训员工 ');
+}
+
+function profileDisplayName(subject?: Profile['subject']): string {
+  return subject?.nickname?.trim() || displayPersonName(subject?.name);
+}
+
+function profileInitial(subject?: Profile['subject']): string {
+  return [...profileDisplayName(subject)].slice(0, 1).join('') || '人';
 }
 
 function adminAccessFor(subject?: Profile['subject']): { level: 'GLOBAL' | 'DEPARTMENT'; scopeOrgPaths: string[] } | null {
@@ -211,6 +249,8 @@ function humanizeApiMessage(message: string): string {
   const value = message.trim();
   const rules: Array<[RegExp, string]> = [
     [/event .* is not open/i, '当前训战未开放'],
+    [/event submission window has not started/i, '训战尚未到开放时间'],
+    [/event submission window has ended/i, '训战提交时间已结束'],
     [/event .*outside.*scope|subject is not configured/i, '当前账号不在该训战参训范围内'],
     [/subject is disabled/i, '当前账号已停用'],
     [/upload requires|artifactBase64|artifactUri|workspacePath/i, '请选择有效交付件'],
@@ -289,6 +329,26 @@ function eventTimeLabel(event?: EventConfig): string {
     return startDate === endDate ? `${startDate} ${startClock}–${endClock}开放` : `${startDate} ${startClock} — ${endDate} ${endClock}开放`;
   }
   return event.startsAt ? `${formatDateTime(event.startsAt)}起开放` : `截至 ${formatDateTime(event.endsAt ?? '')}`;
+}
+
+type EventWindowState = 'BEFORE' | 'OPEN' | 'AFTER';
+
+function eventWindowState(event?: Pick<EventConfig, 'startsAt' | 'endsAt'>, currentTime = Date.now()): EventWindowState {
+  const startsAt = event?.startsAt ? Date.parse(event.startsAt) : Number.NaN;
+  if (Number.isFinite(startsAt) && currentTime < startsAt) return 'BEFORE';
+  const endsAt = event?.endsAt ? Date.parse(event.endsAt) : Number.NaN;
+  if (Number.isFinite(endsAt) && currentTime > endsAt) return 'AFTER';
+  return 'OPEN';
+}
+
+function eventCanAcceptSubmission(event?: EventConfig, currentTime = Date.now()): boolean {
+  return Boolean(event && event.status === 'OPEN' && eventWindowState(event, currentTime) === 'OPEN');
+}
+
+function eventWindowMessage(event?: EventConfig, currentTime = Date.now()): string {
+  if (!event) return '训战交付入口暂不可用';
+  if (event.status !== 'OPEN') return '当前训战已结束，无法提交作品';
+  return eventWindowState(event, currentTime) === 'BEFORE' ? '训战尚未到开放时间' : '训战提交时间已结束';
 }
 
 function eventTitle(event: EventConfig, challenges: Challenge[]): string {
@@ -386,15 +446,21 @@ function App() {
   const [reportSubmissionId, setReportSubmissionId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [clock, setClock] = useState(() => Date.now());
   const [profileHistoryBusy, setProfileHistoryBusy] = useState(false);
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [profileEditorBusy, setProfileEditorBusy] = useState(false);
+  const [profileDraft, setProfileDraft] = useState<{ nickname: string; avatarDataUrl: string }>({ nickname: '', avatarDataUrl: '' });
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const profileHistoryRequestRef = useRef(0);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   const selectedEvent = useMemo(() => events.find((item) => item.id === eventId), [events, eventId]);
   const selectedVersion = useMemo(() => challenges.flatMap((challenge) => challenge.versions).find((version) => version.id === challengeVersionId) ?? (selectedEvent && challenges.flatMap((challenge) => challenge.versions).find((version) => version.id === selectedEvent.challengeVersion)), [challenges, challengeVersionId, selectedEvent]);
   const selectedChallenge = useMemo(() => challenges.find((challenge) => challenge.versions.some((version) => version.id === selectedVersion?.id)), [challenges, selectedVersion]);
   const selectedHardProblem = useMemo(() => hardProblems.find((problem) => problem.id === selectedHardProblemId), [hardProblems, selectedHardProblemId]);
   const totalPoints = profile?.stats.totalPoints ?? profile?.history.reduce((sum, item) => sum + (item.points ?? item.total), 0) ?? 0;
-  const currentRank = leaderboard.find((row) => row.subjectId === subjectId)?.rank;
+  const currentRank = leaderboard.find((row) => row.isSelf || row.subjectId === subjectId)?.rank;
   const adminAccess = adminAccessFor(profile?.subject);
 
   async function refresh() {
@@ -444,10 +510,82 @@ function App() {
     }
   }
 
+  function openProfileEditor(): void {
+    setProfileDraft({ nickname: profile?.subject.nickname ?? '', avatarDataUrl: profile?.subject.avatarDataUrl ?? '' });
+    setProfileEditorOpen(true);
+    setMessage('');
+  }
+
+  function onAvatarFile(fileToRead: File | undefined): void {
+    if (!fileToRead) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(fileToRead.type)) {
+      setMessage('头像仅支持 PNG、JPEG 或 WebP 格式。');
+      return;
+    }
+    if (fileToRead.size > 256 * 1024) {
+      setMessage('头像文件不能超过 256 KiB。');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = typeof reader.result === 'string' ? reader.result : '';
+      if (value) {
+        setProfileDraft((current) => ({ ...current, avatarDataUrl: value }));
+        setMessage('');
+      }
+    };
+    reader.onerror = () => setMessage('头像读取失败，请重试。');
+    reader.readAsDataURL(fileToRead);
+  }
+
+  async function saveProfile(): Promise<void> {
+    setProfileEditorBusy(true);
+    setMessage('');
+    try {
+      const updated = await request<Profile['subject']>('/me/profile', {
+        method: 'PATCH',
+        body: JSON.stringify({ nickname: profileDraft.nickname.trim() || null, avatarDataUrl: profileDraft.avatarDataUrl || null }),
+      });
+      setProfile((current) => current ? { ...current, subject: { ...current.subject, ...updated, name: displayPersonName(updated.name) } } : current);
+      setProfileEditorOpen(false);
+      setMessage('个人资料已更新。');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '个人资料更新失败，请稍后重试。');
+    } finally {
+      setProfileEditorBusy(false);
+    }
+  }
+
   useEffect(() => { void refresh().catch((error: Error) => setMessage(error.message)); }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) setUserMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setUserMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [userMenuOpen]);
 
   function openDelivery(nextEventId = eventId, backView: 'challenges' | 'hard-problem-detail' = 'challenges') {
     const next = events.find((item) => item.id === nextEventId);
+    const currentTime = Date.now();
+    if (!eventCanAcceptSubmission(next, currentTime)) {
+      setMessage(eventWindowMessage(next, currentTime));
+      return;
+    }
     setEventId(nextEventId);
     if (next) {
       setChallengeVersionId(next.challengeVersion);
@@ -463,6 +601,11 @@ function App() {
     const versionEvent = events.find((event) => event.challengeVersion === nextVersionId);
     if (!versionEvent) {
       setMessage('当前账号未被配置为该训战参与者，无法进入。');
+      return;
+    }
+    const currentTime = Date.now();
+    if (!eventCanAcceptSubmission(versionEvent, currentTime)) {
+      setMessage(eventWindowMessage(versionEvent, currentTime));
       return;
     }
     setChallengeVersionId(nextVersionId);
@@ -497,6 +640,11 @@ function App() {
 
   async function submit() {
     if (!selectedEvent) return;
+    const currentTime = Date.now();
+    if (!eventCanAcceptSubmission(selectedEvent, currentTime)) {
+      setMessage(eventWindowMessage(selectedEvent, currentTime));
+      return;
+    }
     setBusy(true);
     setMessage('正在提交交付件…');
     try {
@@ -549,18 +697,27 @@ function App() {
      title: version.title,
      event: events.find((event) => event.purpose !== 'HARD_PROBLEM' && event.challengeVersion === version.id),
   }))).filter((card) => Boolean(card.event)).sort((left, right) => {
-    const weight = (event?: EventConfig) => event?.status === 'OPEN' ? 0 : event?.status === 'RELEASED' ? 1 : 2;
+    const weight = (event?: EventConfig) => eventCanAcceptSubmission(event, clock) ? 0 : eventWindowState(event, clock) === 'BEFORE' ? 1 : event?.status === 'RELEASED' ? 2 : 3;
     return weight(left.event) - weight(right.event);
   });
-  const currentEventCard = challengeCards.find((card) => card.event?.status === 'OPEN');
-  const selectedUploadEvent = events.find((event) => event.purpose !== 'HARD_PROBLEM' && event.challengeVersion === selectedVersion?.id && event.submissionSource === 'UPLOAD');
-  const selectedGitEvent = events.find((event) => event.purpose !== 'HARD_PROBLEM' && event.challengeVersion === selectedVersion?.id && event.submissionSource === 'GIT_REF');
-  const deliveryEvents = selectedEvent?.purpose === 'HARD_PROBLEM' ? events.filter((event) => event.purpose === 'HARD_PROBLEM') : events.filter((event) => event.purpose !== 'HARD_PROBLEM');
+  const currentEventCard = challengeCards.find((card) => eventCanAcceptSubmission(card.event, clock));
+  const selectedUploadEvent = events.find((event) => event.purpose !== 'HARD_PROBLEM' && event.challengeVersion === selectedVersion?.id && event.submissionSource === 'UPLOAD' && eventCanAcceptSubmission(event, clock));
+  const selectedGitEvent = events.find((event) => event.purpose !== 'HARD_PROBLEM' && event.challengeVersion === selectedVersion?.id && event.submissionSource === 'GIT_REF' && eventCanAcceptSubmission(event, clock));
+  const deliveryEvents = events.filter((event) => (selectedEvent?.purpose === 'HARD_PROBLEM' ? event.purpose === 'HARD_PROBLEM' : event.purpose !== 'HARD_PROBLEM') && eventCanAcceptSubmission(event, clock));
+  const userRoleText = adminAccess
+    ? `${adminRoleLabel(adminAccess)} · 参训员工`
+    : profile?.subject.roles.includes('mentor')
+      ? '导师 · 参训员工'
+      : '参训员工';
+  const activeEmployeeId = localEmployeeId();
+  const localIdentityOptions = LOCAL_IDENTITY_OPTIONS.some((item) => item.employeeNo === activeEmployeeId)
+    ? LOCAL_IDENTITY_OPTIONS
+    : [{ employeeNo: activeEmployeeId, label: '当前配置身份', role: '本地身份' }, ...LOCAL_IDENTITY_OPTIONS];
 
   return (
     <div className="shell">
       <header className="topbar">
-        <button className="brand" onClick={() => setView('home')}><span className="brand-mark">AI</span><span><span className="eyebrow">训战平台</span><strong>AI 能力训战平台</strong></span></button>
+        <button className="brand" onClick={() => setView('home')} aria-label="分组核心网AI能力提升平台"><span className="brand-mark" aria-hidden="true"><img src={BRAND_LOGO_URL} alt="" /></span><span className="brand-copy"><span className="eyebrow">分组核心网</span><strong>AI能力提升平台</strong></span></button>
         <nav className="main-nav" aria-label="主导航">
           <button className={view === 'home' ? 'active' : ''} onClick={() => setView('home')}>首页</button>
           <button className={view === 'challenges' || view === 'challenge-detail' || view === 'delivery' ? 'active' : ''} onClick={() => setView('challenges')}>训战广场</button>
@@ -568,10 +725,29 @@ function App() {
           <button className={view === 'profile' || view === 'detailed-report' ? 'active' : ''} onClick={() => setView('profile')}>个人中心</button>
         </nav>
         {adminAccess && <button className={`admin-entry ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>管理后台 <span>↗</span></button>}
-         <button className="user-chip" onClick={() => setView('profile')}><span className="avatar">本</span><span>{displayPersonName(profile?.subject.name)}<br /><small>{adminAccess ? `${adminRoleLabel(adminAccess)} · 参训员工` : profile?.subject.roles.includes('mentor') ? '导师 · 参训员工' : '参训员工'}</small></span><span className="chevron">⌄</span></button>
+        {ENABLE_LOCAL_IDENTITY_SWITCHER && <label className="identity-switcher" title="仅本地开发使用，生产环境由统一认证网关提供身份"><span>本地身份</span><select aria-label="切换本地测试身份" value={activeEmployeeId} onChange={(event) => switchLocalIdentity(event.target.value)}>{localIdentityOptions.map((item) => <option key={item.employeeNo} value={item.employeeNo}>{item.label} · {item.employeeNo} · {item.role}</option>)}</select></label>}
+        <div className="user-menu-anchor" ref={userMenuRef}>
+          <button type="button" className="user-chip" onClick={() => setUserMenuOpen((current) => !current)} aria-label="打开账号信息" aria-expanded={userMenuOpen} aria-controls="account-menu" aria-haspopup="menu"><span className="avatar">{profile?.subject.avatarDataUrl ? <img src={profile.subject.avatarDataUrl} alt="" /> : profileInitial(profile?.subject)}</span><span className="user-chip-info"><strong>{profileDisplayName(profile?.subject)}</strong><span className="user-chip-meta"><span>{profile?.subject.employeeNo ?? '—'}</span><span aria-hidden="true">·</span><span className="user-chip-role">{userRoleText}</span></span></span><span className="chevron" aria-hidden="true" /></button>
+          {userMenuOpen && <div id="account-menu" className="user-menu" role="menu" aria-label="账号信息">
+            <div className="user-menu-summary">
+              <span className="user-menu-avatar">{profile?.subject.avatarDataUrl ? <img src={profile.subject.avatarDataUrl} alt="" /> : profileInitial(profile?.subject)}</span>
+              <div>
+                <strong>{profileDisplayName(profile?.subject)}</strong>
+                <span>{userRoleText}</span>
+              </div>
+            </div>
+            <dl className="user-menu-facts">
+              <div><dt>昵称</dt><dd>{profile?.subject.nickname?.trim() || '未设置'}</dd></div>
+              <div><dt>姓名</dt><dd>{displayPersonName(profile?.subject.name)}</dd></div>
+              <div><dt>工号</dt><dd>{profile?.subject.employeeNo ?? '—'}</dd></div>
+              <div><dt>部门</dt><dd title={profile?.subject.orgPath || undefined}>{profile?.subject.orgPath || '未分配部门'}</dd></div>
+            </dl>
+            <button type="button" className="user-menu-action" role="menuitem" onClick={() => { setUserMenuOpen(false); setView('profile'); }}>进入个人中心</button>
+          </div>}
+        </div>
       </header>
 
-      {view === 'admin' && adminAccess && <AdminWorkspace userName={profile?.subject.name ?? ''} adminAccess={adminAccess} onExit={() => setView('home')} />}
+      {view === 'admin' && adminAccess && <AdminWorkspace userId={profile?.subject.id ?? ''} userName={profileDisplayName(profile?.subject)} adminAccess={adminAccess} onExit={() => setView('home')} />}
 
       {view === 'home' && <main className="home-page">
         <section className="home-current panel">
@@ -602,33 +778,33 @@ function App() {
         </section>
 
         <div className="home-columns">
-           <section className="panel section-panel"><div className="section-title"><div><p className="kicker">训战安排</p><h2>本期训战</h2></div><button className="quiet" onClick={() => setView('challenges')}>查看全部场次 →</button></div><div className="challenge-list">{challengeCards.slice(0, 3).map(({ event, title, version }) => <ChallengeCard key={version.id} event={event} title={title} version={version} onOpen={openChallenge} />)}{challengeCards.length === 0 && <div className="empty">暂无可参加训战</div>}</div></section>
+           <section className="panel section-panel"><div className="section-title"><div><p className="kicker">训战安排</p><h2>本期训战</h2></div><button className="quiet" onClick={() => setView('challenges')}>查看全部场次 →</button></div><div className="challenge-list">{challengeCards.slice(0, 3).map(({ event, title, version }) => <ChallengeCard key={version.id} event={event} title={title} version={version} now={clock} onOpen={openChallenge} />)}{challengeCards.length === 0 && <div className="empty">暂无可参加训战</div>}</div></section>
           <aside className="home-side">
              <section className="panel section-panel announcement-panel"><div className="section-title"><div><p className="kicker">平台动态</p><h2>平台公告</h2></div><span className="dot-label">{announcements.length} 条</span></div>{announcements.slice(0, 3).map((item) => <article className="announcement" key={item.id}><div className="announcement-head"><span className={`announcement-tag tag-${item.tag === '规则更新' ? 'orange' : item.tag === '训战提醒' ? 'blue' : 'green'}`}>{item.tag}</span><time>{formatDate(item.publishedAt)}</time></div><strong>{item.title}</strong><p>{item.summary}</p></article>)}</section>
-           <section className="panel section-panel leaderboard-panel"><div className="section-title"><div><p className="kicker">赛季排名</p><h2>赛季榜单</h2></div><button className="quiet" onClick={() => setView('profile')}>查看我的积分</button></div>{leaderboard.slice(0, 4).map((row) => <div className="leader-row" key={row.subjectId}><span className={`rank rank-${row.rank}`}>{row.rank}</span><span className="leader-avatar">{row.subjectId === subjectId ? '本' : row.subjectId.slice(-1)}</span><span className="leader-name">{row.subjectId === subjectId ? displayPersonName(profile?.subject.name) : '参训员工'}<small>{row.submissions} 场</small></span><strong>{Math.round(row.total)}<small>分</small></strong></div>)}{leaderboard.length === 0 && <div className="empty">暂无排名数据</div>}</section>
+           <section className="panel section-panel leaderboard-panel"><div className="section-title"><div><p className="kicker">赛季排名</p><h2>赛季榜单</h2></div><button className="quiet" onClick={() => setView('profile')}>查看我的积分</button></div>{leaderboard.slice(0, 3).map((row) => <div className="leader-row" key={row.subjectId ?? `${row.rank}-${row.nickname}`}><span className={`rank rank-${row.rank}`}>{row.rank}</span><span className="leader-avatar">{row.isSelf ? '本' : Array.from(row.nickname).slice(0, 1).join('') || '人'}</span><span className="leader-name">{row.nickname || '未设置昵称'}<small>{row.name && row.employeeNo ? `${row.name} · ${row.employeeNo} · ${row.submissions} 场` : row.isSelf ? `我 · ${row.submissions} 场` : `${row.submissions} 场`}</small></span><strong>{Math.round(row.total)}<small>分</small></strong></div>)}{leaderboard.length === 0 && <div className="empty">暂无排名数据</div>}</section>
           <section className="panel section-panel hard-problem-teaser"><div className="section-title"><div><p className="kicker">难题榜</p><h2>难题榜</h2></div><button className="quiet" onClick={() => setView('hard-problems')}>查看全部 →</button></div>{hardProblems.filter((problem) => problem.status === 'OPEN').slice(0, 2).map((problem) => <article className="hard-problem-teaser-row" key={problem.id}><span className={`problem-difficulty difficulty-${problem.difficulty.toLowerCase()}`}>{hardProblemDifficultyLabel(problem.difficulty)}</span><div><strong>{problem.title}</strong><small>{hardProblemPublisherLabel(problem)} · {formatDate(problem.createdAt)}</small></div></article>)}{hardProblems.filter((problem) => problem.status === 'OPEN').length === 0 && <div className="empty compact-empty">暂无待揭榜难题</div>}</section>
           </aside>
         </div>
 
-          <section className="activity panel section-panel"><div className="section-title"><div><p className="kicker">最近动态</p><h2>最近动态</h2></div><button className="quiet" onClick={() => setView('profile')}>查看全部 →</button></div>{submissions.slice().reverse().slice(0, 4).map((submission) => <div className="activity-row" key={submission.id}><span className="activity-icon">{submission.resultId ? '✓' : '…'}</span><div><strong>{eventTitle(events.find((event) => event.id === submission.eventId) ?? { id: '', challengeVersion: '', submissionSource: 'UPLOAD', trigger: 'MANUAL', reveal: 'IMMEDIATE', status: '' }, challenges)}</strong><span>{sourceLabel(submission.snapshot.sourceType === 'UPLOAD' ? 'UPLOAD' : 'GIT_REF')} · {formatDate(submission.createdAt)}</span></div><span className={`state state-${submission.state.toLowerCase()}`}>{statusLabel(submission.state)}</span>{reports[submission.id] && <b className="activity-score">{reports[submission.id].result.total}</b>}</div>)}{submissions.length === 0 && <div className="empty">暂无训战记录</div>}</section>
+          <section className="activity panel section-panel"><div className="section-title"><div><p className="kicker">最近动态</p><h2>最近动态</h2></div><button className="quiet" onClick={() => setView('profile')}>查看全部 →</button></div>{submissions.slice().reverse().slice(0, 4).map((submission) => <div className="activity-row" key={submission.id}><span className="activity-icon"><Icon name={submission.resultId ? 'check' : 'clock'} size={16} /></span><div><strong>{eventTitle(events.find((event) => event.id === submission.eventId) ?? { id: '', challengeVersion: '', submissionSource: 'UPLOAD', trigger: 'MANUAL', reveal: 'IMMEDIATE', status: '' }, challenges)}</strong><span>{sourceLabel(submission.snapshot.sourceType === 'UPLOAD' ? 'UPLOAD' : 'GIT_REF')} · {formatDate(submission.createdAt)}</span></div><span className={`state state-${submission.state.toLowerCase()}`}>{statusLabel(submission.state)}</span>{reports[submission.id] && <b className="activity-score">{reports[submission.id].result.total}</b>}</div>)}{submissions.length === 0 && <div className="empty">暂无训战记录</div>}</section>
       </main>}
 
-      {view === 'challenges' && <main className="content-page"><section className="page-heading"><div><p className="kicker">训战广场</p><h1>训战广场</h1></div><div className="heading-count"><strong>{challengeCards.length}</strong><span>场训战</span></div></section><div className="challenge-grid">{challengeCards.map(({ event, title, version }) => <ChallengeCard key={version.id} event={event} title={title} version={version} onOpen={openChallenge} large />)}</div></main>}
+      {view === 'challenges' && <main className="content-page"><section className="page-heading"><div><p className="kicker">训战广场</p><h1>训战广场</h1></div><div className="heading-count"><strong>{challengeCards.length}</strong><span>场训战</span></div></section><div className="challenge-grid">{challengeCards.map(({ event, title, version }) => <ChallengeCard key={version.id} event={event} title={title} version={version} now={clock} onOpen={openChallenge} large />)}</div></main>}
 
       {view === 'hard-problems' && <HardProblemsPageV2 problems={hardProblems} onRefresh={() => void refresh()} onOpenChallenge={openHardProblemChallenge} />}
 
-      {view === 'hard-problem-detail' && selectedHardProblem && <HardProblemDetailPageV2 problem={selectedHardProblem} event={events.find((item) => item.id === selectedHardProblem.submissionEventId)} onBack={() => setView('hard-problems')} onSubmit={() => { const event = events.find((item) => item.id === selectedHardProblem.submissionEventId); if (event) openDelivery(event.id, 'hard-problem-detail'); else setMessage('交付入口准备中，请稍后重试。'); }} />}
+      {view === 'hard-problem-detail' && selectedHardProblem && <HardProblemDetailPageV2 problem={selectedHardProblem} event={events.find((item) => item.id === selectedHardProblem.submissionEventId)} now={clock} onBack={() => setView('hard-problems')} onSubmit={() => { const event = events.find((item) => item.id === selectedHardProblem.submissionEventId); if (event) openDelivery(event.id, 'hard-problem-detail'); else setMessage('交付入口准备中，请稍后重试。'); }} />}
 
-      {view === 'challenge-detail' && <main className="content-page challenge-detail-page"><button className="back-link" onClick={() => setView(challengeDetailBackView)}>← 返回{challengeDetailBackView === 'hard-problems' ? '难题榜' : '训战广场'}</button>{selectedVersion ? <><section className="detail-hero panel"><div><div className="detail-tags"><span className="zone-tag">{zoneLabel(selectedVersion.zone)}</span>{(selectedVersion.tags ?? []).map((tag) => <span className="detail-tag" key={tag}>{tag}</span>)}</div><h1>{selectedVersion.title}</h1><div className="detail-hero-description" dangerouslySetInnerHTML={{ __html: sanitizeRichText(selectedVersion.description ?? '<p>暂无赛题详情。</p>') }} /></div><div className="detail-facts"><strong>{selectedVersion.estimatedMinutes ?? '—'}</strong><span>预计用时（分钟）</span><strong>v{selectedVersion.version}</strong><span>赛题版本</span></div></section><div className="detail-grid"><section className="panel detail-content"><div className="detail-section"><p className="kicker">训战目标</p><h2>训战目标</h2><ul>{(selectedVersion.objectives ?? ['暂无训战目标']).map((item) => <li key={item}>{item}</li>)}</ul></div><div className="detail-section"><p className="kicker">赛题要求</p><h2>赛题要求</h2><ul>{(selectedVersion.requirements ?? ['暂无赛题要求']).map((item) => <li key={item}>{item}</li>)}</ul></div><div className="detail-section"><p className="kicker">约束与评估</p><h2>约束与评估</h2><ul>{(selectedVersion.constraints ?? ['暂无评估说明']).map((item) => <li key={item}>{item}</li>)}</ul></div><div className="detail-section"><p className="kicker">交付内容</p><h2>交付内容</h2><ul>{(selectedVersion.deliverables ?? ['暂无交付说明']).map((item) => <li key={item}>{item}</li>)}</ul></div></section><aside className="panel delivery-choice"><p className="kicker">可选交付方式</p><h2>选择交付方式</h2><p className="choice-intro">提交后会锁定本次交付内容，后续评估以该版本为准。</p>{selectedUploadEvent && <button className="choice-card" onClick={() => openDelivery(selectedUploadEvent.id)}><span className="choice-icon">↑</span><span><strong>上传交付件</strong><small>支持 {selectedUploadEvent.deliveryConfig?.allowedFormats?.join(' / ') ?? 'zip'} 文件</small></span><b>→</b></button>}{selectedGitEvent && <div className="git-choice"><button className="choice-card" onClick={() => openDelivery(selectedGitEvent.id)}><span className="choice-icon git">⌘</span><span><strong>指定 Git 仓库</strong><small>提交时锁定分支版本</small></span><b>→</b></button><label>Git 仓库路径<input value={selectedGitEvent.deliveryConfig?.repository ?? ''} readOnly /><small className="muted">默认分支：{branchDisplayLabel(selectedGitEvent.deliveryConfig?.branchTemplate)}</small></label></div>}{!selectedUploadEvent && !selectedGitEvent && <div className="coming-box">交付尚未开放</div>}</aside></div></> : <div className="panel empty">训战不存在或尚未加载</div>}</main>}
+      {view === 'challenge-detail' && <main className="content-page challenge-detail-page"><button className="back-link" onClick={() => setView(challengeDetailBackView)}>← 返回{challengeDetailBackView === 'hard-problems' ? '难题榜' : '训战广场'}</button>{selectedVersion ? <><section className="detail-hero panel"><div><div className="detail-tags"><span className="zone-tag">{zoneLabel(selectedVersion.zone)}</span>{(selectedVersion.tags ?? []).map((tag) => <span className="detail-tag" key={tag}>{tag}</span>)}</div><h1>{selectedVersion.title}</h1><div className="detail-hero-description" dangerouslySetInnerHTML={{ __html: sanitizeRichText(selectedVersion.description ?? '<p>暂无赛题详情。</p>') }} /></div><div className="detail-facts"><strong>{selectedVersion.estimatedMinutes ?? '—'}</strong><span>预计用时（分钟）</span><strong>v{selectedVersion.version}</strong><span>赛题版本</span></div></section><div className="detail-grid"><section className="panel detail-content"><div className="detail-section"><p className="kicker">训战目标</p><h2>训战目标</h2><ul>{(selectedVersion.objectives ?? ['暂无训战目标']).map((item) => <li key={item}>{item}</li>)}</ul></div><div className="detail-section"><p className="kicker">赛题要求</p><h2>赛题要求</h2><ul>{(selectedVersion.requirements ?? ['暂无赛题要求']).map((item) => <li key={item}>{item}</li>)}</ul></div><div className="detail-section"><p className="kicker">约束与评估</p><h2>约束与评估</h2><ul>{(selectedVersion.constraints ?? ['暂无评估说明']).map((item) => <li key={item}>{item}</li>)}</ul></div><div className="detail-section"><p className="kicker">交付内容</p><h2>交付内容</h2><ul>{(selectedVersion.deliverables ?? ['暂无交付说明']).map((item) => <li key={item}>{item}</li>)}</ul></div></section><aside className="panel delivery-choice"><p className="kicker">可选交付方式</p><h2>选择交付方式</h2><p className="choice-intro">提交后会锁定本次交付内容，后续评估以该版本为准。</p>{selectedUploadEvent && <button className="choice-card" onClick={() => openDelivery(selectedUploadEvent.id)}><span className="choice-icon">↑</span><span><strong>上传交付件</strong><small>支持 {selectedUploadEvent.deliveryConfig?.allowedFormats?.join(' / ') ?? 'zip'} 文件</small></span><b>→</b></button>}{selectedGitEvent && <div className="git-choice"><button className="choice-card" onClick={() => openDelivery(selectedGitEvent.id)}><span className="choice-icon git">⌘</span><span><strong>指定 Git 仓库</strong><small>提交时锁定分支版本</small></span><b>→</b></button><label>Git 仓库路径<input value={selectedGitEvent.deliveryConfig?.repository ?? ''} readOnly /><small className="muted">默认分支：{branchDisplayLabel(selectedGitEvent.deliveryConfig?.branchTemplate)}</small></label></div>}{!selectedUploadEvent && !selectedGitEvent && <div className="coming-box">{eventWindowMessage(selectedEvent, clock)}</div>}</aside></div></> : <div className="panel empty">训战不存在或尚未加载</div>}</main>}
 
-      {view === 'profile' && <main className="content-page"><section className="profile-hero panel"><div className="profile-avatar">本</div><div><p className="kicker">个人资料</p><h1>{profile?.subject.name ?? '参训员工'}</h1><p>{profile?.subject.employeeNo ?? '参训员工'}</p></div><button className="primary compact" onClick={() => setView('challenges')}>继续参加训战</button></section><section className="profile-stats"><article className="panel"><span>赛季总积分</span><strong>{Math.round(totalPoints)}</strong><small>{currentRank ? `当前排名第 ${currentRank} 名` : '暂无排名'}</small></article><article className="panel"><span>平均成绩</span><strong>{profile?.stats.average ?? '—'}</strong><small>已完成 {profile?.stats.graded ?? 0} 场评估</small></article><article className="panel"><span>最高成绩</span><strong>{profile?.stats.best ?? '—'}</strong><small>赛季最高分</small></article></section><section className="panel section-panel history-panel"><div className="section-title"><div><p className="kicker">参赛历程</p><h2>参赛记录</h2></div></div>{profile?.history.slice().reverse().map((item) => <div className="history-row" key={item.submissionId}><span className="history-date">{formatDate(item.createdAt)}</span><div><strong>{eventTitle(events.find((event) => event.id === item.eventId) ?? { id: '', challengeVersion: '', submissionSource: 'UPLOAD', trigger: 'MANUAL', reveal: 'IMMEDIATE', status: '' }, challenges)}</strong><small>评估结果已生成</small></div><b>{item.total} 分</b>{item.resultId && <button className="small" onClick={() => void openReport(item.submissionId)}>查看报告</button>}</div>)}{(!profile || profile.history.length === 0) && <div className="empty">暂无参赛记录</div>}{profile?.historyPageInfo && profile.historyPageInfo.totalPages > 1 && <div className="table-pagination"><span>第 {profile.historyPageInfo.page} / {profile.historyPageInfo.totalPages} 页 · 共 {profile.historyPageInfo.total} 条</span><div><button className="small" disabled={profileHistoryBusy || !profile.historyPageInfo.hasPrevious} onClick={() => void loadProfileHistory(profile.historyPageInfo!.page - 1)}>上一页</button><button className="small" disabled={profileHistoryBusy || !profile.historyPageInfo.hasNext} onClick={() => void loadProfileHistory(profile.historyPageInfo!.page + 1)}>下一页</button></div></div>}</section></main>}
+      {view === 'profile' && <main className="content-page"><section className="profile-hero panel"><div className="profile-avatar">{profile?.subject.avatarDataUrl ? <img src={profile.subject.avatarDataUrl} alt="头像" /> : profileInitial(profile?.subject)}</div><div className="profile-hero-copy"><p className="kicker">个人资料</p><h1>{profileDisplayName(profile?.subject)}</h1><div className="profile-identity-facts"><span><small>姓名</small>{displayPersonName(profile?.subject.name)}</span><span><small>工号</small>{profile?.subject.employeeNo ?? '—'}</span></div></div><div className="profile-hero-actions"><button className="secondary-button compact" onClick={openProfileEditor}>编辑资料</button><button className="primary compact" onClick={() => setView('challenges')}>继续参加训战</button></div></section>{message && !profileEditorOpen && <p className="message profile-page-message">{message}</p>}{profileEditorOpen && <section className="panel profile-editor"><div className="section-title"><div><p className="kicker">个人设置</p><h2>设置昵称和头像</h2><p className="profile-editor-hint">昵称只影响平台展示；姓名和工号来自统一认证，无法在此修改。</p></div></div><div className="profile-editor-grid"><label>显示昵称<input maxLength={32} value={profileDraft.nickname} onChange={(event) => setProfileDraft((current) => ({ ...current, nickname: event.target.value }))} placeholder={displayPersonName(profile?.subject.name)} /><span className="profile-identity-readonly"><span><small>姓名（统一认证）</small>{displayPersonName(profile?.subject.name)}</span><span><small>工号（统一认证）</small>{profile?.subject.employeeNo ?? '—'}</span></span></label><div className="profile-avatar-editor"><span className="profile-avatar-preview">{profileDraft.avatarDataUrl ? <img src={profileDraft.avatarDataUrl} alt="头像预览" /> : profileInitial(profile?.subject)}</span><label className="file-picker">选择头像<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onAvatarFile(event.target.files?.[0])} /><span>PNG / JPEG / WebP，≤ 256 KiB</span></label>{profileDraft.avatarDataUrl && <button className="quiet" type="button" onClick={() => setProfileDraft((current) => ({ ...current, avatarDataUrl: '' }))}>移除头像</button>}</div></div><div className="profile-editor-actions"><button className="secondary-button" disabled={profileEditorBusy} onClick={() => setProfileEditorOpen(false)}>取消</button><button className="primary" disabled={profileEditorBusy} onClick={() => void saveProfile()}>{profileEditorBusy ? '保存中…' : '保存个人资料'}</button></div>{message && <p className="message profile-editor-message">{message}</p>}</section>}<section className="profile-stats"><article className="panel"><span>赛季总积分</span><strong>{Math.round(totalPoints)}</strong><small>{currentRank ? `当前排名第 ${currentRank} 名` : '暂无排名'}</small></article><article className="panel"><span>平均成绩</span><strong>{profile?.stats.average ?? '—'}</strong><small>已完成 {profile?.stats.graded ?? 0} 场评估</small></article><article className="panel"><span>最高成绩</span><strong>{profile?.stats.best ?? '—'}</strong><small>赛季最高分</small></article></section><section className="panel section-panel history-panel"><div className="section-title"><div><p className="kicker">参赛历程</p><h2>参赛记录</h2></div></div>{profile?.history.slice().reverse().map((item) => <div className="history-row" key={item.submissionId}><span className="history-date">{formatDate(item.createdAt)}</span><div><strong>{eventTitle(events.find((event) => event.id === item.eventId) ?? { id: '', challengeVersion: '', submissionSource: 'UPLOAD', trigger: 'MANUAL', reveal: 'IMMEDIATE', status: '' }, challenges)}</strong><small>评估结果已生成</small></div><b>{item.total} 分</b>{item.resultId && <button className="small" onClick={() => void openReport(item.submissionId)}>查看报告</button>}</div>)}{(!profile || profile.history.length === 0) && <div className="empty">暂无参赛记录</div>}{profile?.historyPageInfo && profile.historyPageInfo.totalPages > 1 && <div className="table-pagination"><span>第 {profile.historyPageInfo.page} / {profile.historyPageInfo.totalPages} 页 · 共 {profile.historyPageInfo.total} 条</span><div><button className="small" disabled={profileHistoryBusy || !profile.historyPageInfo.hasPrevious} onClick={() => void loadProfileHistory(profile.historyPageInfo!.page - 1)}>上一页</button><button className="small" disabled={profileHistoryBusy || !profile.historyPageInfo.hasNext} onClick={() => void loadProfileHistory(profile.historyPageInfo!.page + 1)}>下一页</button></div></div>}</section></main>}
 
        {view === 'report' && <main className="content-page report-page"><button className="back-link" onClick={() => setView('profile')}>← 返回个人中心</button>{reportSubmissionId && reports[reportSubmissionId] ? <><section className="report-hero panel"><div><p className="kicker">评估报告</p><h1>{eventTitle(events.find((event) => event.id === submissions.find((item) => item.id === reportSubmissionId)?.eventId) ?? { id: '', challengeVersion: '', submissionSource: 'UPLOAD', trigger: 'MANUAL', reveal: 'IMMEDIATE', status: '' }, challenges)}</h1><p>本次交付 · {statusLabel(reports[reportSubmissionId].result.status)}</p></div><strong className="report-total">{reports[reportSubmissionId].result.total ?? '—'}<small>/100</small></strong></section><section className="report-grid"><div className="panel report-dimensions"><div className="section-title"><div><p className="kicker">能力维度</p><h2>评分拆解</h2></div></div>{Object.entries(reports[reportSubmissionId].result.dimensions ?? {}).map(([name, dimension]) => <div className="report-dimension" key={name}><span>{dimensionLabel(name)}</span><b>{dimension.evaluated === false ? '待补充评估' : `${dimension.score ?? '—'} / ${dimension.max ?? '—'}`}</b><div className="progress"><i style={{ width: `${dimension.evaluated === false ? 0 : ((dimension.score ?? 0) / (dimension.max ?? 100)) * 100}%` }} /></div></div>)}{reports[reportSubmissionId].report?.event && <p className="muted">本场排名第 {reports[reportSubmissionId].report.event.rank ?? '—'} 名 · 超过 {reports[reportSubmissionId].report.event.percentile ?? '—'}% 的参训员工 · 共 {reports[reportSubmissionId].report.event.participantCount} 人</p>}</div><div className="panel report-findings"><div className="section-title"><div><p className="kicker">问题摘要</p><h2>评估发现</h2></div></div>{(reports[reportSubmissionId].result.findings ?? []).map((finding, index) => <article className="finding" key={`${finding.title}-${index}`}><div><strong>{finding.title}</strong><span>{finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ''}` : severityLabel(finding.severity)}</span></div><p>{finding.detail}</p>{finding.fix && <small>改进建议：{finding.fix}</small>}</article>)}{(reports[reportSubmissionId].result.findings ?? []).length === 0 && <div className="empty">暂无改进项</div>}</div></section></> : <div className="panel empty">报告尚未生成，或当前不可见。</div>}</main>}
-      {view === 'delivery' && <main className="content-page"><button className="back-link" onClick={() => setView(deliveryBackView)}>← 返回{deliveryBackView === 'hard-problem-detail' ? '难题详情' : '训战广场'}</button><section className="delivery-heading panel"><div><p className="kicker">提交交付 · {zoneLabel(selectedVersion?.zone)}</p><h1>{selectedVersion?.title ?? selectedEvent?.challengeVersion}</h1><p>提交后会锁定本次交付内容，后续评估以该版本为准。</p></div><div className="delivery-meta"><span>{eventModeLabel(selectedEvent?.mode)}</span><span>{selectedEvent ? sourceLabel(selectedEvent.submissionSource) : '—'}</span><span>{triggerLabel(selectedEvent?.trigger)}</span></div></section><div className="delivery-grid"><section className="panel delivery-form">{selectedVersion?.submissionContractDefinition && <DeliveryContractNotice version={selectedVersion} />}<div className="section-title"><div><p className="kicker">提交交付</p><h2>创建提交</h2></div><span className="status-pill">{statusLabel(selectedEvent?.status ?? '—')}</span></div><label>{selectedEvent?.purpose === 'HARD_PROBLEM' ? '难题交付场次' : '训战场次'}<select value={eventId} onChange={(event) => openDelivery(event.target.value, deliveryBackView)}>{deliveryEvents.map((item) => <option key={item.id} value={item.id}>{eventTitle(item, challenges)}</option>)}</select></label><div className="segmented"><button className={source === 'UPLOAD' ? 'active' : ''} onClick={() => setSource('UPLOAD')}>上传交付件</button><button className={source === 'GIT_REF' ? 'active' : ''} onClick={() => setSource('GIT_REF')}>指定 Git 仓库</button></div>{source === 'UPLOAD' ? <label className="file-drop">交付包<input type="file" accept=".zip" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><span>{file ? `${file.name} · ${(file.size / 1024).toFixed(1)} KB` : '未选择文件'}</span></label> : <div className="git-fields"><label>仓库路径<input value={git.repository} onChange={(event) => setGit({ ...git, repository: event.target.value })} /></label><label>分支<input value={git.branch} onChange={(event) => setGit({ ...git, branch: event.target.value })} /></label><label>提交版本<input value={git.commitSha} onChange={(event) => setGit({ ...git, commitSha: event.target.value })} /></label></div>}<button className="primary" disabled={busy} onClick={() => void submit()}>{busy ? '正在提交…' : selectedEvent?.purpose === 'HARD_PROBLEM' ? '提交解决方案' : '提交交付件'}</button>{message && <p className="message">{message}</p>}</section><section className="panel submissions"><div className="section-title"><div><p className="kicker">提交记录</p><h2>我的提交</h2></div><button className="quiet" onClick={() => void refresh()}>刷新</button></div>{submissions.filter((item) => item.eventId === eventId).length === 0 ? <div className="empty">暂无提交记录</div> : submissions.filter((item) => item.eventId === eventId).map((item) => <article className="submission" key={item.id}><div><strong>{item.subjectId === subjectId ? (profile?.subject.name ?? '参训员工') : '参训员工'}</strong><span className="muted">{sourceLabel(item.snapshot.sourceType === 'UPLOAD' ? 'UPLOAD' : 'GIT_REF')} · {formatDate(item.createdAt)}</span>{reports[item.id] && <span className="score">总分 {reports[item.id].result.total ?? '—'} / 100</span>}</div><div className="submission-actions"><span className={`state state-${item.state.toLowerCase()}`}>{item.resultId ? '已完成' : item.failureReason || item.gradingStatus === 'FAILED' ? '评估失败' : item.gradingStatus === 'RUNNING' ? '评估中' : item.gradingStatus === 'QUEUED' ? '排队中' : statusLabel(item.state)}</span>{item.resultId && reports[item.id] && <button className="small" onClick={() => void openReport(item.id)}>查看报告</button>}</div></article>)}</section></div></main>}
+      {view === 'delivery' && <main className="content-page"><button className="back-link" onClick={() => setView(deliveryBackView)}>← 返回{deliveryBackView === 'hard-problem-detail' ? '难题详情' : '训战广场'}</button><section className="delivery-heading panel"><div><p className="kicker">提交交付 · {zoneLabel(selectedVersion?.zone)}</p><h1>{selectedVersion?.title ?? selectedEvent?.challengeVersion}</h1><p>提交后会锁定本次交付内容，后续评估以该版本为准。</p></div><div className="delivery-meta"><span>{eventModeLabel(selectedEvent?.mode)}</span><span>{selectedEvent ? sourceLabel(selectedEvent.submissionSource) : '—'}</span><span>{triggerLabel(selectedEvent?.trigger)}</span></div></section><div className="delivery-grid"><section className="panel delivery-form">{selectedVersion?.submissionContractDefinition && <DeliveryContractNotice version={selectedVersion} />}<div className="section-title"><div><p className="kicker">提交交付</p><h2>创建提交</h2></div><span className="status-pill">{statusLabel(selectedEvent?.status ?? '—')}</span></div><label>{selectedEvent?.purpose === 'HARD_PROBLEM' ? '难题交付场次' : '训战场次'}<select value={eventId} onChange={(event) => openDelivery(event.target.value, deliveryBackView)}>{deliveryEvents.map((item) => <option key={item.id} value={item.id}>{eventTitle(item, challenges)}</option>)}</select></label><div className="segmented"><button className={source === 'UPLOAD' ? 'active' : ''} onClick={() => setSource('UPLOAD')}>上传交付件</button><button className={source === 'GIT_REF' ? 'active' : ''} onClick={() => setSource('GIT_REF')}>指定 Git 仓库</button></div>{source === 'UPLOAD' ? <label className="file-drop">交付包<input type="file" accept=".zip" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><span>{file ? `${file.name} · ${(file.size / 1024).toFixed(1)} KB` : '未选择文件'}</span></label> : <div className="git-fields"><label>仓库路径<input value={git.repository} onChange={(event) => setGit({ ...git, repository: event.target.value })} /></label><label>分支<input value={git.branch} onChange={(event) => setGit({ ...git, branch: event.target.value })} /></label><label>提交版本<input value={git.commitSha} onChange={(event) => setGit({ ...git, commitSha: event.target.value })} /></label></div>}<button className="primary" disabled={busy || !eventCanAcceptSubmission(selectedEvent, clock)} onClick={() => void submit()}>{busy ? '正在提交…' : selectedEvent?.purpose === 'HARD_PROBLEM' ? '提交解决方案' : '提交交付件'}</button>{selectedEvent && !eventCanAcceptSubmission(selectedEvent, clock) && <p className="message">{eventWindowMessage(selectedEvent, clock)}</p>}{message && <p className="message">{message}</p>}</section><section className="panel submissions"><div className="section-title"><div><p className="kicker">提交记录</p><h2>我的提交</h2></div><button className="quiet" onClick={() => void refresh()}>刷新</button></div>{submissions.filter((item) => item.eventId === eventId).length === 0 ? <div className="empty">暂无提交记录</div> : submissions.filter((item) => item.eventId === eventId).map((item) => <article className="submission" key={item.id}><div><strong>{item.subjectId === subjectId ? (profile?.subject.name ?? '参训员工') : '参训员工'}</strong><span className="muted">{sourceLabel(item.snapshot.sourceType === 'UPLOAD' ? 'UPLOAD' : 'GIT_REF')} · {formatDate(item.createdAt)}</span>{reports[item.id] && <span className="score">总分 {reports[item.id].result.total ?? '—'} / 100</span>}</div><div className="submission-actions"><span className={`state state-${item.state.toLowerCase()}`}>{item.resultId ? '已完成' : item.failureReason || item.gradingStatus === 'FAILED' ? '评估失败' : item.gradingStatus === 'RUNNING' ? '评估中' : item.gradingStatus === 'QUEUED' ? '排队中' : statusLabel(item.state)}</span>{item.resultId && reports[item.id] && <button className="small" onClick={() => void openReport(item.id)}>查看报告</button>}</div></article>)}</section></div></main>}
 
       {view === 'profile' && <div className="capability-standalone"><CapabilityPanel capabilities={capabilities} /></div>}
       {view === 'detailed-report' && <main className="content-page report-page"><button className="back-link" onClick={() => setView('profile')}>← 返回个人中心</button>{reportSubmissionId && reports[reportSubmissionId] ? <div className="report-standalone"><DetailedReport submissionId={reportSubmissionId} report={reports[reportSubmissionId]} title={eventTitle(events.find((event) => event.id === submissions.find((item) => item.id === reportSubmissionId)?.eventId) ?? { id: '', challengeVersion: '', submissionSource: 'UPLOAD', trigger: 'MANUAL', reveal: 'IMMEDIATE', status: '' }, challenges)} /></div> : <div className="panel empty">报告尚未生成，或当前不可见。</div>}</main>}
-      <footer>AI 训战平台 · 企业内部训战与复盘</footer>
+      <footer>AI能力提升·训战平台·分组核心网控制开发部技术支持 · {PLATFORM_VERSION}</footer>
     </div>
   );
 }
@@ -639,6 +815,7 @@ function CapabilityPanel({ capabilities }: { capabilities: CapabilityProfile | n
   const focus = capabilities?.dimensions.find((item) => item.key === capabilities.summary.focusDimension);
   const strongestDomain = capabilities?.domains.find((item) => item.key === capabilities.summary.strongestDomain);
   const focusDomain = capabilities?.domains.find((item) => item.key === capabilities.summary.focusDomain);
+  const departmentStatsVisible = capabilities?.summary.departmentStatsVisible === true;
   return <section className="panel capability-panel">
      <div className="section-title"><div><p className="kicker">AI 能力画像</p><h2>我的 AI 能力画像</h2><p className="capability-subtitle">基于训战评估记录汇总。</p></div>{capabilities?.lastUpdated && <span className="muted">最近更新 {formatDate(capabilities.lastUpdated)}</span>}</div>
     {!capabilities ? <div className="empty">能力画像加载中…</div> : <>
@@ -647,7 +824,7 @@ function CapabilityPanel({ capabilities }: { capabilities: CapabilityProfile | n
         <div className="capability-overview">
            <div className="capability-score-head"><span>综合能力</span><strong>{capabilities.summary.overallAverage ?? '—'}<small>/100</small></strong><em>{capabilities.summary.delta === null ? '趋势数据不足' : `${capabilities.summary.delta >= 0 ? '↑' : '↓'} ${Math.abs(capabilities.summary.delta)} 分 · 最近两场`}</em></div>
           <div className="capability-fact-grid"><div><span>已评估场次</span><strong>{capabilities.summary.gradedSubmissions}</strong></div><div><span>最近成绩</span><strong>{capabilities.summary.latestTotal ?? '—'}</strong></div><div><span>优势维度</span><strong>{strongest?.label ?? '待形成'}</strong></div><div><span>提升重点</span><strong>{focus?.label ?? '待形成'}</strong></div><div><span>优势能力域</span><strong>{strongestDomain?.shortLabel ?? '待形成'}</strong></div><div><span>提升重点域</span><strong>{focusDomain?.shortLabel ?? '待形成'}</strong></div><div><span>黄区 / 蓝区场次</span><strong>{capabilities.zoneStats?.YELLOW ?? 0} / {capabilities.zoneStats?.BLUE ?? 0}</strong></div><div><span>已完成评估的能力项</span><strong>{capabilities.summary.evaluatedSkillItems ?? 0} / {capabilities.summary.totalSkillItems ?? 16}</strong></div></div>
-          <div className="capability-peer-stats"><div><span>部门平均</span><strong>{capabilities.summary.departmentAverage ?? '—'}</strong></div><div><span>部门中位数</span><strong>{capabilities.summary.departmentMedian ?? '—'}</strong></div><div><span>部门百分位</span><strong>{capabilities.summary.departmentPercentile === null || capabilities.summary.departmentPercentile === undefined ? '—' : `${capabilities.summary.departmentPercentile}%`}</strong></div></div>
+          <div className="capability-peer-stats"><div><span>部门平均</span><strong>{departmentStatsVisible ? capabilities.summary.departmentAverage ?? '—' : '*'}</strong></div><div><span>部门中位数</span><strong>{departmentStatsVisible ? capabilities.summary.departmentMedian ?? '—' : '*'}</strong></div><div><span>部门百分位</span><strong>{departmentStatsVisible ? capabilities.summary.departmentPercentile === null || capabilities.summary.departmentPercentile === undefined ? '—' : `${capabilities.summary.departmentPercentile}%` : '*'}</strong></div></div>
           <div className="capability-dimension-list">{capabilities.dimensions.map((dimension) => <div className="capability-dimension-row" key={dimension.key}><span className="capability-dot" data-tone={dimension.key} /><div><strong>{dimension.label}</strong><small>{dimension.description}{dimension.peerMedianPercent !== null && dimension.peerMedianPercent !== undefined ? ` · 部门中位数 ${dimension.peerMedianPercent}` : ''}</small></div><b>{dimension.percent === null ? '待评估' : `${dimension.percent} 分`}{dimension.vsPeerMedian !== null && dimension.vsPeerMedian !== undefined && <em className={dimension.vsPeerMedian >= 0 ? 'capability-up' : 'capability-down'}>{dimension.vsPeerMedian >= 0 ? ' ↑' : ' ↓'}{Math.abs(dimension.vsPeerMedian)}</em>}</b></div>)}</div>
         </div>
       </div>
@@ -705,9 +882,14 @@ function DetailedReport({ submissionId, report, title }: { submissionId: string;
   const findings = report.result.findings ?? [];
   const diagnostics = report.report?.diagnostics ?? report.result.validationDiagnostics ?? [];
   const recommendations = report.report?.recommendations ?? [];
+  const departmentStatsVisible = report.report?.department?.departmentStatsVisible === true;
+  const departmentAverage = departmentStatsVisible ? report.report?.department?.average ?? '—' : '*';
+  const departmentPercentile = departmentStatsVisible && report.report?.department?.percentile !== null && report.report?.department?.percentile !== undefined
+    ? ` · ${report.report.department.percentile}%`
+    : '';
   return <>
     <section className="report-hero panel report-hero-detailed"><div><p className="kicker">详细评估报告</p><h1>{title}</h1><p>本次交付 · {statusLabel(report.result.status)} · {summary?.grade ?? '评估完成'}</p></div><strong className="report-total">{report.result.total ?? '—'}<small>/100</small></strong></section>
-    <section className="report-summary-cards"><article className="panel report-summary-card"><span>本次得分率</span><strong>{summary?.passRate ?? '—'}<small>%</small></strong><em>已评估维度</em></article><article className="panel report-summary-card"><span>场次排名</span><strong>{event?.rank ?? '—'}<small>{event?.participantCount ? ` / ${event.participantCount}` : ''}</small></strong><em>{event?.percentile ? `超过 ${event.percentile}% 的参训员工` : '暂无排名数据'}</em></article><article className="panel report-summary-card"><span>部门对比</span><strong>{report.report?.department?.average ?? '—'}<small>{report.report?.department?.percentile === null || report.report?.department?.percentile === undefined ? '' : ` · ${report.report.department.percentile}%`}</small></strong><em>{report.report?.department?.participantCount ? `部门平均 · ${report.report.department.participantCount} 人` : '暂无部门数据'}</em></article><article className="panel report-summary-card"><span>问题与提示</span><strong>{summary?.findingCount ?? findings.length}<small> 项问题</small></strong><em>{summary?.diagnosticCount ?? diagnostics.length} 条处理提示</em></article></section>
+    <section className="report-summary-cards"><article className="panel report-summary-card"><span>本次得分率</span><strong>{summary?.passRate ?? '—'}<small>%</small></strong><em>已评估维度</em></article><article className="panel report-summary-card"><span>场次排名</span><strong>{event?.rank ?? '—'}<small>{event?.participantCount ? ` / ${event.participantCount}` : ''}</small></strong><em>{event?.percentile ? `超过 ${event.percentile}% 的参训员工` : '暂无排名数据'}</em></article><article className="panel report-summary-card"><span>部门对比</span><strong>{departmentAverage}<small>{departmentPercentile}</small></strong><em>{!departmentStatsVisible ? '部门统计仅管理员可见' : report.report?.department?.participantCount ? `部门平均 · ${report.report.department.participantCount} 人` : '暂无部门数据'}</em></article><article className="panel report-summary-card"><span>问题与提示</span><strong>{summary?.findingCount ?? findings.length}<small> 项问题</small></strong><em>{summary?.diagnosticCount ?? diagnostics.length} 条处理提示</em></article></section>
     <section className="report-detail-grid"><section className="panel report-detail-card"><div className="mini-heading"><div><p className="kicker">能力维度</p><h3>能力维度拆解</h3></div><span>{summary?.evaluatedDimensions ?? details.filter((item) => item.evaluated).length} / {summary?.totalDimensions ?? details.length} 已评估</span></div>{details.map((dimension) => <div className="detail-dimension-row" key={dimension.key}><div className="detail-dimension-head"><span>{dimension.label}</span><b>{dimension.evaluated ? `${dimension.score ?? '—'} / ${dimension.max ?? '—'}` : '待补充评估'}</b></div><div className="progress"><i style={{ width: `${dimension.percent ?? 0}%` }} /></div><small>{dimension.evaluated ? `${dimension.percent ?? 0}% · ${dimension.criteriaCount} 个评分项 · ${dimension.findingsCount} 项问题` : '待补充评估'}</small></div>)}</section><section className="panel report-detail-card"><div className="mini-heading"><div><p className="kicker">提交信息</p><h3>交付与评估信息</h3></div><span>{statusLabel(report.report?.submission?.state)}</span></div><dl className="report-meta-list"><dt>提交来源</dt><dd>{report.report?.submission?.sourceType === 'GIT_REF' ? '指定 Git 仓库' : '上传交付件'}</dd><dt>提交时间</dt><dd>{report.report?.submission?.submittedAt ? new Date(report.report.submission.submittedAt).toLocaleString('zh-CN') : '—'}</dd>{report.report?.submission?.repository && <><dt>仓库 / 分支</dt><dd className="mono">{report.report.submission.repository} · {report.report.submission.branch}</dd></>}{report.report?.submission?.commitSha && <><dt>提交版本</dt><dd className="mono">{report.report.submission.commitSha}</dd></>}<dt>评分标准</dt><dd>{report.result.rubricVersion ?? '已配置'}</dd></dl></section></section>
     <section className="panel report-criteria-card"><div className="mini-heading"><div><p className="kicker">16 个评分点</p><h3>评分点档位矩阵</h3></div><span>{report.report?.gradeMatrix?.length ?? criteria.length} 个评分点</span></div>{report.report?.gradeMatrix?.length ? <div className="grade-matrix report-grade-matrix">{report.report.gradeMatrix.map((criterion) => <div className={`grade-cell grade-${(criterion.level ?? 'n').toLowerCase()}`} key={`${criterion.dim}:${criterion.key}`}><strong>{criterion.name}</strong><b>{criterion.level ?? '—'}</b><small>{criterion.score === null ? '未提供评分' : `${criterion.score} / ${criterion.max}`}</small></div>)}</div> : <div className="empty compact-empty">暂无评分点数据</div>}</section>
     <section className="panel report-criteria-card"><div className="mini-heading"><div><p className="kicker">评分项证据</p><h3>评分项与证据</h3></div><span>{criteria.length} 个评分项</span></div>{criteria.length === 0 ? <div className="empty compact-empty">暂无可展示的评分项</div> : <div className="report-table-wrap"><table className="report-table"><thead><tr><th>维度与评分项</th><th>档位</th><th>得分</th><th>来源</th><th>判据</th><th>证据</th></tr></thead><tbody>{criteria.map((criterion) => <tr key={criterion.key}><td><strong>{criterion.name}</strong><small>{dimensionLabel(criterion.dim)}</small></td><td><span className="level-badge">{criterion.level ?? '—'}</span></td><td><b>{criterion.score} / {criterion.max}</b></td><td>{evidenceSourceLabel(criterion.source)}</td><td><span>{criterion.rule ?? '—'}</span>{criterion.rationale && <small>{criterion.rationale}</small>}</td><td className="evidence-cell">{criterion.evidence ? evidenceSummary(criterion.evidence) : evidenceTypeLabel(criterion.evidenceType)}</td></tr>)}</tbody></table></div>}</section>
@@ -736,9 +918,9 @@ function hardProblemSolutionSourceLabel(solution?: HardProblemSolution): string 
   return solution.artifactName ? `上传：${solution.artifactName}` : '上传交付件';
 }
 
-function HardProblemDetailPageV2({ problem, event, onBack, onSubmit }: { problem: HardProblem; event?: EventConfig; onBack: () => void; onSubmit: () => void }) {
+function HardProblemDetailPageV2({ problem, event, now, onBack, onSubmit }: { problem: HardProblem; event?: EventConfig; now: number; onBack: () => void; onSubmit: () => void }) {
   const resolved = problem.status === 'RESOLVED';
-  const canSubmit = !resolved && event?.status === 'OPEN';
+  const canSubmit = !resolved && eventCanAcceptSubmission(event, now);
   return <main className="content-page hard-problem-detail-page">
     <button className="back-link" onClick={onBack}>← 返回难题榜</button>
      <section className="hard-problem-detail-hero panel"><div><div className="detail-tags"><span className="problem-source-label">难题榜</span><span className={`problem-difficulty difficulty-${problem.difficulty.toLowerCase()}`}>{hardProblemDifficultyLabel(problem.difficulty)}</span><span className={`problem-open-label ${resolved ? 'resolved' : ''}`}>{resolved ? '揭榜成功' : '待揭榜'}</span></div><h1>{problem.title}</h1><p>{problem.summary}</p></div><div className="hard-problem-detail-action"><span>{resolved ? `揭榜人：${problem.solverName ?? '参训员工'}` : `发布者：${hardProblemPublisherLabel(problem)}`}</span></div></section>
@@ -759,18 +941,19 @@ function HardProblemsPageV2({ problems, onRefresh, onOpenChallenge }: { problems
   </main>;
 }
 
-function ChallengeCard({ event, title, version, onOpen, large = false }: { event?: EventConfig; title: string; version?: ChallengeVersion; onOpen: (versionId: string) => void; large?: boolean }) {
-  const canOpen = Boolean(version && event && ['OPEN', 'RELEASED'].includes(event.status));
-  const status = event?.status === 'OPEN' ? '进行中' : event?.status === 'RELEASED' ? '已完成' : event?.status === 'CLOSED' ? '已关闭' : '即将开放';
-  const statusClass = event?.status === 'RELEASED' ? 'completed' : event?.status === 'CLOSED' ? 'closed' : !event ? 'upcoming' : '';
+function ChallengeCard({ event, title, version, now, onOpen, large = false }: { event?: EventConfig; title: string; version?: ChallengeVersion; now: number; onOpen: (versionId: string) => void; large?: boolean }) {
+  const windowState = eventWindowState(event, now);
+  const canOpen = Boolean(version && eventCanAcceptSubmission(event, now));
+  const status = event?.status === 'RELEASED' ? '已完成' : event?.status === 'CLOSED' ? '已关闭' : windowState === 'BEFORE' ? '即将开放' : windowState === 'AFTER' ? '已结束' : event?.status === 'OPEN' ? '进行中' : '暂不可用';
+  const statusClass = event?.status === 'RELEASED' ? 'completed' : event?.status === 'CLOSED' || windowState === 'AFTER' ? 'closed' : windowState === 'BEFORE' ? 'upcoming' : !event ? 'upcoming' : '';
   const language = languageLabel(version?.languagePolicy?.languages?.[0]);
-  const openFromCard = () => { if (canOpen && version) onOpen(version.id); };
-  return <article className={`challenge-card panel ${large ? 'large' : ''} ${canOpen ? 'is-clickable' : ''}`} onClick={(clickEvent) => { if (!(clickEvent.target as HTMLElement).closest('button')) openFromCard(); }} onKeyDown={(keyEvent) => { if ((keyEvent.key === 'Enter' || keyEvent.key === ' ') && canOpen) { keyEvent.preventDefault(); openFromCard(); } }} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `进入训战：${title}` : undefined}>
+  const openFromCard = () => { if (version && eventCanAcceptSubmission(event, Date.now())) onOpen(version.id); };
+  return <article className={`challenge-card panel ${large ? 'large' : ''} ${canOpen ? 'is-clickable' : ''}`} onClick={(clickEvent) => { if (!(clickEvent.target as HTMLElement).closest('button')) openFromCard(); }} onKeyDown={(keyEvent) => { if ((keyEvent.key === 'Enter' || keyEvent.key === ' ') && eventCanAcceptSubmission(event, Date.now())) { keyEvent.preventDefault(); openFromCard(); } }} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `进入训战：${title}` : undefined}>
     <div className="challenge-top"><span className="zone-tag">{zoneLabel(version?.zone)}</span><span className={`challenge-status ${statusClass}`}>{status}</span></div>
     <h3>{title}</h3>
     <p className="challenge-desc">{richTextPreview(version?.description ?? '') || '暂无赛题简介'}</p>
      <div className="challenge-meta"><span>类型：{event ? eventModeLabel(event.mode) : '类型待定'}</span><span>时间：{eventTimeLabel(event)}</span><span>提交：{event ? sourceLabel(event.submissionSource) : '提交方式待定'}</span><span>评估：{event ? triggerLabel(event.trigger) : '评估方式待定'}</span><span>语言：{language}</span></div>
-     <div className="challenge-footer"><span>评分标准</span>{canOpen && version ? <button className="small" onClick={() => onOpen(version.id)}>{event?.status === 'OPEN' ? '进入训战 →' : '查看训战 →'}</button> : <span className={`challenge-lock-note ${statusClass}`}>暂不可查看</span>}</div>
+     <div className="challenge-footer"><span>评分标准</span>{canOpen && version ? <button className="small" onClick={() => onOpen(version.id)}>进入训战 →</button> : <span className={`challenge-lock-note ${statusClass}`}>{event ? (windowState === 'BEFORE' ? '尚未开放' : windowState === 'AFTER' ? '提交已截止' : event.status === 'RELEASED' ? '结果已公布' : '暂不可查看') : '暂不可查看'}</span>}</div>
   </article>;
 }
 

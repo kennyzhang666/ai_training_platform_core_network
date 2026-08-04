@@ -87,6 +87,28 @@ test('only a global administrator can read aggregate operational metrics', async
   });
 });
 
+test('API prevents a global administrator from removing their own global access', async () => {
+  await withApp(async (baseUrl) => {
+    const headers = { 'content-type': 'application/json', 'x-employee-id': 'w00123' };
+    const demotion = await fetch(`${baseUrl}/api/v1/users/w00123`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ roles: ['learner'] }),
+    });
+    assert.equal(demotion.status, 403);
+
+    const retained = await fetch(`${baseUrl}/api/v1/users/w00123`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ roles: ['global_admin'], roleBindings: [] }),
+    });
+    assert.equal(retained.status, 200);
+    const body = await retained.json() as { roles: string[]; roleBindings?: Array<{ role: string; scopeOrgPath: string }> };
+    assert.deepEqual(body.roles, ['global_admin']);
+    assert.ok(body.roleBindings?.some((binding) => binding.role === 'global_admin' && binding.scopeOrgPath === '/'));
+  });
+});
+
 test('browser preflight allows administration update and delete requests', async () => {
   await withApp(async (baseUrl) => {
     for (const method of ['PATCH', 'DELETE']) {
@@ -164,6 +186,7 @@ test('administrator mutations keep the workspace refresh endpoints healthy', asy
       '/api/v1/admin/grading-queue',
       '/api/v1/evaluation-executors',
       '/api/v1/admin/code-agent-runtime',
+      '/api/v1/admin/code-agent-runtime/diagnostics',
       '/api/v1/evaluation-contracts',
     ];
     const responses = await Promise.all(refreshPaths.map((path) => fetch(`${baseUrl}${path}`, { headers })));
@@ -186,6 +209,55 @@ test('administrator mutations keep the workspace refresh endpoints healthy', asy
 
     const internalContractDetailResponse = await fetch(`${baseUrl}/api/v1/evaluation-contracts/engine-invocation-input-v1`, { headers });
     assert.equal(internalContractDetailResponse.status, 404);
+  });
+});
+
+test('global administrators can move several employees to one department in a single request', async () => {
+  await withApp(async (baseUrl) => {
+    const headers = { 'content-type': 'application/json', 'x-employee-id': 'w00123' };
+    const created = await fetch(`${baseUrl}/api/v1/org-units`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ id: 'org-api-batch', parentId: 'org-125', name: '批量调整测试部门', label: '团队' }),
+    });
+    assert.equal(created.status, 201);
+
+    const response = await fetch(`${baseUrl}/api/v1/users/batch-department`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ userIds: ['w00124', 'w00126'], orgUnitId: 'org-api-batch' }),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json() as { requested: number; updated: Array<{ id: string; orgUnitId: string; orgPath: string }> };
+    assert.equal(body.requested, 2);
+    assert.deepEqual(body.updated.map((user) => user.id).sort(), ['w00124', 'w00126']);
+    assert.ok(body.updated.every((user) => user.orgUnitId === 'org-api-batch' && user.orgPath.endsWith('/org-api-batch/')));
+  });
+});
+
+test('global administrators can inspect runtime diagnostics and receive a safe test result', async () => {
+  await withApp(async (baseUrl) => {
+    const headers = { 'content-type': 'application/json', 'x-employee-id': 'w00123' };
+    const diagnosticsResponse = await fetch(`${baseUrl}/api/v1/admin/code-agent-runtime/diagnostics`, { headers });
+    assert.equal(diagnosticsResponse.status, 200);
+    const diagnostics = await diagnosticsResponse.json() as { defaults: { enabled: boolean; commandLine: string; prompt: string; timeoutSeconds: number }; worker: { cliOverrideVisible: boolean }; test: { canExecute: boolean } };
+    assert.equal(diagnostics.defaults.enabled, false);
+    assert.equal(diagnostics.defaults.commandLine, 'opencode --prompt "{{prompt}}"');
+    assert.match(diagnostics.defaults.prompt, /instruction\.md/);
+    assert.equal(diagnostics.defaults.timeoutSeconds, 3600);
+    assert.equal(diagnostics.worker.cliOverrideVisible, false);
+    assert.equal(typeof diagnostics.test.canExecute, 'boolean');
+
+    const command = `"${process.execPath}" -e "process.exit(0)"`;
+    const response = await fetch(`${baseUrl}/api/v1/admin/code-agent-runtime/test`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ commandLine: command, prompt: 'runtime connectivity test', timeoutSeconds: 60 }),
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json() as { status: string; executable: string | null; stdout: string; stderr: string };
+    assert.ok(['PASS', 'FAIL', 'BLOCKED', 'TIMEOUT'].includes(result.status));
+    assert.equal(result.executable, process.execPath);
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /process\.env|DATABASE_URL/);
   });
 });
 
@@ -353,6 +425,80 @@ test('upload rejects an unsafe ZIP even when the event does not set maxFiles', a
     });
     assert.equal(uploaded.status, 400);
     assert.equal((await uploaded.json() as { code?: string }).code, 'ARTIFACT_ARCHIVE_INVALID');
+  });
+});
+
+test('submission endpoints reject requests outside the current event window', async () => {
+  await withApp(async (baseUrl) => {
+    const current = Date.now();
+    const created = await fetch(`${baseUrl}/api/v1/events`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'event-api-window-future',
+        challengeVersion: 'parking-fee-01@1',
+        submissionSource: 'UPLOAD',
+        trigger: 'IMPORT',
+        reveal: 'IMMEDIATE',
+        mode: 'WINDOW',
+        startsAt: new Date(current + 60 * 60 * 1000).toISOString(),
+        endsAt: new Date(current + 2 * 60 * 60 * 1000).toISOString(),
+      }),
+    });
+    assert.equal(created.status, 201);
+
+    const uploadHandle = await fetch(`${baseUrl}/api/v1/uploads`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00123' },
+      body: JSON.stringify({ eventId: 'event-api-window-future', fileName: 'submission.zip', declaredSize: 1 }),
+    });
+    assert.equal(uploadHandle.status, 409);
+
+    const snapshot = { sourceType: 'UPLOAD', submittedAt: new Date(current).toISOString() };
+    const generic = await fetch(`${baseUrl}/api/v1/submissions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00123' },
+      body: JSON.stringify({ eventId: 'event-api-window-future', subjectId: 'w00123', snapshot }),
+    });
+    assert.equal(generic.status, 409);
+    assert.match((await generic.json() as { message: string }).message, /window has not started/);
+
+    const upload = await fetch(`${baseUrl}/api/v1/events/event-api-window-future/submissions:upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00123' },
+      body: JSON.stringify({ subjectId: 'w00123', artifactBase64: 'not-used', fileName: 'submission.zip', snapshot }),
+    });
+    assert.equal(upload.status, 409);
+
+    const git = await fetch(`${baseUrl}/api/v1/events/event-api-window-future/submissions:register-git`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00123' },
+      body: JSON.stringify({ subjectId: 'w00123', snapshot: { sourceType: 'GIT_REF', submittedAt: snapshot.submittedAt, repository: 'training/demo', branch: 'drill/w00123', commitSha: 'abcdef1' } }),
+    });
+    assert.equal(git.status, 409);
+
+    const pastCreated = await fetch(`${baseUrl}/api/v1/events`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'event-api-window-past',
+        challengeVersion: 'parking-fee-01@1',
+        submissionSource: 'UPLOAD',
+        trigger: 'IMPORT',
+        reveal: 'IMMEDIATE',
+        mode: 'WINDOW',
+        startsAt: new Date(current - 2 * 60 * 60 * 1000).toISOString(),
+        endsAt: new Date(current - 60 * 60 * 1000).toISOString(),
+      }),
+    });
+    assert.equal(pastCreated.status, 201);
+    const past = await fetch(`${baseUrl}/api/v1/submissions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00123' },
+      body: JSON.stringify({ eventId: 'event-api-window-past', subjectId: 'w00123', snapshot }),
+    });
+    assert.equal(past.status, 409);
+    assert.match((await past.json() as { message: string }).message, /window has ended/);
   });
 });
 
@@ -535,6 +681,25 @@ test('local grading executor runs the reference challenge without GitLab', async
     assert.ok(report.report.criteriaByDimension.verify.length > 0);
     assert.ok(report.report.recommendations.length > 0);
 
+    const employeeLeaderboardResponse = await fetch(`${baseUrl}/api/v1/seasons/season-local-2026/leaderboard`, { headers: { 'x-employee-id': 'w00124' } });
+    assert.equal(employeeLeaderboardResponse.status, 200);
+    const employeeLeaderboard = await employeeLeaderboardResponse.json() as Array<{ rank: number; nickname: string; name?: string; employeeNo?: string; subjectId?: string }>;
+    assert.ok(employeeLeaderboard.length <= 3);
+    assert.equal(employeeLeaderboard.length, 1);
+    assert.equal(employeeLeaderboard[0].rank, 1);
+    assert.equal(employeeLeaderboard[0].nickname, '未设置昵称');
+    assert.equal(employeeLeaderboard[0].name, undefined);
+    assert.equal(employeeLeaderboard[0].employeeNo, undefined);
+    assert.equal(employeeLeaderboard[0].subjectId, undefined);
+
+    const adminLeaderboardResponse = await fetch(`${baseUrl}/api/v1/seasons/season-local-2026/leaderboard`, { headers: { 'x-employee-id': 'w00123' } });
+    assert.equal(adminLeaderboardResponse.status, 200);
+    const adminLeaderboard = await adminLeaderboardResponse.json() as Array<{ rank: number; nickname: string; name?: string; employeeNo?: string; subjectId?: string }>;
+    assert.ok(adminLeaderboard.length <= 3);
+    assert.equal(adminLeaderboard[0].name, '本地开发用户');
+    assert.equal(adminLeaderboard[0].employeeNo, 'w00123');
+    assert.equal(adminLeaderboard[0].subjectId, 'w00123');
+
     const capabilityResponse = await fetch(`${baseUrl}/api/v1/profiles/w00123/capabilities`);
     assert.equal(capabilityResponse.status, 200);
     const capabilities = await capabilityResponse.json() as {
@@ -555,7 +720,7 @@ test('local grading executor runs the reference challenge without GitLab', async
     assert.equal(capabilities.summary.totalSkillItems, 16);
     assert.equal(capabilities.summary.evaluatedSkillItems, 8);
     assert.equal(capabilities.summary.zoneStats.YELLOW, 1);
-    assert.equal(capabilities.capabilityCatalogVersion, '1.0');
+    assert.equal(capabilities.capabilityCatalogVersion, '1.1');
     assert.equal(capabilities.summary.totalCapabilityDomains, 8);
     assert.equal(capabilities.summary.evaluatedCapabilityDomains, 4);
     assert.equal(capabilities.domains.length, 8);
@@ -568,6 +733,28 @@ test('local grading executor runs the reference challenge without GitLab', async
     assert.equal(capabilities.skills.find((item) => item.criterionKey === 'S1')?.percent, null);
     assert.ok(capabilities.weakItems.length >= 1);
     assert.ok(capabilities.weakItems[0].recommendation.length > 0);
+
+    const employeeCapabilityResponse = await fetch(`${baseUrl}/api/v1/profiles/w00124/capabilities`, { headers: { 'x-employee-id': 'w00124' } });
+    assert.equal(employeeCapabilityResponse.status, 200);
+    const employeeCapabilities = await employeeCapabilityResponse.json() as {
+      summary: { departmentStatsVisible: boolean; departmentAverage: number | null; departmentMedian: number | null; departmentPercentile: number | null };
+      dimensions: Array<{ peerMedianPercent: number | null; peerCount: number }>;
+    };
+    assert.equal(employeeCapabilities.summary.departmentStatsVisible, false);
+    assert.equal(employeeCapabilities.summary.departmentAverage, null);
+    assert.equal(employeeCapabilities.summary.departmentMedian, null);
+    assert.equal(employeeCapabilities.summary.departmentPercentile, null);
+    assert.ok(employeeCapabilities.dimensions.every((item) => item.peerMedianPercent === null && item.peerCount === 0));
+
+    const departmentAdminCapabilityResponse = await fetch(`${baseUrl}/api/v1/profiles/w00124/capabilities`, { headers: { 'x-employee-id': 'w00134' } });
+    assert.equal(departmentAdminCapabilityResponse.status, 200);
+    const departmentAdminCapabilities = await departmentAdminCapabilityResponse.json() as {
+      summary: { departmentStatsVisible: boolean; departmentAverage: number | null };
+      dimensions: Array<{ peerMedianPercent: number | null; peerCount: number }>;
+    };
+    assert.equal(departmentAdminCapabilities.summary.departmentStatsVisible, true);
+    assert.equal(departmentAdminCapabilities.summary.departmentAverage, 52.5);
+    assert.ok(departmentAdminCapabilities.dimensions.some((item) => item.peerMedianPercent !== null && item.peerCount > 0));
 
     const profileWithoutHistoryResponse = await fetch(`${baseUrl}/api/v1/profiles/w00123?includeHistory=false`);
     assert.equal(profileWithoutHistoryResponse.status, 200);
@@ -1037,6 +1224,50 @@ test('hard problem board lists unresolved problems and supports employee publish
 
     const closedDeliveryEvent = await fetch(`${baseUrl}/api/v1/events/${reviewedProblem.submissionEventId}`, { headers: { 'x-employee-id': 'w00125' } });
     assert.equal((await closedDeliveryEvent.json() as { status: string }).status, 'CLOSED');
+  });
+});
+
+test('employees can update their own nickname and validated avatar', async () => {
+  await withApp(async (baseUrl) => {
+    const headers = { 'content-type': 'application/json', 'x-employee-id': 'w00124' };
+    const avatarDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const updated = await fetch(`${baseUrl}/api/v1/me/profile`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ nickname: 'Parking Hero', avatarDataUrl }),
+    });
+    assert.equal(updated.status, 200);
+    const user = await updated.json() as { id: string; name: string; nickname?: string; avatarDataUrl?: string };
+    assert.equal(user.id, 'w00124');
+    assert.equal(user.nickname, 'Parking Hero');
+    assert.equal(user.avatarDataUrl, avatarDataUrl);
+    assert.equal(user.name, '本地学员 A');
+
+    const profile = await fetch(`${baseUrl}/api/v1/profiles/w00124?includeHistory=false`, { headers });
+    assert.equal(profile.status, 200);
+    const profileBody = await profile.json() as { subject: { nickname?: string; avatarDataUrl?: string } };
+    assert.equal(profileBody.subject.nickname, 'Parking Hero');
+    assert.equal(profileBody.subject.avatarDataUrl, avatarDataUrl);
+
+    const invalidAvatar = await fetch(`${baseUrl}/api/v1/me/profile`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ avatarDataUrl: 'https://example.com/avatar.png' }),
+    });
+    assert.equal(invalidAvatar.status, 400);
+
+    const invalidNickname = await fetch(`${baseUrl}/api/v1/me/profile`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ nickname: 'x'.repeat(33) }),
+    });
+    assert.equal(invalidNickname.status, 400);
+
+    const cleared = await fetch(`${baseUrl}/api/v1/me/profile`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ nickname: null, avatarDataUrl: null }),
+    });
+    assert.equal(cleared.status, 200);
+    const clearedUser = await cleared.json() as { nickname?: string; avatarDataUrl?: string };
+    assert.equal(clearedUser.nickname, undefined);
+    assert.equal(clearedUser.avatarDataUrl, undefined);
   });
 });
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { BadRequestException } from '@nestjs/common';
-import { CodeAgentRuntimeConfig, CodeAgentRuntimeInput } from './domain';
+import { CodeAgentRuntimeConfig, CodeAgentRuntimeDiagnostics, CodeAgentRuntimeInput } from './domain';
 
 const MAX_COMMAND_LENGTH = 4096;
 const MAX_ARGUMENTS = 64;
@@ -8,6 +8,15 @@ const MAX_ARGUMENT_LENGTH = 8192;
 const MAX_PROMPT_LENGTH = 16_000;
 const MIN_TIMEOUT_SECONDS = 60;
 const MAX_TIMEOUT_SECONDS = 21_600;
+const DEFAULT_TEST_MAX_TIMEOUT_SECONDS = 120;
+
+/**
+ * The administrator form starts with a safe, reusable OpenCode template.
+ * The template is deliberately disabled by default; an administrator must
+ * enable and save it after installing/configuring OpenCode on the Worker.
+ */
+export const DEFAULT_CODE_AGENT_COMMAND = 'opencode --prompt "{{prompt}}"';
+export const DEFAULT_CODE_AGENT_PROMPT = '请读取批次清单、instruction.md 和 Skills，逐份评测 submissions，并将符合结果契约的结果写入 manifest.resultIndexPath。';
 
 /**
  * Parse the administrator-facing command line into an executable plus argv.
@@ -100,5 +109,121 @@ export function buildCodeAgentRuntimeConfig(
 }
 
 export function defaultCodeAgentRuntimeConfig(): CodeAgentRuntimeConfig {
-  return buildCodeAgentRuntimeConfig({ enabled: false, commandLine: '', prompt: '', timeoutSeconds: 3600 }, 'system', '1970-01-01T00:00:00.000Z');
+  return buildCodeAgentRuntimeConfig({
+    enabled: false,
+    commandLine: DEFAULT_CODE_AGENT_COMMAND,
+    prompt: DEFAULT_CODE_AGENT_PROMPT,
+    timeoutSeconds: 3600,
+  }, 'system', '1970-01-01T00:00:00.000Z');
+}
+
+function allowedExecutables(environment: NodeJS.ProcessEnv = process.env): string[] {
+  return (environment.CODE_AGENT_ALLOWED_EXECUTABLES ?? '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function executableIsAllowed(executable: string, allowed: string[]): boolean {
+  if (!allowed.length) return true;
+  const normalized = executable.trim().toLowerCase();
+  const name = normalized.split(/[\\/]/).pop() ?? normalized;
+  return allowed.includes(normalized) || allowed.includes(name);
+}
+
+function redactWorkerArgument(value: string, previous: string | undefined): string {
+  if (/(?:token|key|secret|password|cookie|authorization)/i.test(previous ?? '') || /(?:token|key|secret|password|cookie|authorization)[=:]/i.test(value)) return '[REDACTED]';
+  return value.length > 256 ? `${value.slice(0, 256)}…` : value;
+}
+
+function testTimeoutLimit(environment: NodeJS.ProcessEnv = process.env): number {
+  const configured = Number(environment.CODE_AGENT_RUNTIME_TEST_MAX_SECONDS ?? DEFAULT_TEST_MAX_TIMEOUT_SECONDS);
+  if (!Number.isFinite(configured)) return DEFAULT_TEST_MAX_TIMEOUT_SECONDS;
+  return Math.max(10, Math.min(300, Math.floor(configured)));
+}
+
+/**
+ * Return the effective Worker source without exposing its complete command
+ * line. A Worker started with `--agent-command` owns that value in its own
+ * process and the API deliberately reports it as not observable.
+ */
+export function codeAgentRuntimeDiagnostics(platform: CodeAgentRuntimeConfig, environment: NodeJS.ProcessEnv = process.env): CodeAgentRuntimeDiagnostics {
+  const defaults = defaultCodeAgentRuntimeConfig();
+  const allowlist = allowedExecutables(environment);
+  // The pull Worker keeps its fallback executable and fixed arguments in
+  // separate variables, matching scripts/evaluation-worker.mjs.
+  const localCommand = environment.CODE_AGENT_COMMAND?.trim() ?? '';
+  let localArgs: string[] = [];
+  let localExecutable: string | null = null;
+  let localCommandError = '';
+  if (localCommand) {
+    if (/[\u0000\r\n]/.test(localCommand)) localCommandError = 'Worker 本地可执行文件必须是单行路径';
+    else localExecutable = localCommand;
+  }
+  const rawArgs = environment.CODE_AGENT_ARGS_JSON?.trim();
+  if (rawArgs) {
+    try {
+      const parsed = JSON.parse(rawArgs) as unknown;
+      if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string')) throw new Error('CODE_AGENT_ARGS_JSON 必须是字符串数组');
+      localArgs = parsed.map((value, index) => redactWorkerArgument(value, parsed[index - 1] as string | undefined));
+    } catch (error) {
+      localCommandError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  const platformConfigured = platform.enabled && Boolean(platform.executable);
+  const platformAllowed = platformConfigured && executableIsAllowed(platform.executable, allowlist);
+  const environmentConfigured = Boolean(localExecutable);
+  const environmentAllowed = environmentConfigured && !localCommandError && executableIsAllowed(localExecutable!, allowlist);
+  const source = platformConfigured ? 'PLATFORM' : environmentConfigured ? 'ENVIRONMENT' : 'NONE';
+  const canResolveExecutable = source === 'PLATFORM' ? platformAllowed : source === 'ENVIRONMENT' ? environmentAllowed : false;
+  const reason = source === 'PLATFORM'
+    ? (platformAllowed ? '批次会使用已冻结的平台配置。' : '平台可执行文件不在 CODE_AGENT_ALLOWED_EXECUTABLES 允许列表中。')
+    : localCommandError
+      ? `Worker 本地配置无法解析：${localCommandError}`
+      : source === 'ENVIRONMENT'
+        ? (environmentAllowed ? '平台配置未启用，Worker 会回退到 CODE_AGENT_COMMAND。' : 'Worker 本地可执行文件不在允许列表中。')
+        : '没有可解析的可执行文件。请启用平台配置，或在 Worker 主机设置 CODE_AGENT_COMMAND。命令行 --agent-command 仅在 Worker 进程内可见。';
+  const testEnabled = environment.CODE_AGENT_RUNTIME_TEST_ENABLED === 'true';
+  const maxTimeoutSeconds = testTimeoutLimit(environment);
+  const testCanExecute = testEnabled && environment.NODE_ENV !== 'production' && platformConfigured && platformAllowed;
+  const testReason = environment.NODE_ENV === 'production'
+    ? '生产环境禁止 API 进程启动 Code Agent；请在 Worker 主机执行测试。'
+    : !testEnabled
+      ? '运行测试默认关闭。仅在受控开发环境设置 CODE_AGENT_RUNTIME_TEST_ENABLED=true。'
+      : !platformConfigured
+        ? '请先保存一份启用的平台配置，测试只使用管理员当前填写的配置。'
+        : !platformAllowed
+          ? '平台可执行文件不在 CODE_AGENT_ALLOWED_EXECUTABLES 允许列表中。'
+          : '可以使用合成批次清单执行一次受控连通性测试。';
+
+  return {
+    schemaVersion: '1.0',
+    defaults: {
+      enabled: defaults.enabled,
+      commandLine: defaults.commandLine,
+      prompt: defaults.prompt,
+      timeoutSeconds: defaults.timeoutSeconds,
+    },
+    platform: { ...platform, args: [...platform.args] },
+    worker: {
+      mode: environment.EMBEDDED_EVALUATION_WORKER === 'true' ? 'EMBEDDED' : 'EXTERNAL',
+      workerId: environment.EVALUATION_WORKER_ID?.trim() || null,
+      source,
+      commandConfigured: Boolean(localCommand),
+      executable: localExecutable,
+      args: localArgs,
+      commandPreview: localExecutable ? `${localExecutable}${localArgs.length ? ` · ${localArgs.length} 个固定参数` : ''}` : null,
+      cliOverrideVisible: false,
+      canResolveExecutable,
+      reason,
+    },
+    allowedExecutables: allowlist,
+    test: {
+      enabled: testEnabled,
+      maxTimeoutSeconds,
+      canExecute: testCanExecute,
+      reason: testReason,
+    },
+  };
 }

@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AppUser, AuditRecord, OrgUnit, AdminAccess } from './domain';
-import { normalizeOrgPath, orgPathIncludes, resolveAdminAccess, assertAdminOrgScope } from './access-control';
+import { hasGlobalAdminAccess, normalizeOrgPath, orgPathIncludes, resolveAdminAccess, assertAdminOrgScope } from './access-control';
 import { AuditAppendInput, NormalizedUserListQuery, PageInfo, UserListQuery, UserPage, UserPatch } from './repository';
 import { PlatformStore } from './store';
 import { PrismaPlatformRepository } from './prisma-platform-repository';
@@ -35,7 +35,7 @@ function filePage(users: AppUser[], query: NormalizedUserListQuery): UserPage {
   const filtered = users.filter((user) => {
     if (scopePaths?.length && !scopePaths.includes('/') && !scopePaths.some((scope) => orgPathIncludes(scope, user.orgPath))) return false;
     if (requestedPath && !orgPathIncludes(requestedPath, user.orgPath)) return false;
-    if (normalizedQuery && ![user.employeeNo, user.name].some((value) => value.toLocaleLowerCase('zh-CN').includes(normalizedQuery))) return false;
+    if (normalizedQuery && ![user.employeeNo, user.name, user.nickname ?? ''].some((value) => value.toLocaleLowerCase('zh-CN').includes(normalizedQuery))) return false;
     if (roles.size && ![...roles].some((role) => user.roles.includes(role))) return false;
     if (query.status && user.status !== query.status) return false;
     return true;
@@ -91,6 +91,12 @@ export class FileUserDirectoryRepository implements UserDirectoryRepository {
     // PlatformStore keeps the established file-adapter validation and audit
     // behavior. The application service has already performed the same
     // authorization checks before reaching this adapter.
+    if (patch.nickname !== undefined || patch.avatarDataUrl !== undefined) {
+      return this.store.updateUserProfile(id, {
+        ...(patch.nickname !== undefined ? { nickname: patch.nickname } : {}),
+        ...(patch.avatarDataUrl !== undefined ? { avatarDataUrl: patch.avatarDataUrl } : {}),
+      }, audit.actorId);
+    }
     return this.store.updateUser(id, {
       ...(patch.orgUnitId !== undefined ? { orgUnitId: patch.orgUnitId } : {}),
       ...(patch.roles !== undefined ? { roles: [...patch.roles] } : {}),
@@ -142,7 +148,7 @@ export class PrismaUserDirectoryRepository implements UserDirectoryRepository {
   async updateWithAudit(id: string, patch: UserPatch, audit: AuditAppendInput): Promise<AppUser> {
     const updated = await this.repository.transaction(async (transaction) => {
       const updated = await transaction.users.update(id, patch);
-      await transaction.audits.append({ ...audit, after: updated });
+      await transaction.audits.append({ ...audit, after: audit.after ?? updated });
       return updated;
     });
     this.store.noteExternalCommit();
@@ -308,6 +314,15 @@ export class UserDirectoryService {
     if (nextRoles.includes('department_admin') && targetUnit && !bindings.some((binding) => binding.role === 'department_admin' && binding.scopeOrgPath === targetUnit.path)) {
       bindings.push({ role: 'department_admin', scopeOrgPath: targetUnit.path });
     }
+    const nextUser: AppUser = {
+      ...target,
+      ...(departmentPatchProvided ? { orgUnitId: targetUnit?.id ?? '', orgPath: targetUnit?.path ?? '' } : {}),
+      roles: nextRoles,
+      roleBindings: bindings,
+    };
+    if (target.id === actorId && access.level === 'GLOBAL' && !hasGlobalAdminAccess(nextUser)) {
+      throw new ForbiddenException('全局管理员不能移除自己的全局管理员权限');
+    }
     const nextPatch: UserPatch = {
       ...(departmentPatchProvided ? { orgUnitId: targetUnit?.id ?? '' } : {}),
       roles: nextRoles,
@@ -322,6 +337,68 @@ export class UserDirectoryService {
       createdAt: new Date().toISOString(),
     };
     const updated = await this.repository.updateWithAudit(userId, nextPatch, audit);
+    this.store.cacheUserSnapshot(updated);
+    return updated;
+  }
+
+  /** Move several employees to one department after validating the complete
+   * selection first. The individual update path remains the source of truth
+   * for role bindings, audit records and self-admin protection. */
+  async updateDepartmentBatch(userIds: readonly string[], orgUnitId: string, actorId: string): Promise<{ requested: number; updated: AppUser[] }> {
+    if (!Array.isArray(userIds)) throw new BadRequestException('员工列表格式不正确');
+    const ids = [...new Set(userIds.map((id) => typeof id === 'string' ? id.trim() : '').filter(Boolean))];
+    if (!ids.length) throw new BadRequestException('至少选择一名员工');
+    if (ids.length > 100) throw new BadRequestException('单次最多调整 100 名员工');
+
+    const targetId = typeof orgUnitId === 'string' ? orgUnitId.trim() : '';
+    const { access } = await this.adminAccess(actorId);
+    const targetUnit = targetId ? await this.repository.getOrgUnit(targetId) : undefined;
+    if (targetId && !targetUnit) throw new NotFoundException('目标部门不存在');
+    if (targetUnit?.level === 0 || targetUnit?.path === '/') throw new BadRequestException('员工必须归属具体部门');
+    if (targetUnit) assertAdminOrgScope(access, targetUnit.path);
+    if (!targetId && access.level !== 'GLOBAL') throw new ForbiddenException('部门管理员只能调整到其管理范围内的部门');
+
+    const targets: AppUser[] = [];
+    for (const id of ids) {
+      const target = await this.repository.getById(id);
+      if (!target) throw new NotFoundException(`员工不存在: ${id}`);
+      const targetIsAdministrator = target.roles.some((role) => ['admin', 'global_admin', 'department_admin'].includes(role))
+        || Boolean(target.roleBindings?.some((binding) => ['admin', 'global_admin', 'department_admin'].includes(binding.role)));
+      if (access.level !== 'GLOBAL' && targetIsAdministrator) throw new ForbiddenException('管理员账号需由全局管理员配置');
+      if (!target.orgPath && access.level !== 'GLOBAL') throw new ForbiddenException('未归属部门的员工需由全局管理员配置部门');
+      if (target.orgPath) assertAdminOrgScope(access, target.orgPath);
+      targets.push(target);
+    }
+
+    const updated: AppUser[] = [];
+    for (const target of targets) {
+      updated.push(await this.update(target.id, { orgUnitId: targetId }, actorId));
+    }
+    return { requested: ids.length, updated };
+  }
+
+  async updateProfile(userId: string, patch: Pick<UserPatch, 'nickname' | 'avatarDataUrl'>, actorId: string): Promise<AppUser> {
+    const actor = await this.repository.getById(actorId);
+    const target = await this.repository.getById(userId);
+    if (!actor || !target) throw new ForbiddenException('authenticated user or target user was not found');
+    if (actor.status !== 'ACTIVE') throw new ForbiddenException('account is disabled');
+    if (actor.id !== target.id) throw new ForbiddenException('只能修改自己的个人资料');
+    const redact = (user: AppUser): AppUser => ({
+      ...user,
+      ...(user.avatarDataUrl ? { avatarDataUrl: `[头像 ${user.avatarDataUrl.length} 字符]` } : {}),
+    });
+    const audit: AuditAppendInput = {
+      id: `audit-${randomUUID()}`,
+      actorId,
+      action: 'user.profile.update',
+      target: `user:${userId}`,
+      before: redact(target),
+      createdAt: new Date().toISOString(),
+    };
+    const auditAfter: AppUser = { ...target };
+    if (patch.nickname !== undefined) auditAfter.nickname = patch.nickname ?? undefined;
+    if (patch.avatarDataUrl !== undefined) auditAfter.avatarDataUrl = patch.avatarDataUrl ?? undefined;
+    const updated = await this.repository.updateWithAudit(userId, patch, { ...audit, after: redact(auditAfter) });
     this.store.cacheUserSnapshot(updated);
     return updated;
   }

@@ -34,11 +34,12 @@ import {
   SsoIdentity,
   EvaluationBatch,
   CodeAgentRuntimeConfig,
+  CodeAgentRuntimeDiagnostics,
   CodeAgentRuntimeInput,
 } from './domain';
 import { validateEvaluationResult } from './contract-validator';
 import { checkEvaluationScore } from './score-validator';
-import { buildCodeAgentRuntimeConfig, defaultCodeAgentRuntimeConfig } from './code-agent-runtime';
+import { buildCodeAgentRuntimeConfig, codeAgentRuntimeDiagnostics, defaultCodeAgentRuntimeConfig } from './code-agent-runtime';
 import {
   CAPABILITY_CATALOG_VERSION,
   CAPABILITY_DOMAINS,
@@ -46,11 +47,24 @@ import {
   CAPABILITY_ITEM_BY_KEY,
 } from './capability-catalog';
 import type { AuditListQuery, AuditPage, SortOrder, SubmissionListQuery, SubmissionPage, UserListQuery, UserPage, UserSortField } from './repository';
+import { hasGlobalAdminAccess } from './access-control';
 
 export type { UserListQuery, UserPage } from './repository';
 
 function now(): string {
   return new Date().toISOString();
+}
+
+export function assertEventSubmissionWindow(event: Pick<EventConfig, 'startsAt' | 'endsAt'>): void {
+  const currentTime = Date.now();
+  const startsAt = event.startsAt ? Date.parse(event.startsAt) : Number.NaN;
+  if (Number.isFinite(startsAt) && currentTime < startsAt) {
+    throw new ConflictException('event submission window has not started');
+  }
+  const endsAt = event.endsAt ? Date.parse(event.endsAt) : Number.NaN;
+  if (Number.isFinite(endsAt) && currentTime > endsAt) {
+    throw new ConflictException('event submission window has ended');
+  }
 }
 
 function pageInfo(page: number, pageSize: number, total: number) {
@@ -262,6 +276,8 @@ export interface PlatformStateSnapshot {
   hardProblems: HardProblem[];
   participants: ParticipantRecord[];
   codeAgentRuntimeConfig: CodeAgentRuntimeConfig;
+  /** File-adapter local demo seed can be explicitly disabled after cleanup. */
+  localDemoSeedEnabled?: boolean;
 }
 
 export interface PlatformStatePersistence {
@@ -277,6 +293,8 @@ export interface PlatformStoreOptions {
   persistence?: PlatformStatePersistence;
   /** Local fixtures are opt-in for database-backed startup. */
   seed?: boolean;
+  /** Keep the file adapter's local demo data compact without changing test fixtures. */
+  seedProfile?: 'FULL' | 'MINIMAL';
 }
 
 @Injectable()
@@ -296,6 +314,7 @@ export class PlatformStore {
   private readonly hardProblems = new Map<string, HardProblem>();
   private readonly participants = new Map<string, ParticipantRecord>();
   private codeAgentRuntimeConfig: CodeAgentRuntimeConfig = defaultCodeAgentRuntimeConfig();
+  private localDemoSeedEnabled = true;
   private readonly dataFile: string;
   private persistence?: PlatformStatePersistence;
 
@@ -305,7 +324,12 @@ export class PlatformStore {
     this.persistence = resolvedOptions.persistence;
     this.load();
     if (resolvedOptions.seed === false) return;
-    let seeded = false;
+    if (this.dataFile !== ':memory:' && !this.localDemoSeedEnabled) return;
+    const configuredSeedProfile = resolvedOptions.seedProfile ?? process.env.PLATFORM_SEED_PROFILE ?? (this.dataFile === ':memory:' ? 'FULL' : 'MINIMAL');
+    const seedProfile = String(configuredSeedProfile).trim().toUpperCase();
+    if (seedProfile !== 'FULL' && seedProfile !== 'MINIMAL') throw new Error(`unsupported PLATFORM_SEED_PROFILE: ${seedProfile}`);
+    const minimalSeed = seedProfile === 'MINIMAL';
+    let seeded = minimalSeed ? this.pruneLegacyLocalFixture() : false;
     const localTrainingStartsAt = '2026-08-01T09:00:00+08:00';
     const localTrainingEndsAt = '2026-08-08T18:00:00+08:00';
     const localEvent = this.events.get('event-local');
@@ -330,7 +354,7 @@ export class PlatformStore {
       });
       seeded = true;
     }
-    if (!this.events.has('event-local-git')) {
+    if (!minimalSeed && !this.events.has('event-local-git')) {
       this.events.set('event-local-git', {
         id: 'event-local-git',
         challengeVersion: 'parking-fee-01@1',
@@ -352,26 +376,42 @@ export class PlatformStore {
       seeded = true;
     }
     if (!this.orgUnits.size) {
-      for (const unit of [
-        { id: 'org-root', path: '/', level: 0, label: '集团', name: '华为' },
-        { id: 'org-1', parentId: 'org-root', path: '/1/', level: 1, label: '一级组织', name: '企业业务' },
-        { id: 'org-12', parentId: 'org-1', path: '/1/12/', level: 2, label: '二级组织', name: '云计算' },
-        { id: 'org-125', parentId: 'org-12', path: '/1/12/125/', level: 3, label: '团队', name: 'AI 工程团队' },
-      ]) this.orgUnits.set(unit.id, unit);
+      const units = minimalSeed
+        ? [
+            { id: 'org-root', path: '/', level: 0, label: '集团', name: '华为' },
+            { id: 'org-125', parentId: 'org-root', path: '/1/', level: 1, label: '部门', name: 'AI 工程团队' },
+          ]
+        : [
+            { id: 'org-root', path: '/', level: 0, label: '集团', name: '华为' },
+            { id: 'org-1', parentId: 'org-root', path: '/1/', level: 1, label: '一级组织', name: '企业业务' },
+            { id: 'org-12', parentId: 'org-1', path: '/1/12/', level: 2, label: '二级组织', name: '云计算' },
+            { id: 'org-125', parentId: 'org-12', path: '/1/12/125/', level: 3, label: '团队', name: 'AI 工程团队' },
+          ];
+      for (const unit of units) this.orgUnits.set(unit.id, unit);
       seeded = true;
     }
     if (!this.users.size) {
-      this.users.set('w00123', { id: 'w00123', employeeNo: 'w00123', name: '本地开发用户', orgUnitId: 'org-125', orgPath: '/1/12/125/', roles: ['admin', 'learner'], roleBindings: [{ role: 'admin', scopeOrgPath: '/' }], status: 'ACTIVE' });
-      this.users.set('w00124', { id: 'w00124', employeeNo: 'w00124', name: '本地学员 A', orgUnitId: 'org-125', orgPath: '/1/12/125/', roles: ['learner'], status: 'ACTIVE' });
-      this.users.set('w00125', { id: 'w00125', employeeNo: 'w00125', name: '本地学员 B', orgUnitId: 'org-12', orgPath: '/1/12/', roles: ['learner'], status: 'ACTIVE' });
+      const users: AppUser[] = minimalSeed
+        ? [
+            { id: 'w00123', employeeNo: 'w00123', name: '本地开发用户', orgUnitId: 'org-125', orgPath: '/1/', roles: ['global_admin'], roleBindings: [{ role: 'global_admin', scopeOrgPath: '/' }], status: 'ACTIVE' },
+            { id: 'w00124', employeeNo: 'w00124', name: '本地学员 A', orgUnitId: 'org-125', orgPath: '/1/', roles: ['learner'], status: 'ACTIVE' },
+            { id: 'w00126', employeeNo: 'w00126', name: '本地学员 B', orgUnitId: 'org-125', orgPath: '/1/', roles: ['learner'], status: 'ACTIVE' },
+            { id: 'w00133', employeeNo: 'w00133', name: '本地导师', orgUnitId: 'org-125', orgPath: '/1/', roles: ['mentor'], status: 'ACTIVE' },
+          ]
+        : [
+            { id: 'w00123', employeeNo: 'w00123', name: '本地开发用户', orgUnitId: 'org-125', orgPath: '/1/12/125/', roles: ['admin', 'learner'], roleBindings: [{ role: 'admin', scopeOrgPath: '/' }], status: 'ACTIVE' },
+            { id: 'w00124', employeeNo: 'w00124', name: '本地学员 A', orgUnitId: 'org-125', orgPath: '/1/12/125/', roles: ['learner'], status: 'ACTIVE' },
+            { id: 'w00125', employeeNo: 'w00125', name: '本地学员 B', orgUnitId: 'org-12', orgPath: '/1/12/', roles: ['learner'], status: 'ACTIVE' },
+            { id: 'w00126', employeeNo: 'w00126', name: '本地学员 C', orgUnitId: 'org-125', orgPath: '/1/12/125/', roles: ['learner'], status: 'ACTIVE' },
+          ];
+      for (const user of users) this.users.set(user.id, user);
+      seeded = true;
+    }
+    if (!minimalSeed && !this.users.has('w00126')) {
       this.users.set('w00126', { id: 'w00126', employeeNo: 'w00126', name: '本地学员 C', orgUnitId: 'org-125', orgPath: '/1/12/125/', roles: ['learner'], status: 'ACTIVE' });
       seeded = true;
     }
-    if (!this.users.has('w00126')) {
-      this.users.set('w00126', { id: 'w00126', employeeNo: 'w00126', name: '本地学员 C', orgUnitId: 'org-125', orgPath: '/1/12/125/', roles: ['learner'], status: 'ACTIVE' });
-      seeded = true;
-    }
-    for (const [id, name] of [
+    for (const [id, name] of minimalSeed ? [] : [
       ['w00127', '本地学员 D'],
       ['w00128', '本地学员 E'],
       ['w00129', '本地学员 F'],
@@ -409,7 +449,7 @@ export class PlatformStore {
         seeded = true;
       }
     }
-    if (!this.users.has('w00134')) {
+    if (!minimalSeed && !this.users.has('w00134')) {
       this.users.set('w00134', {
         id: 'w00134',
         employeeNo: 'w00134',
@@ -454,45 +494,47 @@ export class PlatformStore {
       this.challenges.set('parking-fee-01', { id: 'parking-fee-01', ownerOrgPath: '/', origin: 'OFFICIAL', category: 'TRAINING', status: 'PUBLISHED', versions: [version] });
       seeded = true;
     }
-    for (const challenge of [
-      { id: 'member-points-01', title: '会员积分规则引擎', version: 1 },
-      { id: 'batch-log-scrub-01', title: '批量日志脱敏', version: 1 },
-    ]) {
-      if (this.challenges.has(challenge.id)) continue;
-      this.challenges.set(challenge.id, {
-        id: challenge.id,
-        ownerOrgPath: '/',
-        origin: 'OFFICIAL',
-        category: 'TRAINING',
-        status: 'PUBLISHED',
-        versions: [{
-          id: `${challenge.id}@${challenge.version}`,
-          challengeId: challenge.id,
-          version: challenge.version,
-          title: challenge.title,
-          description: challenge.id === 'member-points-01' ? '围绕会员消费、等级和积分生命周期，设计一套可演进的规则引擎。' : '为一批真实场景日志做脱敏处理，同时保持格式、顺序和可追溯性。',
-          objectives: ['拆解复杂业务规则', '设计可验证、可交付的方案'],
-          requirements: ['完成赛题说明中的核心功能', '提交实现说明和测试思路'],
-          constraints: ['遵守赛题声明的语言和依赖限制', '评估环境默认不提供网络访问'],
-          deliverables: ['源码交付件', '需求与假设说明'],
-          tags: challenge.id === 'member-points-01' ? ['规格驱动', '规则引擎'] : ['批量改造', '工程质量'],
-          estimatedMinutes: challenge.id === 'member-points-01' ? 60 : 45,
-          zone: 'YELLOW',
-          languagePolicy: { mode: 'fixed', languages: ['python'] },
-          deliveryPolicy: { allowedSources: ['UPLOAD', 'GIT_REF'], upload: { formats: ['zip'] } },
-          rubricVersion: '1.0',
-          submissionContract: 'contracts/submission-contract.schema.json',
-          evaluationEngine: {
-            id: `${challenge.id}-evaluator`,
-            version: '1.0.0',
-            mode: 'EXTERNAL_CLI',
-            input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
-            output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
-          },
+    if (!minimalSeed) {
+      for (const challenge of [
+        { id: 'member-points-01', title: '会员积分规则引擎', version: 1 },
+        { id: 'batch-log-scrub-01', title: '批量日志脱敏', version: 1 },
+      ]) {
+        if (this.challenges.has(challenge.id)) continue;
+        this.challenges.set(challenge.id, {
+          id: challenge.id,
+          ownerOrgPath: '/',
+          origin: 'OFFICIAL',
+          category: 'TRAINING',
           status: 'PUBLISHED',
-        }],
-      });
-      seeded = true;
+          versions: [{
+            id: `${challenge.id}@${challenge.version}`,
+            challengeId: challenge.id,
+            version: challenge.version,
+            title: challenge.title,
+            description: challenge.id === 'member-points-01' ? '围绕会员消费、等级和积分生命周期，设计一套可演进的规则引擎。' : '为一批真实场景日志做脱敏处理，同时保持格式、顺序和可追溯性。',
+            objectives: ['拆解复杂业务规则', '设计可验证、可交付的方案'],
+            requirements: ['完成赛题说明中的核心功能', '提交实现说明和测试思路'],
+            constraints: ['遵守赛题声明的语言和依赖限制', '评估环境默认不提供网络访问'],
+            deliverables: ['源码交付件', '需求与假设说明'],
+            tags: challenge.id === 'member-points-01' ? ['规格驱动', '规则引擎'] : ['批量改造', '工程质量'],
+            estimatedMinutes: challenge.id === 'member-points-01' ? 60 : 45,
+            zone: 'YELLOW',
+            languagePolicy: { mode: 'fixed', languages: ['python'] },
+            deliveryPolicy: { allowedSources: ['UPLOAD', 'GIT_REF'], upload: { formats: ['zip'] } },
+            rubricVersion: '1.0',
+            submissionContract: 'contracts/submission-contract.schema.json',
+            evaluationEngine: {
+              id: `${challenge.id}-evaluator`,
+              version: '1.0.0',
+              mode: 'EXTERNAL_CLI',
+              input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
+              output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
+            },
+            status: 'PUBLISHED',
+          }],
+        });
+        seeded = true;
+      }
     }
     // Backfill the publisher-selected category for challenge records created
     // before classifications were introduced. A legacy BOUNTY or board entry
@@ -596,9 +638,9 @@ export class PlatformStore {
       }
     }
     if (!this.seasons.size) {
-      this.seasons.set('season-local-2026', { id: 'season-local-2026', name: '本地训战赛季 2026', eventIds: ['event-local', 'event-local-git'], status: 'RUNNING' });
+      this.seasons.set('season-local-2026', { id: 'season-local-2026', name: '本地训战赛季 2026', eventIds: minimalSeed ? ['event-local'] : ['event-local', 'event-local-git'], status: 'RUNNING' });
       seeded = true;
-    } else {
+    } else if (!minimalSeed) {
       const localSeason = this.seasons.get('season-local-2026');
       if (localSeason && !localSeason.eventIds.includes('event-local-git')) {
         localSeason.eventIds.push('event-local-git');
@@ -635,7 +677,7 @@ export class PlatformStore {
       scoreCopy.summary = '评估结果揭晓后，赛季积分、参赛记录和能力维度会同步到个人中心。';
       seeded = true;
     }
-    const hardProblemSeeds: HardProblem[] = [
+    const hardProblemSeeds: HardProblem[] = minimalSeed ? [] : [
       {
         id: 'problem-knowledge-traceability',
         title: '跨团队知识库内容如何保持可追溯和可复用？',
@@ -729,6 +771,107 @@ export class PlatformStore {
     if (seeded) this.persist();
   }
 
+  /**
+   * Compact the original empty local demo fixture once it is opened with the
+   * file adapter. This deliberately runs only when the file contains the
+   * known seed IDs and has no submissions, runs, batches or results; a custom
+   * local dataset is never silently deleted.
+   */
+  private pruneLegacyLocalFixture(): boolean {
+    if (this.dataFile === ':memory:' || this.submissions.size || this.runs.size || this.evaluationBatches.size || this.results.size) return false;
+    const knownChallenges = new Set(['parking-fee-01', 'member-points-01', 'batch-log-scrub-01', 'problem-knowledge-traceability', 'problem-nested-log-redaction', 'problem-api-change-impact']);
+    const knownEvents = new Set(['event-local', 'event-local-git', 'hard-problem:problem-knowledge-traceability:upload', 'hard-problem:problem-nested-log-redaction:upload', 'hard-problem:problem-api-change-impact:upload']);
+    const knownUsers = new Set(['w00123', 'w00124', 'w00125', 'w00126', 'w00127', 'w00128', 'w00129', 'w00130', 'w00131', 'w00132', 'w00133', 'w00134']);
+    const knownOrgUnits = new Set(['org-root', 'org-1', 'org-12', 'org-125']);
+    const onlyKnown = <T extends { id: string }>(rows: Map<string, T>, known: Set<string>): boolean => [...rows.keys()].every((id) => known.has(id));
+    if (!onlyKnown(this.challenges, knownChallenges) || !onlyKnown(this.events, knownEvents) || !onlyKnown(this.users, knownUsers) || !onlyKnown(this.orgUnits, knownOrgUnits)) return false;
+
+    let changed = false;
+    const keepChallenge = new Set(['parking-fee-01']);
+    for (const id of [...this.challenges.keys()]) {
+      if (keepChallenge.has(id)) continue;
+      this.challenges.delete(id);
+      changed = true;
+    }
+    const keepEvent = new Set(['event-local']);
+    for (const id of [...this.events.keys()]) {
+      if (keepEvent.has(id)) continue;
+      this.events.delete(id);
+      changed = true;
+    }
+    const keepUser = new Set(['w00123', 'w00124', 'w00126', 'w00133']);
+    for (const id of [...this.users.keys()]) {
+      if (keepUser.has(id)) continue;
+      this.users.delete(id);
+      changed = true;
+    }
+    const keepOrgUnit = new Set(['org-root', 'org-125']);
+    for (const id of [...this.orgUnits.keys()]) {
+      if (keepOrgUnit.has(id)) continue;
+      this.orgUnits.delete(id);
+      changed = true;
+    }
+    const department = this.orgUnits.get('org-125');
+    if (department && (department.parentId !== 'org-root' || department.path !== '/1/' || department.level !== 1 || department.label !== '部门' || department.name !== 'AI 工程团队')) {
+      this.orgUnits.set('org-125', { ...department, parentId: 'org-root', path: '/1/', level: 1, label: '部门', name: 'AI 工程团队' });
+      changed = true;
+    }
+    for (const user of this.users.values()) {
+      const nextRoles = user.id === 'w00123' ? ['global_admin'] : user.id === 'w00133' ? ['mentor'] : ['learner'];
+      const nextBindings = user.id === 'w00123' ? [{ role: 'global_admin' as const, scopeOrgPath: '/' }] : undefined;
+      const canonicalName = ({ w00123: '本地开发用户', w00124: '本地学员 A', w00126: '本地学员 B', w00133: '本地导师' } as Record<string, string>)[user.id];
+      if (user.name !== canonicalName || user.orgUnitId !== 'org-125' || user.orgPath !== '/1/' || JSON.stringify(user.roles) !== JSON.stringify(nextRoles) || JSON.stringify(user.roleBindings) !== JSON.stringify(nextBindings)) {
+        this.users.set(user.id, { ...user, ...(canonicalName ? { name: canonicalName } : {}), orgUnitId: 'org-125', orgPath: '/1/', roles: nextRoles, ...(nextBindings ? { roleBindings: nextBindings } : { roleBindings: undefined }) });
+        changed = true;
+      }
+    }
+    const localEvent = this.events.get('event-local');
+    if (localEvent) {
+      const accessPolicy = {
+        mode: 'RESTRICTED' as const,
+        subjectIds: ['w00124', 'w00126'],
+        departmentIds: ['org-125'],
+        mentorIds: ['w00133'],
+      };
+      if (JSON.stringify(localEvent.accessPolicy) !== JSON.stringify(accessPolicy) || localEvent.participantMode !== 'ALLOWLIST') {
+        localEvent.accessPolicy = accessPolicy;
+        localEvent.participantMode = 'ALLOWLIST';
+        changed = true;
+      }
+    }
+    const keepParticipantIds = new Set(['w00124', 'w00126']);
+    for (const key of [...this.participants.keys()]) {
+      const participant = this.participants.get(key);
+      if (participant?.eventId === 'event-local' && keepParticipantIds.has(participant.subjectId)) continue;
+      this.participants.delete(key);
+      changed = true;
+    }
+    for (const subjectId of keepParticipantIds) {
+      const key = `event-local:${subjectId}`;
+      if (this.participants.has(key)) continue;
+      const user = this.users.get(subjectId);
+      if (!user) continue;
+      this.participants.set(key, { eventId: 'event-local', subjectId, orgPathSnapshot: user.orgPath, importedAt: now() });
+      changed = true;
+    }
+    for (const season of this.seasons.values()) {
+      const eventIds = season.eventIds.filter((eventId) => eventId === 'event-local');
+      if (JSON.stringify(season.eventIds) !== JSON.stringify(eventIds)) {
+        season.eventIds = eventIds;
+        changed = true;
+      }
+    }
+    if (this.hardProblems.size) {
+      this.hardProblems.clear();
+      changed = true;
+    }
+    if (this.audits.size) {
+      this.audits.clear();
+      changed = true;
+    }
+    return changed;
+  }
+
   private load(): void {
     if (this.dataFile === ':memory:' || !existsSync(this.dataFile)) return;
     try {
@@ -750,6 +893,7 @@ export class PlatformStore {
       for (const announcement of state.announcements ?? []) this.announcements.set(announcement.id, announcement);
       for (const problem of state.hardProblems ?? []) this.hardProblems.set(problem.id, problem);
       for (const participant of state.participants ?? []) this.participants.set(`${participant.eventId}:${participant.subjectId}`, participant);
+      if (state.localDemoSeedEnabled === false) this.localDemoSeedEnabled = false;
       if (state.codeAgentRuntimeConfig) {
         this.codeAgentRuntimeConfig = buildCodeAgentRuntimeConfig(
           state.codeAgentRuntimeConfig,
@@ -779,6 +923,7 @@ export class PlatformStore {
       hardProblems: [...this.hardProblems.values()],
       participants: [...this.participants.values()],
       codeAgentRuntimeConfig: this.codeAgentRuntimeConfig,
+      localDemoSeedEnabled: this.localDemoSeedEnabled,
     })) as PlatformStateSnapshot;
   }
 
@@ -802,6 +947,7 @@ export class PlatformStore {
     this.announcements.clear();
     this.hardProblems.clear();
     this.participants.clear();
+    this.localDemoSeedEnabled = state.localDemoSeedEnabled !== false;
     for (const event of state.events ?? []) if (event?.id) this.events.set(event.id, event);
     for (const submission of state.submissions ?? []) if (submission?.id) this.submissions.set(submission.id, submission);
     for (const run of state.runs ?? []) if (run?.id) this.runs.set(run.id, run);
@@ -1679,6 +1825,14 @@ export class PlatformStore {
     if (nextRoles.includes('department_admin') && targetUnit && !nextBindings.some((binding) => binding.role === 'department_admin' && binding.scopeOrgPath === targetUnit.path)) {
       nextBindings.push({ role: 'department_admin', scopeOrgPath: targetUnit.path });
     }
+    const nextUser: AppUser = {
+      ...user,
+      roles: nextRoles,
+      ...(nextBindings.length ? { roleBindings: nextBindings } : { roleBindings: undefined }),
+    };
+    if (user.id === actorId && access.level === 'GLOBAL' && !hasGlobalAdminAccess(nextUser)) {
+      throw new ForbiddenException('全局管理员不能移除自己的全局管理员权限');
+    }
     Object.assign(user, {
       ...(departmentPatchProvided ? {
         orgUnitId: targetUnit?.id ?? '',
@@ -1690,6 +1844,20 @@ export class PlatformStore {
       ...(nextBindings.length ? { roleBindings: nextBindings } : { roleBindings: undefined }),
     });
     this.audit(actorId, 'user.roles.update', `user:${userId}`, before, user);
+    this.persist();
+    return user;
+  }
+
+  /** Update only employee-managed profile fields; identity and permissions stay server-owned. */
+  updateUserProfile(userId: string, patch: { nickname?: string | null; avatarDataUrl?: string | null }, actorId: string): AppUser {
+    const user = this.getUser(userId);
+    if (user.id !== actorId) throw new ForbiddenException('只能修改自己的个人资料');
+    if (user.status !== 'ACTIVE') throw new ForbiddenException('account is disabled');
+    const before = { ...user, ...(user.avatarDataUrl ? { avatarDataUrl: `[头像 ${user.avatarDataUrl.length} 字符]` } : {}) };
+    if (patch.nickname !== undefined) user.nickname = patch.nickname?.trim() || undefined;
+    if (patch.avatarDataUrl !== undefined) user.avatarDataUrl = patch.avatarDataUrl || undefined;
+    const after = { ...user, ...(user.avatarDataUrl ? { avatarDataUrl: `[头像 ${user.avatarDataUrl.length} 字符]` } : {}) };
+    this.audit(actorId, 'user.profile.update', `user:${userId}`, before, after);
     this.persist();
     return user;
   }
@@ -1751,6 +1919,11 @@ export class PlatformStore {
   getCodeAgentRuntimeConfig(actorId: string): CodeAgentRuntimeConfig {
     this.assertGlobalAdmin(actorId);
     return { ...this.codeAgentRuntimeConfig, args: [...this.codeAgentRuntimeConfig.args] };
+  }
+
+  getCodeAgentRuntimeDiagnostics(actorId: string): CodeAgentRuntimeDiagnostics {
+    this.assertGlobalAdmin(actorId);
+    return codeAgentRuntimeDiagnostics(this.getCodeAgentRuntimeConfig(actorId));
   }
 
   updateCodeAgentRuntimeConfig(input: CodeAgentRuntimeInput, actorId: string): CodeAgentRuntimeConfig {
@@ -2136,6 +2309,7 @@ export class PlatformStore {
     const before = challenge.status;
     challenge.archivedFrom = before;
     challenge.status = 'ARCHIVED';
+    this.localDemoSeedEnabled = false;
     this.syncHardProblemSubmissionEvent(challenge);
     this.audit(actorId, 'challenge.archive', `challenge:${challengeId}`, { status: before }, { status: challenge.status, archivedFrom: challenge.archivedFrom });
     this.persist();
@@ -2233,7 +2407,13 @@ export class PlatformStore {
     }));
   }
 
-  leaderboard(seasonId: string): Array<Record<string, unknown>> {
+  /**
+   * Return a season leaderboard. Internal callers that omit `actorId` retain
+   * the full, identity-keyed representation used by legacy store jobs. HTTP
+   * callers must provide an actor so the public response can be bounded and
+   * privacy-filtered at the domain boundary.
+   */
+  leaderboard(seasonId: string, actorId?: string): Array<Record<string, unknown>> {
     const season = this.getSeason(seasonId);
     const rows = new Map<string, { score: number; points: number; submissions: number }>();
     for (const eventId of season.eventIds) {
@@ -2246,7 +2426,23 @@ export class PlatformStore {
       }
     }
     const sorted = [...rows.entries()].sort((a, b) => b[1].points - a[1].points || b[1].score - a[1].score || a[0].localeCompare(b[0]));
-    return sorted.map(([subjectId, row], index) => ({ rank: index + 1, subjectId, score: Number(row.score.toFixed(4)), points: row.points, total: row.points, submissions: row.submissions }));
+    const legacyRows = sorted.map(([subjectId, row], index) => ({ rank: index + 1, subjectId, score: Number(row.score.toFixed(4)), points: row.points, total: row.points, submissions: row.submissions }));
+    if (!actorId) return legacyRows;
+
+    const canViewIdentity = this.isAdmin(actorId);
+    return sorted.slice(0, 3).map(([subjectId, row], index) => {
+      const user = this.getUser(subjectId);
+      return {
+        rank: index + 1,
+        nickname: user.nickname?.trim() || '未设置昵称',
+        score: Number(row.score.toFixed(4)),
+        points: row.points,
+        total: row.points,
+        submissions: row.submissions,
+        isSelf: subjectId === actorId,
+        ...(canViewIdentity ? { subjectId, name: user.name, employeeNo: user.employeeNo } : {}),
+      };
+    });
   }
 
   profile(subjectId: string, options: { includeHistory?: boolean } = {}): Record<string, unknown> {
@@ -2307,8 +2503,11 @@ export class PlatformStore {
   * Scores are normalized to percentages so different rubrics can share one
   * radar chart while the original score/max values remain available for detail.
   */
-  capabilities(subjectId: string, options: { includeSealed?: boolean; trendPage?: number; trendPageSize?: number; eventId?: string } = {}): Record<string, unknown> {
+  capabilities(subjectId: string, options: { includeSealed?: boolean; trendPage?: number; trendPageSize?: number; eventId?: string; includeDepartmentStats?: boolean } = {}): Record<string, unknown> {
     const includeSealed = options.includeSealed === true;
+    // Keep the historical store-level default for internal/admin consumers,
+    // while HTTP callers explicitly pass the actor's department permission.
+    const includeDepartmentStats = options.includeDepartmentStats !== false;
     const trendPage = options.trendPage;
     const trendPageSize = options.trendPageSize;
     const requestedEventId = options.eventId?.trim() || undefined;
@@ -2434,9 +2633,9 @@ export class PlatformStore {
         bestPercent: samples.length ? Math.max(...samples.map((sample) => sample.percent)) : null,
         delta: latest && previous ? round(latest.percent - previous.percent) : null,
         evaluatedCount: samples.length,
-        peerMedianPercent: peer.median,
-        peerCount: peer.count,
-        vsPeerMedian: average !== null && peer.median !== null ? round(average - peer.median) : null,
+        peerMedianPercent: includeDepartmentStats ? peer.median : null,
+        peerCount: includeDepartmentStats ? peer.count : 0,
+        vsPeerMedian: includeDepartmentStats && average !== null && peer.median !== null ? round(average - peer.median) : null,
         samples,
       };
     });
@@ -2475,9 +2674,9 @@ export class PlatformStore {
         delta: latest && previous ? round(latest.percent - previous.percent) : null,
         sampleCount: samples.length,
         evidenceCount: evidenceKeys.length,
-        peerMedianPercent: peer.median,
-        peerCount: peer.count,
-        vsPeerMedian: average !== null && peer.median !== null ? round(average - peer.median) : null,
+        peerMedianPercent: includeDepartmentStats ? peer.median : null,
+        peerCount: includeDepartmentStats ? peer.count : 0,
+        vsPeerMedian: includeDepartmentStats && average !== null && peer.median !== null ? round(average - peer.median) : null,
         status: average === null ? '待评估' : average >= 85 ? '优势' : average >= 60 ? '稳定' : '待提升',
         samples,
       };
@@ -2580,9 +2779,9 @@ export class PlatformStore {
     const departmentComparison = {
       orgPath: subject.orgPath,
       participantCount: departmentAverages.length,
-      average: medianValue(departmentAverages) === null ? null : round(departmentAverages.reduce((sum, value) => sum + value, 0) / departmentAverages.length),
-      median: medianValue(departmentAverages),
-      percentile: departmentPercentile,
+      average: includeDepartmentStats && medianValue(departmentAverages) !== null ? round(departmentAverages.reduce((sum, value) => sum + value, 0) / departmentAverages.length) : null,
+      median: includeDepartmentStats ? medianValue(departmentAverages) : null,
+      percentile: includeDepartmentStats ? departmentPercentile : null,
     };
     const rankedDimensions = dimensionRows.filter((dimension) => typeof dimension.percent === 'number').sort((a, b) => (b.percent as number) - (a.percent as number));
     const evaluatedSkills = skills.filter((skill) => typeof skill.percent === 'number');
@@ -2617,6 +2816,7 @@ export class PlatformStore {
         departmentAverage: departmentComparison.average,
         departmentMedian: departmentComparison.median,
         departmentPercentile: departmentComparison.percentile,
+        departmentStatsVisible: includeDepartmentStats,
       },
       dimensions: dimensionRows,
       capabilityCatalogVersion: CAPABILITY_CATALOG_VERSION,
@@ -2630,8 +2830,25 @@ export class PlatformStore {
       ...(trendPage === undefined ? {} : { trendPageInfo: pageInfo(trendPage, trendPageSize ?? 20, trend.length) }),
       zoneStats,
       departmentComparison,
+      departmentStatsVisible: includeDepartmentStats,
       lastUpdated: visible.at(-1)?.result.finishedAt ?? visible.at(-1)?.submission.createdAt ?? null,
     };
+  }
+
+  /**
+   * Department comparisons are visible only to a global administrator or to
+   * a department administrator whose scope contains the target employee.
+   * A normal employee can still read their own capability profile, but never
+   * receives peer statistics from the API.
+   */
+  canViewDepartmentStats(actorId: string, subjectId: string): boolean {
+    const subject = this.getUser(subjectId);
+    try {
+      const access = this.resolveAdminAccess(actorId, false);
+      return access.level === 'GLOBAL' || access.scopeOrgPaths.some((scope) => this.orgPathIncludes(scope, subject.orgPath));
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -3040,6 +3257,7 @@ export class PlatformStore {
     for (const season of this.seasons.values()) {
       season.eventIds = season.eventIds.filter((id) => id !== eventId);
     }
+    this.localDemoSeedEnabled = false;
     this.audit(actorId, 'event.delete', `event:${eventId}`, before, undefined);
     this.persist();
   }
@@ -3047,6 +3265,7 @@ export class PlatformStore {
   createSubmission(eventId: string, subjectId: string, snapshot: SubmissionSnapshot): SubmissionRecord {
     const event = this.getEvent(eventId);
     if (event.status !== 'OPEN') throw new ConflictException(`event ${eventId} is not open`);
+    assertEventSubmissionWindow(event);
     if (!subjectId) throw new BadRequestException('subjectId is required');
     const subject = this.getUser(subjectId);
     if (subject.status !== 'ACTIVE') throw new ForbiddenException('subject is disabled');
@@ -3891,7 +4110,8 @@ export class PlatformStore {
     return stored;
   }
 
-  getReport(submissionId: string): StoredResult & { report?: Record<string, unknown> } {
+  getReport(submissionId: string, options: { includeDepartmentStats?: boolean } = {}): StoredResult & { report?: Record<string, unknown> } {
+    const includeDepartmentStats = options.includeDepartmentStats !== false;
     const submission = this.getSubmission(submissionId);
     if (!submission.resultId) throw new NotFoundException(`report not available for submission: ${submissionId}`);
     const event = this.getEvent(submission.eventId);
@@ -4001,7 +4221,15 @@ export class PlatformStore {
       ...stored,
       report: {
         event: { eventId: event.id, participantCount: visible.length, rank: rank || null, percentile: rank ? Number((100 * (1 - (rank - 1) / Math.max(visible.length, 1))).toFixed(4)) : null, average: scores.length ? Number((scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(4)) : null, median: median(scores) },
-        department: { orgPath: departmentPath, participantCount: departmentVisible.length, rank: departmentRank || null, percentile: departmentRank ? Number((100 * (1 - (departmentRank - 1) / Math.max(departmentVisible.length, 1))).toFixed(4)) : null, average: departmentScores.length ? Number((departmentScores.reduce((sum, score) => sum + score, 0) / departmentScores.length).toFixed(4)) : null, median: median(departmentScores) },
+        department: {
+          orgPath: departmentPath,
+          participantCount: departmentVisible.length,
+          rank: includeDepartmentStats && departmentRank ? departmentRank : null,
+          percentile: includeDepartmentStats && departmentRank ? Number((100 * (1 - (departmentRank - 1) / Math.max(departmentVisible.length, 1))).toFixed(4)) : null,
+          average: includeDepartmentStats && departmentScores.length ? Number((departmentScores.reduce((sum, score) => sum + score, 0) / departmentScores.length).toFixed(4)) : null,
+          median: includeDepartmentStats ? median(departmentScores) : null,
+          departmentStatsVisible: includeDepartmentStats,
+        },
         distribution: { min: scores.length ? Math.min(...scores) : null, max: scores.length ? Math.max(...scores) : null, scores },
         summary: {
           score: total,

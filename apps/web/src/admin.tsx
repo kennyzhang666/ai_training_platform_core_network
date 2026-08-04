@@ -1,10 +1,51 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { richTextPreview, sanitizeRichText } from './rich-text';
+import { Icon, type IconName } from './icons';
+import { EVALUATION_ENGINE_GUIDE_MARKDOWN } from './evaluation-engine-guide';
 
 const API = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:3000/api/v1';
 const ADMIN_EMPLOYEE_ID = import.meta.env.VITE_EMPLOYEE_ID ?? 'w00123';
 
 type AdminSection = 'overview' | 'organization' | 'challenges' | 'events' | 'participants' | 'capabilities' | 'grading' | 'evaluation-runtime' | 'announcements' | 'audit';
+type AdminGuideKey = 'challenges' | 'events' | 'evaluation-runtime';
+type AdminGuideSection = { title: string; paragraphs?: string[]; bullets?: string[] };
+
+const ADMIN_GUIDE_CONTENT: Record<AdminGuideKey, { kicker: string; title: string; intro: string; sections: AdminGuideSection[] }> = {
+  challenges: {
+    kicker: '赛题配置说明',
+    title: '如何创建一份可评测的赛题',
+    intro: '赛题是可复用的题目资产；训战只引用已经发布的赛题版本。建议先完成赛题配置和自测，再创建训战。',
+    sections: [
+      { title: '1. 赛题与版本', bullets: ['赛题 ID 和标题用于识别题目，赛题类型决定它属于训战、竞赛或难题榜。', '每次发布都会形成不可变版本；已发布版本不能原地修改，修改时请创建新版本。', '训战引用的是具体版本，不是会随时变化的赛题草稿。'] },
+      { title: '2. 题面和交付要求', bullets: ['题面、目标、要求、约束、交付件和支持语言会展示给参训员工，并参与 Agent 评测上下文。', '提交方式至少选择一种：上传 ZIP 或指定 Git 仓路径。Git 地址必须来自受控的训战配置。', '目录规范用于校验文件路径、大小、数量和禁止内容，平台接收后会生成不可变快照。'] },
+      { title: '3. 评测引擎与契约', bullets: ['平台内置执行器适用于 PLATFORM_LOCAL；上传完整评测包适用于 PACKAGED；EXTERNAL_CLI 用于线下评测后导入。', '输入约束和输出约束必须从 Git 固定目录选择，可点击“查看详情”阅读 Schema、示例和编写说明。', 'Code Agent 评测还需要配置 instruction.md 和 Skills；评测结果必须符合平台输出契约。'] },
+      { title: '4. 发布前检查', bullets: ['确认题面能让员工知道交付什么、评测什么、结果如何产生。', '确认评测引擎、版本、参数、契约路径和示例相互匹配。', '确认保存成功后再发布；发布版本被训战引用后，不要通过修改旧版本改变历史评测含义。'] },
+    ],
+  },
+  events: {
+    kicker: '训战配置说明',
+    title: '如何编排一场完整训战',
+    intro: '训战是一次赛题运行安排，负责开放时间、参与范围、提交方式、评测触发和结果公布，不承载赛题评分逻辑。',
+    sections: [
+      { title: '1. 基础配置', bullets: ['选择已经发布的赛题版本；训战保存后会固定引用该版本。', '训战类型分为开放窗口和集中训战；开始、结束时间由服务端校验。', '提交方式可选上传 ZIP 或指定 Git 仓路径，Git 分支模板和版本锁定时点也在这里配置。'] },
+      { title: '2. 访问范围', bullets: ['全员可见表示组织范围内的员工都可以进入。', '定向访问时，部门和导师使用勾选方式配置；员工、部门或导师任一范围匹配即可进入。', '访问范围只控制能否进入，提交仍需满足开放时间和赛题交付契约。'] },
+      { title: '3. 评测方式', bullets: ['自动评测：提交后自动进入评测队列。', '管理员发起：管理员在评测中心选择具体提交后创建评测批次。', '导入评测结果：适用于外部线下评测，先生成输入清单，再导入符合契约的结果。'] },
+      { title: '4. 运行与变更', bullets: ['开放中可接收提交；结束训战后不能继续提交，管理员可以公布结果。', '已有提交的训战不允许删除，避免破坏提交和评测历史。', '修改配置只影响后续新批次；已经冻结的评测批次继续使用创建时的赛题、快照和运行配置。'] },
+      { title: '5. 发布前检查', bullets: ['确认赛题版本已发布、时间窗口正确、访问范围符合预期。', '确认评测触发方式与赛题引擎匹配，EXTERNAL_CLI 应使用导入结果。', '先用测试账号验证进入、提交、评测和结果公布四个关键路径。'] },
+    ],
+  },
+  'evaluation-runtime': {
+    kicker: '评测环境说明',
+    title: 'Code Agent 运行配置怎么工作',
+    intro: '此页面配置的是评测 Worker 如何启动 Code Agent，不是赛题内置执行器本身。API 只负责创建批次、校验结果和保存状态，实际评测由独立 Worker 执行。',
+    sections: [
+      { title: '1. 两种命令来源', bullets: ['页面默认提供 `opencode --prompt "{{prompt}}"` 和一段可直接使用的评测任务指令，但默认保持关闭；确认 Worker 安装 OpenCode 后再勾选保存。', '勾选“使用平台配置”后，平台会在创建新批次时冻结启动命令、任务指令和超时。', '不勾选时，Worker 使用主机上的 CODE_AGENT_COMMAND / CODE_AGENT_ARGS_JSON 兜底配置。', 'Worker 如果在另一台主机或容器中，管理后台只能看到 API 进程可见的诊断；Worker 的 --agent-command 不会自动同步。'] },
+      { title: '2. 启动命令填写规则', bullets: ['只填写“可执行文件 + 参数”，例如 `opencode --prompt "{{prompt}}"`；命令不会经过系统 Shell。', '可用占位符为 `{{prompt}}`、`{{manifestPath}}`、`{{batchDir}}`。没有清单参数时，Worker 会追加 manifest 参数。', '可执行文件必须真实存在于 Worker 主机，并满足 CODE_AGENT_ALLOWED_EXECUTABLES（如果配置了白名单）。'] },
+      { title: '3. 任务指令和超时', bullets: ['任务指令描述 Agent 如何读取清单、instruction、Skills、提交物和结果契约；Worker 会补充批次上下文。', '批次超时默认 3600 秒，允许范围为 60 到 21600 秒；Worker 命令行或环境变量可以按规则覆盖。', '凭据只能放在 Worker 运行环境，不要写入题面、任务指令或日志。'] },
+      { title: '4. 环境页签、测试与排查', bullets: ['“环境配置”页签按 API、Worker、租约、评测引擎和目录列出变量、优先级与 PowerShell 启动示例。', '“当前可执行文件”是只读诊断，来自已保存命令的第一个 token；它不是文件选择框。', '“测试启动命令”只在非生产环境且 CODE_AGENT_RUNTIME_TEST_ENABLED=true 时运行合成清单，不会带入真实提交。', '如果显示未找到，依次检查：平台配置是否保存、命令是否在 Worker 主机存在、Worker 是否启动、API 与 Worker 是否使用了不同环境变量。'] },
+    ],
+  },
+};
 type ChallengeStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 type ChallengeCategory = 'TRAINING' | 'COMPETITION' | 'HARD_PROBLEM';
 type HardProblemReviewStatus = 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
@@ -92,6 +133,41 @@ type CodeAgentRuntimeConfig = {
   updatedAt: string;
   updatedBy: string;
 };
+type CodeAgentRuntimeDiagnostics = {
+  schemaVersion: '1.0';
+  defaults: Pick<CodeAgentRuntimeConfig, 'enabled' | 'commandLine' | 'prompt' | 'timeoutSeconds'>;
+  platform: CodeAgentRuntimeConfig;
+  worker: {
+    mode: 'EMBEDDED' | 'EXTERNAL';
+    workerId: string | null;
+    source: 'PLATFORM' | 'ENVIRONMENT' | 'CLI_OVERRIDE_UNKNOWN' | 'NONE';
+    commandConfigured: boolean;
+    executable: string | null;
+    args: string[];
+    commandPreview: string | null;
+    cliOverrideVisible: false;
+    canResolveExecutable: boolean;
+    reason: string;
+  };
+  allowedExecutables: string[];
+  test: { enabled: boolean; maxTimeoutSeconds: number; canExecute: boolean; reason: string };
+};
+type CodeAgentRuntimeTestResult = {
+  schemaVersion: '1.0';
+  status: 'PASS' | 'FAIL' | 'BLOCKED' | 'TIMEOUT';
+  message: string;
+  executable: string | null;
+  args: string[];
+  workingDirectory: string;
+  manifestPath: string | null;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  exitCode: number | null;
+  signal: string | null;
+  stdout: string;
+  stderr: string;
+};
 type OrgUnit = { id: string; parentId?: string; path: string; level: number; label: string; name: string };
 type AdminUser = { id: string; employeeNo: string; name: string; orgUnitId: string; orgPath: string; departmentHint?: string; departmentSource?: 'SSO' | 'ADMIN'; roles: string[]; roleBindings?: Array<{ role: string; scopeOrgPath: string }>; status: 'ACTIVE' | 'DISABLED' };
 type UserPage = { items: AdminUser[]; pageInfo: { page: number; pageSize: number; total: number; totalPages: number; hasNext: boolean; hasPrevious: boolean } };
@@ -171,7 +247,7 @@ type EventDraft = {
 };
 
 type AdminAccess = { level: 'GLOBAL' | 'DEPARTMENT'; scopeOrgPaths: string[] };
-type Props = { onExit: () => void; userName: string; adminAccess: AdminAccess };
+type Props = { onExit: () => void; userId: string; userName: string; adminAccess: AdminAccess };
 
 function humanizeApiMessage(message: string): string {
   const value = message.trim();
@@ -278,8 +354,43 @@ function eventScheduleLabel(event: Pick<EventConfig, 'startsAt' | 'endsAt'>): st
   return `${event.startsAt ? formatScheduleDate(event.startsAt) : '待配置'} — ${event.endsAt ? formatScheduleDate(event.endsAt) : '待配置'}`;
 }
 
+type EventWindowState = 'BEFORE' | 'OPEN' | 'AFTER';
+
+function eventWindowState(event: Pick<EventConfig, 'startsAt' | 'endsAt'>, currentTime = Date.now()): EventWindowState {
+  const startsAt = event.startsAt ? Date.parse(event.startsAt) : Number.NaN;
+  if (Number.isFinite(startsAt) && currentTime < startsAt) return 'BEFORE';
+  const endsAt = event.endsAt ? Date.parse(event.endsAt) : Number.NaN;
+  if (Number.isFinite(endsAt) && currentTime > endsAt) return 'AFTER';
+  return 'OPEN';
+}
+
+/**
+ * Event status is a persisted workflow state; the time window is a separate
+ * runtime state. Keep those distinct so an administrator can still close an
+ * expired event (including deadline Git snapshot pinning), while the console
+ * does not call it "in progress" after its submission window has ended.
+ */
+function eventDisplayStatus(event: EventConfig, currentTime = Date.now()): EventConfig['status'] {
+  if (event.status !== 'OPEN') return event.status;
+  return eventWindowState(event, currentTime) === 'AFTER' ? 'CLOSED' : 'OPEN';
+}
+
+function eventDisplayLabel(event: EventConfig, currentTime = Date.now()): string {
+  if (event.status === 'OPEN') {
+    const window = eventWindowState(event, currentTime);
+    if (window === 'BEFORE') return '即将开放';
+    if (window === 'AFTER') return '已结束';
+  }
+  return statusLabel(event.status);
+}
+
 function statusLabel(value: string): string {
   return ({ DRAFT: '草稿', PUBLISHED: '已发布', ARCHIVED: '垃圾箱', OPEN: '进行中', CLOSED: '已结束', RELEASED: '已公布', WAITING_TRIGGER: '等待处理', WAITING_IMPORT: '等待结果', RECEIVED: '已提交', QUEUED: '等待开始', RUNNING: '处理中', GRADED: '已完成', FAILED: '需要重试', ACTIVE: '在职', DISABLED: '已停用' } as Record<string, string>)[value] ?? (value && !/^[A-Z][A-Z0-9_]*$/.test(value) ? value : '—');
+}
+
+function organizationLevelLabel(level: number): string {
+  const normalized = Number.isFinite(level) ? Math.max(0, Math.floor(level)) : 0;
+  return normalized === 0 ? '根组织' : `第 ${normalized} 级组织`;
 }
 
 function roleLabel(value: string): string {
@@ -341,6 +452,18 @@ function evaluationContractModeLabel(mode: EngineMode): string {
 
 function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? String(value);
+}
+
+function downloadTextFile(fileName: string, contents: string, mimeType = 'text/markdown;charset=utf-8'): void {
+  const blob = new Blob([contents], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function participantModeLabel(mode?: string): string {
@@ -469,7 +592,7 @@ function draftFromVersion(version?: ChallengeVersion): ChallengeDraft {
   return { id: version?.challengeId ?? '', title: version?.title ?? '', category: 'TRAINING', description: version?.description ?? '', objectives: (version?.objectives ?? []).join('\n'), requirements: (version?.requirements ?? []).join('\n'), constraints: (version?.constraints ?? []).join('\n'), deliverables: (version?.deliverables ?? []).join('\n'), tags: (version?.tags ?? []).join('\n'), estimatedMinutes: String(version?.estimatedMinutes ?? 45), zone: version?.zone ?? 'YELLOW', languages: languages.join('\n'), allowUpload: allowed.includes('UPLOAD'), allowGit: allowed.includes('GIT_REF'), repository: String(git.repository ?? ''), branchTemplate: String(git.branchTemplate ?? 'drill/{subjectId}'), rubricVersion: version?.rubricVersion ?? '1.0', submissionContract: version?.submissionContract ?? 'contracts/submission-contract-v1.1.schema.json', submissionContractJson: version?.submissionContractDefinition ? JSON.stringify(version.submissionContractDefinition, null, 2) : '', evaluationEngineId: engine?.id ?? `${version?.challengeId ?? 'challenge'}-evaluator`, evaluationEngineVersion: engine?.version ?? '1.0.0', evaluationEngineMode: mode, enginePackage: engine?.package ?? null, enginePackageSummary: engine?.package ? `${engine.package.fileName ?? '引擎包'} · ${engine.package.packageHash.slice(0, 12)}…` : '', executorId: engine?.executor?.id ?? '', executorParams: Object.fromEntries(Object.entries(engine?.executor?.params ?? {}).map(([key, value]) => [key, String(value ?? '')])), evaluationInputContract: engine?.input?.contractPath ?? defaults.evaluationInputContract, evaluationOutputContract: engine?.output?.contractPath ?? defaults.evaluationOutputContract, agentInstructionPath: engine?.agent?.instructionPath ?? 'instruction.md', agentSkillPaths: (engine?.agent?.skillPaths ?? ['skills/evaluation']).join('\n') };
 }
 
-export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
+export function AdminWorkspace({ onExit, userId, userName, adminAccess }: Props) {
   const [section, setSection] = useState<AdminSection>('events');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
@@ -478,6 +601,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   const [evaluationContractDetail, setEvaluationContractDetail] = useState<EvaluationContractDetail | null>(null);
   const [evaluationContractDetailBusy, setEvaluationContractDetailBusy] = useState(false);
   const [evaluationContractCopied, setEvaluationContractCopied] = useState(false);
+  const [adminGuide, setAdminGuide] = useState<AdminGuideKey | null>(null);
   const [events, setEvents] = useState<EventConfig[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -496,6 +620,8 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   const [audits, setAudits] = useState<Audit[]>([]);
   const [queue, setQueue] = useState<QueueStats | null>(null);
   const [codeAgentRuntime, setCodeAgentRuntime] = useState<CodeAgentRuntimeConfig | null>(null);
+  const [codeAgentRuntimeDiagnostics, setCodeAgentRuntimeDiagnostics] = useState<CodeAgentRuntimeDiagnostics | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [selectedGradingIds, setSelectedGradingIds] = useState<string[]>([]);
@@ -509,7 +635,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   const [announcementForm, setAnnouncementForm] = useState({ title: '', summary: '', tag: '平台通知' as Announcement['tag'], pinned: false });
   const [importText, setImportText] = useState('');
   const [participantEventId, setParticipantEventId] = useState('');
-  const [participantText, setParticipantText] = useState('');
+  const [participantSubjectIds, setParticipantSubjectIds] = useState<string[]>([]);
 
   const visibleChallenges = useMemo(() => challenges.filter((challenge) => challengeView === 'trash' ? challenge.status === 'ARCHIVED' : challenge.status !== 'ARCHIVED'), [challenges, challengeView]);
   const selectedChallenge = useMemo(() => visibleChallenges.find((challenge) => challenge.id === selectedChallengeId), [visibleChallenges, selectedChallengeId]);
@@ -517,6 +643,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   const pendingSubmissions = useMemo(() => submissions.filter((submission) => ['WAITING_TRIGGER', 'WAITING_IMPORT', 'RECEIVED', 'QUEUED', 'RUNNING', 'FAILED'].includes(submission.state) || ['PENDING', 'QUEUED', 'RUNNING', 'FAILED'].includes(submission.gradingStatus ?? '')), [submissions]);
   const gradingSubmissions = useMemo(() => submissions.filter((submission) => pendingSubmissions.includes(submission) || Boolean(submission.resultId)), [submissions, pendingSubmissions]);
   const capabilityUsers = capabilityUserPage?.items ?? [];
+  const activeEventCount = useMemo(() => events.filter((event) => event.status === 'OPEN' && eventWindowState(event, clock) === 'OPEN').length, [events, clock]);
 
   async function loadCapabilityUsers(page = 1, orgPath = capabilityOrgPath): Promise<void> {
     const requestId = ++capabilityUsersRequestRef.current;
@@ -536,8 +663,8 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   async function refresh() {
     const capabilityUserParams = new URLSearchParams({ page: '1', pageSize: '20', role: 'learner', status: 'ACTIVE' });
     if (capabilityOrgPath) capabilityUserParams.set('orgPath', capabilityOrgPath);
-    const [loadedOverview, loadedChallenges, loadedEvents, loadedSubmissionPage, loadedUsers, loadedCapabilityUsers, loadedOrgUnits, loadedCapabilities, loadedAnnouncements, loadedAuditPage, loadedQueue, loadedRuntime] = await Promise.all([
-      request<Overview>('/admin/overview'), request<Challenge[]>('/challenges'), request<EventConfig[]>('/events'), request<SubmissionPage>('/submissions?page=1&pageSize=100'), request<UserPage>('/users?page=1&pageSize=100'), request<UserPage>(`/users?${capabilityUserParams.toString()}`), request<OrgUnit[]>('/org-units'), request<AdminCapabilityBundle>('/admin/capabilities'), request<Announcement[]>('/announcements'), request<AuditPage>('/audits?page=1&pageSize=100'), request<QueueStats>('/admin/grading-queue'), adminAccess.level === 'GLOBAL' ? request<CodeAgentRuntimeConfig>('/admin/code-agent-runtime') : Promise.resolve(null),
+    const [loadedOverview, loadedChallenges, loadedEvents, loadedSubmissionPage, loadedUsers, loadedCapabilityUsers, loadedOrgUnits, loadedCapabilities, loadedAnnouncements, loadedAuditPage, loadedQueue, loadedRuntime, loadedRuntimeDiagnostics] = await Promise.all([
+      request<Overview>('/admin/overview'), request<Challenge[]>('/challenges'), request<EventConfig[]>('/events'), request<SubmissionPage>('/submissions?page=1&pageSize=100'), request<UserPage>('/users?page=1&pageSize=100'), request<UserPage>(`/users?${capabilityUserParams.toString()}`), request<OrgUnit[]>('/org-units'), request<AdminCapabilityBundle>('/admin/capabilities'), request<Announcement[]>('/announcements'), request<AuditPage>('/audits?page=1&pageSize=100'), request<QueueStats>('/admin/grading-queue'), adminAccess.level === 'GLOBAL' ? request<CodeAgentRuntimeConfig>('/admin/code-agent-runtime') : Promise.resolve(null), adminAccess.level === 'GLOBAL' ? request<CodeAgentRuntimeDiagnostics>('/admin/code-agent-runtime/diagnostics').catch(() => null) : Promise.resolve(null),
     ]);
     setOverview(loadedOverview);
     setChallenges(loadedChallenges);
@@ -565,6 +692,7 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     setAudits(loadedAuditPage.items);
     setQueue(loadedQueue);
     setCodeAgentRuntime(loadedRuntime);
+    setCodeAgentRuntimeDiagnostics(loadedRuntimeDiagnostics);
     const firstActiveChallenge = loadedChallenges.find((challenge) => challenge.status !== 'ARCHIVED') ?? loadedChallenges[0];
     if (!selectedChallengeId && firstActiveChallenge) setSelectedChallengeId(firstActiveChallenge.id);
     if (!participantEventId && loadedEvents[0]) setParticipantEventId(loadedEvents[0].id);
@@ -654,6 +782,17 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   }
 
   useEffect(() => { void refresh().catch((error: Error) => setMessage(error.message)); }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(() => setMessage(''), 5000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
 
   async function runAction(action: () => Promise<unknown>, success: string): Promise<boolean> {
     setBusy(true);
@@ -975,6 +1114,21 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     );
   }
 
+  async function testCodeAgentRuntime(input: Pick<CodeAgentRuntimeConfig, 'commandLine' | 'prompt' | 'timeoutSeconds'>): Promise<CodeAgentRuntimeTestResult | null> {
+    setBusy(true);
+    setMessage('正在执行 Code Agent 配置测试…');
+    try {
+      const result = await request<CodeAgentRuntimeTestResult>('/admin/code-agent-runtime/test', { method: 'POST', body: JSON.stringify(input) });
+      setMessage(result.message);
+      return result;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Code Agent 配置测试失败');
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createAnnouncement() {
     if (!announcementForm.title.trim() || !announcementForm.summary.trim()) { setMessage('请填写公告标题和摘要'); return; }
     await runAction(() => request('/announcements', { method: 'POST', body: JSON.stringify({ ...announcementForm, publishedAt: new Date().toISOString(), actorId: 'admin-local' }) }), '公告已发布');
@@ -985,28 +1139,28 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
     setParticipantEventId(eventId);
     try {
       const rows = await request<Array<{ subjectId: string }>>(`/events/${eventId}/participants`);
-      setParticipantText(rows.map((row) => row.subjectId).join('\n'));
-      setMessage(rows.length ? `已加载 ${rows.length} 名参赛员工` : '暂无参赛员工');
-    } catch (error) { setMessage(error instanceof Error ? error.message : '参赛名单加载失败'); }
+      setParticipantSubjectIds([...new Set(rows.map((row) => row.subjectId).filter(Boolean))]);
+      setMessage(rows.length ? `已加载 ${rows.length} 名参训员工` : '暂无参训员工');
+    } catch (error) { setMessage(error instanceof Error ? error.message : '参训名单加载失败'); throw error; }
   }
 
   async function saveParticipants() {
     if (!participantEventId) return;
-    const subjectIds = lines(participantText);
-    await runAction(() => request(`/events/${participantEventId}/participants`, { method: 'PUT', body: JSON.stringify({ subjectIds }) }), `参赛名单已保存，共 ${subjectIds.length} 人`);
+    const subjectIds = [...new Set(participantSubjectIds.map((id) => id.trim()).filter(Boolean))];
+    await runAction(() => request(`/events/${participantEventId}/participants`, { method: 'PUT', body: JSON.stringify({ subjectIds }) }), `参训名单已保存，共 ${subjectIds.length} 人`);
   }
 
-  const menu: Array<{ id: AdminSection; label: string; icon: string; count?: number }> = [
-    { id: 'overview', label: '运营总览', icon: '▦' },
-    { id: 'organization', label: '组织与人员', icon: '♙', count: users.length },
-    { id: 'events', label: '训战管理', icon: '◷', count: overview?.events.open },
-    { id: 'challenges', label: '赛题库', icon: '◇', count: overview ? overview.challenges.total - overview.challenges.archived : undefined },
-    { id: 'participants', label: '参训名单', icon: '♙' },
-    { id: 'capabilities', label: 'AI 能力画像', icon: '◎', count: adminCapabilities?.selectedCount },
-    { id: 'grading', label: '评测中心', icon: '✓', count: overview?.grading.queuedOrRunning },
-    ...(adminAccess.level === 'GLOBAL' ? [{ id: 'evaluation-runtime' as const, label: '评测环境', icon: '⌘' }] : []),
-    { id: 'announcements', label: '公告管理', icon: '✦', count: overview?.announcements },
-    { id: 'audit', label: '审计日志', icon: '≡' },
+  const menu: Array<{ id: AdminSection; label: string; icon: IconName; count?: number }> = [
+    { id: 'overview', label: '运营总览', icon: 'grid' },
+    { id: 'organization', label: '组织与人员', icon: 'users', count: users.length },
+    { id: 'events', label: '训战管理', icon: 'clock', count: activeEventCount },
+    { id: 'challenges', label: '赛题库', icon: 'challenge', count: overview ? overview.challenges.total - overview.challenges.archived : undefined },
+    { id: 'participants', label: '参训名单', icon: 'participants' },
+    { id: 'capabilities', label: 'AI 能力画像', icon: 'capabilities', count: adminCapabilities?.selectedCount },
+    { id: 'grading', label: '评测中心', icon: 'grading', count: overview?.grading.queuedOrRunning },
+    ...(adminAccess.level === 'GLOBAL' ? [{ id: 'evaluation-runtime' as const, label: '评测环境', icon: 'runtime' as const }] : []),
+    { id: 'announcements', label: '公告管理', icon: 'announcement', count: overview?.announcements },
+    { id: 'audit', label: '审计日志', icon: 'audit' },
   ];
 
   const scopeLabel = adminAccess.level === 'GLOBAL' ? '全组织' : '所属部门及下属组织';
@@ -1014,32 +1168,45 @@ export function AdminWorkspace({ onExit, userName, adminAccess }: Props) {
   return <main className="admin-page">
     <section className="admin-heading panel"><div><p className="kicker">管理后台</p><h1>管理后台</h1></div><button className="secondary-button" onClick={onExit}>← 返回员工首页</button></section>
     <div className="admin-layout">
-      <aside className="admin-sidebar panel"><div className="admin-sidebar-title"><span className="admin-mark">A</span><div><strong>平台管理</strong><small>训战运营中心</small></div></div><nav>{menu.map((item) => <button key={item.id} className={section === item.id ? 'active' : ''} onClick={() => setSection(item.id)}><span>{item.icon}</span><b>{item.label}</b>{item.count !== undefined && <em>{item.count}</em>}</button>)}</nav><div className="admin-sidebar-note"><strong>权限范围</strong><span>当前账号：{roleLabel}</span><span>组织范围：{scopeLabel}</span></div></aside>
+      <aside className="admin-sidebar panel"><div className="admin-sidebar-title"><span className="admin-mark"><Icon name="grid" size={18} strokeWidth={2} /></span><div><strong>平台管理</strong><small>训战运营中心</small></div></div><nav>{menu.map((item) => <button key={item.id} className={section === item.id ? 'active' : ''} onClick={() => setSection(item.id)}><span><Icon name={item.icon} size={18} /></span><b>{item.label}</b>{item.count !== undefined && <em>{item.count}</em>}</button>)}</nav><div className="admin-sidebar-note"><strong>权限范围</strong><span>当前账号：{roleLabel}</span><span>组织范围：{scopeLabel}</span></div></aside>
       <section className="admin-main">
-        {message && <div className="admin-message">{message}</div>}
+        {message && <div className="admin-message" role="status" aria-live="polite"><span>{message}</span><button type="button" className="admin-message-close" aria-label="关闭提示" onClick={() => setMessage('')}>×</button></div>}
         {section === 'overview' && <OverviewSection overview={overview} challenges={challenges} events={events} submissions={submissions} onSection={setSection} />}
-        {section === 'organization' && <OrganizationSection users={users} orgUnits={orgUnits} adminAccess={adminAccess} busy={busy} onSaved={refresh} onMessage={setMessage} />}
-        {section === 'challenges' && <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">赛题库</p><h2>赛题库</h2></div><button className="primary compact" onClick={() => { setChallengeView('active'); setChallengeForm(blankChallenge()); }}>＋ 新建赛题</button></div>{challengeForm && <ChallengeEditor form={challengeForm} setForm={setChallengeForm} onCancel={() => setChallengeForm(null)} onSave={() => void saveChallenge()} onUploadPackage={(file) => uploadEnginePackage(file, challengeForm, setChallengeForm)} executors={builtInExecutors} contracts={evaluationContractCatalog} onViewContractDetail={(contract) => void openEvaluationContractDetail(contract)} busy={busy} title="创建赛题草稿" />}{versionForm && selectedChallenge && <ChallengeEditor form={versionForm} setForm={setVersionForm} onCancel={() => { setVersionForm(null); setVersionEditId(''); }} onSave={() => void saveVersion()} onUploadPackage={(file) => uploadEnginePackage(file, versionForm, setVersionForm)} executors={builtInExecutors} contracts={evaluationContractCatalog} onViewContractDetail={(contract) => void openEvaluationContractDetail(contract)} busy={busy} title={versionEditId ? `编辑 ${selectedChallenge.id} 草稿` : `创建 ${selectedChallenge.id} 新版本`} />}{!challengeForm && !versionForm && <ChallengeList challenges={visibleChallenges} view={challengeView} activeCount={challenges.filter((challenge) => challenge.status !== 'ARCHIVED').length} trashCount={challenges.filter((challenge) => challenge.status === 'ARCHIVED').length} onViewChange={setChallengeView} selectedId={selectedChallengeId} onSelect={setSelectedChallengeId} onEdit={editChallenge} onPublish={(id) => void runAction(() => request(`/challenges/${id}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已发布')} onTrash={(id) => { if (!window.confirm(`确认删除赛题“${id}”吗？删除后可在回收站恢复。`)) return; void runAction(() => request(`/challenges/${id}`, { method: 'DELETE' }), '赛题已移入回收站'); }} onRestore={(id) => void runAction(() => request(`/challenges/${id}/restore`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已恢复')} />}{selectedChallenge && !challengeForm && !versionForm && <ChallengeDetail challenge={selectedChallenge} events={events} onNewVersion={() => { setVersionEditId(''); setVersionForm(draftFromVersion(selectedChallenge.versions[selectedChallenge.versions.length - 1])); }} onEditVersion={(version) => { setVersionEditId(version.id); setVersionForm(draftFromVersion(version)); }} onCategoryChange={(category) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ category, actorId: 'admin-local' }) }), '赛题类型已更新')} onSolutionVisibilityChange={(solutionVisibility) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ solutionVisibility, actorId: 'admin-local' }) }), '交付件展示策略已更新')} onPublish={(versionId) => void runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionId}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题版本已发布')} />}</section>}
-        {section === 'events' && <EventsSection events={events} challenges={challenges} overview={overview} users={users} orgUnits={orgUnits} eventForm={eventForm} setEventForm={setEventForm} eventEditId={eventEditId} onNew={() => { setEventEditId(''); setEventForm(blankEvent(publishedVersions[0]?.id ?? '', challenges)); }} onEdit={(event) => { setEventEditId(event.id); setEventForm(draftFromEvent(event)); }} onDelete={(event) => void deleteEvent(event)} onCreate={() => void saveEvent()} onAction={(event, action) => void eventAction(event, action)} busy={busy} />}
-        {section === 'participants' && <ParticipantSection events={events} eventId={participantEventId} setEventId={setParticipantEventId} text={participantText} setText={setParticipantText} onLoad={(id) => void loadParticipants(id)} onSave={() => void saveParticipants()} busy={busy} />}
+        {section === 'organization' && <OrganizationSection users={users} orgUnits={orgUnits} currentUserId={userId} adminAccess={adminAccess} busy={busy} onSaved={refresh} onMessage={setMessage} />}
+        {section === 'challenges' && <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">赛题库</p><h2>赛题库</h2></div><div className="admin-section-actions"><button type="button" className="secondary-button admin-guide-button" onClick={() => setAdminGuide('challenges')}>说明指导</button><button className="primary compact" onClick={() => { setChallengeView('active'); setChallengeForm(blankChallenge()); }}>＋ 新建赛题</button></div></div>{challengeForm && <ChallengeEditor form={challengeForm} setForm={setChallengeForm} onCancel={() => setChallengeForm(null)} onSave={() => void saveChallenge()} onUploadPackage={(file) => uploadEnginePackage(file, challengeForm, setChallengeForm)} executors={builtInExecutors} contracts={evaluationContractCatalog} onViewContractDetail={(contract) => void openEvaluationContractDetail(contract)} busy={busy} title="创建赛题草稿" />}{versionForm && selectedChallenge && <ChallengeEditor form={versionForm} setForm={setVersionForm} onCancel={() => { setVersionForm(null); setVersionEditId(''); }} onSave={() => void saveVersion()} onUploadPackage={(file) => uploadEnginePackage(file, versionForm, setVersionForm)} executors={builtInExecutors} contracts={evaluationContractCatalog} onViewContractDetail={(contract) => void openEvaluationContractDetail(contract)} busy={busy} title={versionEditId ? `编辑 ${selectedChallenge.id} 草稿` : `创建 ${selectedChallenge.id} 新版本`} />}{!challengeForm && !versionForm && <ChallengeList challenges={visibleChallenges} view={challengeView} activeCount={challenges.filter((challenge) => challenge.status !== 'ARCHIVED').length} trashCount={challenges.filter((challenge) => challenge.status === 'ARCHIVED').length} onViewChange={setChallengeView} selectedId={selectedChallengeId} onSelect={setSelectedChallengeId} onEdit={editChallenge} onPublish={(id) => void runAction(() => request(`/challenges/${id}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已发布')} onTrash={(id) => { if (!window.confirm(`确认删除赛题“${id}”吗？删除后可在回收站恢复。`)) return; void runAction(() => request(`/challenges/${id}`, { method: 'DELETE' }), '赛题已移入回收站'); }} onRestore={(id) => void runAction(() => request(`/challenges/${id}/restore`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题已恢复')} />}{selectedChallenge && !challengeForm && !versionForm && <ChallengeDetail challenge={selectedChallenge} events={events} onNewVersion={() => { setVersionEditId(''); setVersionForm(draftFromVersion(selectedChallenge.versions[selectedChallenge.versions.length - 1])); }} onEditVersion={(version) => { setVersionEditId(version.id); setVersionForm(draftFromVersion(version)); }} onCategoryChange={(category) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ category, actorId: 'admin-local' }) }), '赛题类型已更新')} onSolutionVisibilityChange={(solutionVisibility) => void runAction(() => request(`/challenges/${selectedChallenge.id}`, { method: 'PATCH', body: JSON.stringify({ solutionVisibility, actorId: 'admin-local' }) }), '交付件展示策略已更新')} onPublish={(versionId) => void runAction(() => request(`/challenges/${selectedChallenge.id}/versions/${versionId}/publish`, { method: 'POST', body: JSON.stringify({ actorId: 'admin-local' }) }), '赛题版本已发布')} />}</section>}
+        {section === 'events' && <EventsSection events={events} challenges={challenges} overview={overview} users={users} orgUnits={orgUnits} eventForm={eventForm} setEventForm={setEventForm} eventEditId={eventEditId} onNew={() => { setEventEditId(''); setEventForm(blankEvent(publishedVersions[0]?.id ?? '', challenges)); }} onEdit={(event) => { setEventEditId(event.id); setEventForm(draftFromEvent(event)); }} onDelete={(event) => void deleteEvent(event)} onCreate={() => void saveEvent()} onAction={(event, action) => void eventAction(event, action)} onOpenGuide={() => setAdminGuide('events')} busy={busy} />}
+        {section === 'participants' && <ParticipantSection events={events} users={users} eventId={participantEventId} setEventId={(id) => { setParticipantEventId(id); setParticipantSubjectIds([]); }} selectedIds={participantSubjectIds} setSelectedIds={setParticipantSubjectIds} onLoad={loadParticipants} onSave={() => void saveParticipants()} busy={busy} />}
         {section === 'capabilities' && <CapabilityAdminSection data={adminCapabilities} events={events} challenges={challenges} users={capabilityUsers} userPageInfo={capabilityUserPage?.pageInfo ?? null} usersBusy={capabilityUsersBusy} orgUnits={orgUnits} orgPath={capabilityOrgPath} eventId={capabilityEventId} selectedIds={capabilitySubjectIds} onOrgPathChange={handleCapabilityOrgPathChange} onEventIdChange={handleCapabilityEventChange} onUsersPageChange={(page) => void loadCapabilityUsers(page)} onToggle={toggleCapabilitySubject} onSelectAll={selectAllCapabilityUsers} onClear={() => setCapabilitySubjectIds([])} onViewAll={() => void loadAdminCapabilities('ALL')} onViewSelected={() => void loadAdminCapabilities('SELECTED')} profilePage={capabilityProfilePage} onProfilePageChange={(page) => void loadAdminCapabilities(capabilityProfileMode, capabilityIncludeProfiles, page)} busy={busy} />}
         {section === 'grading' && <GradingSection submissions={gradingSubmissions} events={events} challenges={challenges} users={users} queue={queue} selectedIds={selectedGradingIds} importText={importText} setImportText={setImportText} onToggle={toggleGradingSelection} onSelectEvent={selectEventSubmissions} onClearEvent={clearEventSubmissions} onPrepareInput={(eventId) => void prepareEvaluationInput(eventId)} onStartSelected={(eventId) => void startSelectedGrading(eventId)} onSubmission={(submission) => void submissionAction(submission)} onRegrade={(submission) => void regradeSubmission(submission)} onDownload={(submission) => void downloadSubmissionArtifact(submission).catch((error) => setMessage(error instanceof Error ? error.message : '交付件下载失败'))} onImport={importResult} busy={busy} />}
-        {section === 'evaluation-runtime' && codeAgentRuntime && <CodeAgentRuntimeSection config={codeAgentRuntime} busy={busy} onSave={(input) => void saveCodeAgentRuntime(input)} />}
+        {section === 'evaluation-runtime' && codeAgentRuntime && <CodeAgentRuntimeSection config={codeAgentRuntime} diagnostics={codeAgentRuntimeDiagnostics} busy={busy} onSave={(input) => void saveCodeAgentRuntime(input)} onTest={testCodeAgentRuntime} onOpenGuide={() => setAdminGuide('evaluation-runtime')} />}
         {section === 'announcements' && <AnnouncementSection announcements={announcements} form={announcementForm} setForm={setAnnouncementForm} onCreate={() => void createAnnouncement()} onDelete={(id) => void runAction(() => request(`/announcements/${id}`, { method: 'DELETE', body: JSON.stringify({ actorId: 'admin-local' }) }), '公告已删除')} busy={busy} />}
         {section === 'audit' && <AuditSection audits={audits} />}
         {evaluationContractDetail && <EvaluationContractDetailDialog detail={evaluationContractDetail} busy={evaluationContractDetailBusy} copied={evaluationContractCopied} onClose={closeEvaluationContractDetail} onCopy={() => void copyEvaluationContractForAi(evaluationContractDetail)} />}
+        {adminGuide && <AdminGuideDialog guide={adminGuide} onClose={() => setAdminGuide(null)} />}
       </section>
     </div>
   </main>;
 }
 
 function OverviewSection({ overview, challenges, events, submissions, onSection }: { overview: Overview | null; challenges: Challenge[]; events: EventConfig[]; submissions: Submission[]; onSection: (section: AdminSection) => void }) {
+  const now = Date.now();
   const title = (versionId: string) => versionTitle(versionId, challenges);
-  return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">运营总览</p><h2>运营总览</h2></div><span className="last-sync">{overview ? `更新于 ${formatDate(overview.generatedAt)}` : '加载中…'}</span></div><div className="admin-stat-grid"><AdminStat label="已发布赛题" value={overview?.challenges.published ?? '—'} hint={`${overview?.challenges.versions ?? 0} 个赛题版本`} tone="blue" /><AdminStat label="开放训战" value={overview?.events.open ?? '—'} hint={`${overview?.events.total ?? 0} 个训战配置`} tone="violet" /><AdminStat label="待处理评测" value={overview?.grading.queuedOrRunning ?? '—'} hint={`${overview?.grading.failed ?? 0} 个需要重试`} tone="orange" /><AdminStat label="累计提交" value={overview?.submissions.total ?? '—'} hint={`${overview?.submissions.graded ?? 0} 份已完成`} tone="green" /></div><div className="admin-overview-grid"><section className="panel admin-card"><div className="admin-card-heading"><div><p className="kicker">训战监控</p><h3>训战运行状态</h3></div><button className="quiet" onClick={() => onSection('events')}>管理训战 →</button></div>{overview?.eventStats.map((item) => <div className="event-monitor-row" key={item.eventId}><span className={`monitor-dot monitor-${item.status.toLowerCase()}`} /><div><strong>{title(item.challengeVersion)}</strong><small>{statusLabel(item.status)}</small></div><span>{item.submissionCount} 份提交</span><b>{item.pendingCount > 0 ? `${item.pendingCount} 待处理` : '当前无待处理项'}</b></div>)}{!overview?.eventStats.length && <div className="empty">暂无训战</div>}</section><section className="panel admin-card"><div className="admin-card-heading"><div><p className="kicker">常用操作</p><h3>常用操作</h3></div></div><div className="quick-action-grid"><button onClick={() => onSection('challenges')}><span>◇</span><strong>创建赛题</strong><small>赛题配置</small></button><button onClick={() => onSection('events')}><span>◷</span><strong>创建训战</strong><small>训战配置</small></button><button onClick={() => onSection('grading')}><span>✓</span><strong>进入评测中心</strong><small>评测处理</small></button><button onClick={() => onSection('announcements')}><span>✦</span><strong>发布公告</strong><small>公告发布</small></button></div></section></div><div className="admin-overview-grid"><section className="panel admin-card"><div className="admin-card-heading"><div><p className="kicker">最近操作</p><h3>最近操作</h3></div><button className="quiet" onClick={() => onSection('audit')}>查看全部 →</button></div>{overview?.recentAudits.slice(0, 5).map((audit) => <div className="audit-mini-row" key={audit.id}><span className="audit-icon">{audit.action.includes('grading') ? '✓' : audit.action.includes('challenge') ? '◇' : '•'}</span><div><strong>{auditActionLabel(audit.action)}</strong><small>{auditTargetLabel(audit.target)} · {displayActorName(audit.actorId)}</small></div><time>{formatDate(audit.createdAt)}</time></div>)}</section><section className="panel admin-card admin-roadmap"><div className="admin-card-heading"><div><p className="kicker">运营提醒</p><h3>运营提醒</h3></div></div><div className="empty compact-empty">暂无运营提醒</div></section></div><div className="admin-footer-note">当前赛季：{overview?.activeSeason?.name ?? '尚未创建运行中赛季'}</div></section>;
+  if (overview) {
+    overview = {
+      ...overview,
+      events: { ...overview.events, open: events.filter((event) => event.status === 'OPEN' && eventWindowState(event, now) === 'OPEN').length },
+      eventStats: overview.eventStats.map((item) => {
+        const event = events.find((candidate) => candidate.id === item.eventId);
+        return event ? { ...item, status: eventDisplayStatus(event, now) } : item;
+      }),
+    };
+  }
+  return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">运营总览</p><h2>运营总览</h2></div><span className="last-sync">{overview ? `更新于 ${formatDate(overview.generatedAt)}` : '加载中…'}</span></div><div className="admin-stat-grid"><AdminStat label="已发布赛题" value={overview?.challenges.published ?? '—'} hint={`${overview?.challenges.versions ?? 0} 个赛题版本`} tone="blue" /><AdminStat label="开放训战" value={overview?.events.open ?? '—'} hint={`${overview?.events.total ?? 0} 个训战配置`} tone="violet" /><AdminStat label="待处理评测" value={overview?.grading.queuedOrRunning ?? '—'} hint={`${overview?.grading.failed ?? 0} 个需要重试`} tone="orange" /><AdminStat label="累计提交" value={overview?.submissions.total ?? '—'} hint={`${overview?.submissions.graded ?? 0} 份已完成`} tone="green" /></div><div className="admin-overview-grid"><section className="panel admin-card"><div className="admin-card-heading"><div><p className="kicker">训战监控</p><h3>训战运行状态</h3></div><button className="quiet" onClick={() => onSection('events')}>管理训战 →</button></div>{overview?.eventStats.map((item) => <div className="event-monitor-row" key={item.eventId}><span className={`monitor-dot monitor-${item.status.toLowerCase()}`} /><div><strong>{title(item.challengeVersion)}</strong><small>{statusLabel(item.status)}</small></div><span>{item.submissionCount} 份提交</span><b>{item.pendingCount > 0 ? `${item.pendingCount} 待处理` : '当前无待处理项'}</b></div>)}{!overview?.eventStats.length && <div className="empty">暂无训战</div>}</section><section className="panel admin-card"><div className="admin-card-heading"><div><p className="kicker">常用操作</p><h3>常用操作</h3></div></div><div className="quick-action-grid"><button onClick={() => onSection('challenges')}><span><Icon name="challenge" size={20} /></span><strong>创建赛题</strong><small>赛题配置</small></button><button onClick={() => onSection('events')}><span><Icon name="clock" size={20} /></span><strong>创建训战</strong><small>训战配置</small></button><button onClick={() => onSection('grading')}><span><Icon name="grading" size={20} /></span><strong>进入评测中心</strong><small>评测处理</small></button><button onClick={() => onSection('announcements')}><span><Icon name="announcement" size={20} /></span><strong>发布公告</strong><small>公告发布</small></button></div></section></div><div className="admin-overview-grid"><section className="panel admin-card"><div className="admin-card-heading"><div><p className="kicker">最近操作</p><h3>最近操作</h3></div><button className="quiet" onClick={() => onSection('audit')}>查看全部 →</button></div>{overview?.recentAudits.slice(0, 5).map((audit) => <div className="audit-mini-row" key={audit.id}><span className="audit-icon"><Icon name={audit.action.includes('grading') ? 'grading' : audit.action.includes('challenge') ? 'challenge' : 'dot'} size={16} /></span><div><strong>{auditActionLabel(audit.action)}</strong><small>{auditTargetLabel(audit.target)} · {displayActorName(audit.actorId)}</small></div><time>{formatDate(audit.createdAt)}</time></div>)}</section><section className="panel admin-card admin-roadmap"><div className="admin-card-heading"><div><p className="kicker">运营提醒</p><h3>运营提醒</h3></div></div><div className="empty compact-empty">暂无运营提醒</div></section></div><div className="admin-footer-note">当前赛季：{overview?.activeSeason?.name ?? '尚未创建运行中赛季'}</div></section>;
 }
 
 function AdminStat({ label, value, hint, tone }: { label: string; value: string | number; hint: string; tone: string }) {
-  return <article className={`admin-stat panel tone-${tone}`}><span className="admin-stat-icon">{tone === 'blue' ? '◇' : tone === 'violet' ? '◷' : tone === 'orange' ? '!' : '✓'}</span><div><strong>{value}</strong><span>{label}</span><small>{hint}</small></div></article>;
+  const icon: IconName = tone === 'blue' ? 'challenge' : tone === 'violet' ? 'clock' : tone === 'orange' ? 'warning' : 'check';
+  return <article className={`admin-stat panel tone-${tone}`}><span className="admin-stat-icon"><Icon name={icon} size={21} /></span><div><strong>{value}</strong><span>{label}</span><small>{hint}</small></div></article>;
 }
 
 function ChallengeListLegacy({ challenges, selectedId, onSelect, onPublish, onArchive }: { challenges: Challenge[]; selectedId: string; onSelect: (id: string) => void; onPublish: (id: string) => void; onArchive: (id: string) => void }) {
@@ -1062,7 +1229,7 @@ type ChallengeListProps = {
 
 function ChallengeList({ challenges, view, activeCount, trashCount, onViewChange, selectedId, onSelect, onEdit, onPublish, onTrash, onRestore }: ChallengeListProps) {
   const emptyText = view === 'trash' ? '垃圾箱为空' : '暂无赛题';
-  return <div className="panel admin-table-card">
+  return <div className="panel admin-table-card challenge-library-card">
     <div className="admin-table-toolbar">
       <div className="challenge-library-tabs" role="tablist" aria-label="赛题库视图">
         <button type="button" className={view === 'active' ? 'active' : ''} role="tab" aria-selected={view === 'active'} onClick={() => onViewChange('active')}>赛题库 <em>{activeCount}</em></button>
@@ -1122,7 +1289,7 @@ function ChallengeDetail({ challenge, events, onNewVersion, onEditVersion, onCat
       setReviewBusy(false);
     }
   }
-  return <section className="panel admin-detail-card">
+  return <section className="panel admin-detail-card challenge-detail-card">
     <div className="admin-card-heading"><div><p className="kicker">赛题详情</p><h3>{challenge.versions[challenge.versions.length - 1]?.title ?? '暂无赛题标题'}</h3><small>{statusLabel(challenge.status)} · {challengeCategoryLabel(category)}{challenge.board?.type === 'HARD_PROBLEM' ? ` · 难题榜${challenge.board.status === 'OPEN' ? ' · 未解决' : ' · 已解决'}` : ''}</small></div><button className="primary compact" disabled={challenge.status === 'ARCHIVED'} title={challenge.status === 'ARCHIVED' ? '需先恢复赛题' : undefined} onClick={onNewVersion}>{challenge.status === 'ARCHIVED' ? '恢复后创建版本' : '＋ 新建版本'}</button></div>
     <div className="challenge-category-control"><label>赛题类型<select value={category} disabled={challenge.status === 'ARCHIVED'} onChange={(event) => onCategoryChange(event.target.value as ChallengeCategory)}><option value="TRAINING">训战类</option><option value="COMPETITION">竞赛类</option><option value="HARD_PROBLEM">难题类</option></select></label><span>难题类赛题进入难题榜。</span></div>
     {challenge.board?.type === 'HARD_PROBLEM' && <>
@@ -1133,7 +1300,7 @@ function ChallengeDetail({ challenge, events, onNewVersion, onEditVersion, onCat
       {challenge.board.status === 'RESOLVED' && <div className="hard-problem-resolution-control resolved"><div><strong>揭榜结果</strong><span>揭榜人：{displayPersonName(challenge.board.solverName ?? challenge.board.solverId)} · {challenge.board.solutionVisibility === 'HIDDEN' ? '交付件不公开' : '交付件公开'}</span></div><span className="review-status review-status-approved">揭榜成功</span></div>}
     </>}
     <div className="version-list">{challenge.versions.slice().reverse().map((version) => <article className="version-row" key={version.id}><div className="version-number">v{version.version}</div><div><strong>{version.title}</strong><small>评分标准 v{version.rubricVersion} · {version.estimatedMinutes ?? '—'} 分钟</small><div className="version-tags">{(version.tags ?? []).slice(0, 4).map((tag) => <span key={tag}>{tag}</span>)}</div></div><div className="version-actions"><span className={`status-badge status-${version.status.toLowerCase()}`}>{statusLabel(version.status)}</span>{version.status === 'DRAFT' && challenge.status !== 'ARCHIVED' && <><button className="small" onClick={() => onEditVersion(version)}>编辑草稿</button><button className="small" onClick={() => onPublish(version.id)}>发布版本</button></>}</div></article>)}</div>
-    <div className="linked-events"><strong>关联训战</strong>{events.filter((event) => challenge.versions.some((version) => version.id === event.challengeVersion)).map((event) => <span key={event.id}>{challenge.versions.find((version) => version.id === event.challengeVersion)?.title ?? '训战'} · {statusLabel(event.status)}</span>)}{challenge.board?.type === 'HARD_PROBLEM' && challenge.board.submissionEventId && <span>独立难题交付入口</span>}{!events.some((event) => challenge.versions.some((version) => version.id === event.challengeVersion)) && challenge.board?.type !== 'HARD_PROBLEM' && <small>暂无关联训战</small>}</div>
+    <div className="linked-events"><strong>关联训战</strong>{events.filter((event) => challenge.versions.some((version) => version.id === event.challengeVersion)).map((event) => <span key={event.id}>{challenge.versions.find((version) => version.id === event.challengeVersion)?.title ?? '训战'} · {eventDisplayLabel(event)}</span>)}{challenge.board?.type === 'HARD_PROBLEM' && challenge.board.submissionEventId && <span>独立难题交付入口</span>}{!events.some((event) => challenge.versions.some((version) => version.id === event.challengeVersion)) && challenge.board?.type !== 'HARD_PROBLEM' && <small>暂无关联训战</small>}</div>
   </section>;
 }
 
@@ -1363,7 +1530,7 @@ function ChallengeEditor({ form, setForm, onCancel, onSave, onUploadPackage, exe
   const outputContracts = contracts.filter((item) => item.kind === 'OUTPUT' && item.modes.includes(form.evaluationEngineMode));
   const selectedInput = inputContracts.find((item) => item.path === form.evaluationInputContract) ?? contracts.find((item) => item.kind === 'INPUT' && item.path === form.evaluationInputContract);
   const selectedOutput = outputContracts.find((item) => item.path === form.evaluationOutputContract) ?? contracts.find((item) => item.kind === 'OUTPUT' && item.path === form.evaluationOutputContract);
-  return <section className="panel admin-editor">
+  return <section className="panel admin-editor challenge-editor-card">
     <div className="admin-card-heading"><div><p className="kicker">题面编辑</p><h3>{title}</h3></div><button className="quiet" onClick={onCancel}>取消</button></div>
     <div className="form-grid">
       <label>赛题 ID<input value={form.id} onChange={(event) => update('id', event.target.value)} disabled={!creatingChallenge} /></label>
@@ -1428,13 +1595,147 @@ function EvaluationContractDetailDialog({ detail, busy, copied, onClose, onCopy 
   </div>;
 }
 
-function ParticipantSection({ events, eventId, setEventId, text, setText, onLoad, onSave, busy }: { events: EventConfig[]; eventId: string; setEventId: (value: string) => void; text: string; setText: (value: string) => void; onLoad: (eventId: string) => void; onSave: () => void; busy: boolean }) {
-  const selected = events.find((event) => event.id === eventId);
-  return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">参训名单</p><h2>参训名单</h2></div></div><section className="panel admin-card participant-editor"><div className="form-grid"><label>训战<select value={eventId} onChange={(event) => setEventId(event.target.value)}>{events.map((item) => <option key={item.id} value={item.id}>{item.id} · {statusLabel(item.status)}</option>)}</select></label><label>当前访问模式<input value={selected?.accessPolicy?.mode === 'RESTRICTED' ? '定向访问' : participantModeLabel(selected?.participantMode)} readOnly /></label></div><label>员工工号<textarea value={text} onChange={(event) => setText(event.target.value)} rows={12} /></label><div className="editor-actions"><button className="secondary-button" disabled={!eventId || busy} onClick={() => onLoad(eventId)}>加载名单</button><button className="primary compact" disabled={!eventId || busy} onClick={onSave}>保存名单</button></div></section></section>;
+function AdminGuideDialog({ guide, onClose }: { guide: AdminGuideKey; onClose: () => void }) {
+  const content = ADMIN_GUIDE_CONTENT[guide];
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+  return <div className="admin-guide-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="panel admin-guide-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-guide-title">
+      <div className="admin-card-heading admin-guide-heading"><div><p className="kicker">{content.kicker}</p><h3 id="admin-guide-title">{content.title}</h3></div><button type="button" className="quiet" onClick={onClose}>关闭</button></div>
+      <p className="admin-guide-intro">{content.intro}</p>
+      <div className="admin-guide-sections">{content.sections.map((section) => <section className="admin-guide-section" key={section.title}><h4>{section.title}</h4>{section.paragraphs?.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}{section.bullets && <ul>{section.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}</ul>}</section>)}</div>
+      <div className="admin-guide-footer"><span>说明仅影响操作理解，不会改变当前配置。</span><button type="button" className="primary compact" onClick={onClose}>知道了</button></div>
+    </section>
+  </div>;
+}
+
+function EvaluationEngineGuideDialog({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  function downloadGuide(): void {
+    downloadTextFile('evaluation-engine-development-guide.md', EVALUATION_ENGINE_GUIDE_MARKDOWN);
+  }
+
+  return <div className="admin-guide-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="panel engine-guide-dialog" role="dialog" aria-modal="true" aria-labelledby="evaluation-engine-guide-title">
+      <div className="admin-card-heading admin-guide-heading"><div><p className="kicker">评测引擎开发</p><h3 id="evaluation-engine-guide-title">评测引擎开发指南</h3></div><button type="button" className="quiet" onClick={onClose}>关闭</button></div>
+      <p className="admin-guide-intro">这里集中说明评测引擎、Code Agent、Worker、输入输出契约、结果幂等、安全边界和本地验证流程。内容可以直接下载为 Markdown，交给其他 AI 作为开发上下文。</p>
+      <div className="engine-guide-actions"><div className="engine-guide-downloads"><button type="button" className="primary compact" onClick={downloadGuide}>下载开发指南（Markdown）</button><a className="secondary-button engine-guide-kit-link" href={`${import.meta.env.BASE_URL}evaluation-engine-development-kit.md`} download="evaluation-engine-development-kit.md">下载 AI 资料包（Markdown）</a><a className="primary compact engine-guide-kit-link" href={`${import.meta.env.BASE_URL}evaluation-engine-development-kit.zip`} download="evaluation-engine-development-kit.zip">下载独立开发包（ZIP）</a></div><span>ZIP 包含真实契约、样例、参考引擎和独立 Python 校验/运行 CLI；完整平台源码仍需单独取得。</span></div>
+      <details className="engine-guide-document-wrap" open><summary>查看完整开发规范</summary><pre className="engine-guide-document">{EVALUATION_ENGINE_GUIDE_MARKDOWN}</pre></details>
+      <div className="admin-guide-footer"><span>下载文件不包含员工信息、凭据或运行日志。</span><button type="button" className="primary compact" onClick={onClose}>知道了</button></div>
+    </section>
+  </div>;
+}
+
+function ParticipantSection({ events, users, eventId, setEventId, selectedIds, setSelectedIds, onLoad, onSave, busy }: { events: EventConfig[]; users: AdminUser[]; eventId: string; setEventId: (value: string) => void; selectedIds: string[]; setSelectedIds: (value: string[]) => void; onLoad: (eventId: string) => Promise<void>; onSave: () => void; busy: boolean }) {
+  const selectedEvent = events.find((event) => event.id === eventId);
+  const [loadedEventId, setLoadedEventId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState('');
+  const [availableChecked, setAvailableChecked] = useState<string[]>([]);
+  const [selectedChecked, setSelectedChecked] = useState<string[]>([]);
+  const userById = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const availableUsers = useMemo(() => users
+    .filter((user) => user.status === 'ACTIVE' && !selectedSet.has(user.id))
+    .sort((a, b) => a.employeeNo.localeCompare(b.employeeNo)), [users, selectedSet]);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredAvailableUsers = normalizedQuery
+    ? availableUsers.filter((user) => `${user.name} ${user.employeeNo} ${user.departmentHint ?? user.orgPath}`.toLowerCase().includes(normalizedQuery))
+    : availableUsers;
+  const filteredSelectedIds = normalizedQuery
+    ? selectedIds.filter((id) => {
+      const user = userById.get(id);
+      return `${user?.name ?? id} ${user?.employeeNo ?? id} ${user?.departmentHint ?? user?.orgPath ?? ''}`.toLowerCase().includes(normalizedQuery);
+    })
+    : selectedIds;
+  const loaded = loadedEventId === eventId && Boolean(eventId);
+
+  function toggleChecked(id: string, setter: (value: string[]) => void, current: string[]): void {
+    setter(current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
+
+  function displayUser(id: string): { name: string; meta: string } {
+    const user = userById.get(id);
+    if (!user) return { name: id, meta: '当前员工目录中未找到' };
+    return { name: displayPersonName(user.name), meta: `${user.employeeNo} · ${user.departmentHint ?? user.orgPath}` };
+  }
+
+  function addChecked(): void {
+    if (!availableChecked.length) return;
+    setSelectedIds([...new Set([...selectedIds, ...availableChecked])]);
+    setAvailableChecked([]);
+  }
+
+  function removeChecked(): void {
+    if (!selectedChecked.length) return;
+    const removing = new Set(selectedChecked);
+    setSelectedIds(selectedIds.filter((id) => !removing.has(id)));
+    setSelectedChecked([]);
+  }
+
+  function selectAllAvailable(): void {
+    setAvailableChecked(filteredAvailableUsers.map((user) => user.id));
+  }
+
+  function selectAllSelected(): void {
+    setSelectedChecked(filteredSelectedIds);
+  }
+
+  function changeEvent(value: string): void {
+    setEventId(value);
+    setLoadedEventId('');
+    setSelectedIds([]);
+    setAvailableChecked([]);
+    setSelectedChecked([]);
+    setQuery('');
+  }
+
+  async function load(): Promise<void> {
+    if (!eventId) return;
+    setLoading(true);
+    try {
+      await onLoad(eventId);
+      setLoadedEventId(eventId);
+      setAvailableChecked([]);
+      setSelectedChecked([]);
+    } catch {
+      // The parent displays the API error; keep the editor locked until a
+      // successful load prevents accidentally saving an empty list.
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const renderOption = (id: string, checked: boolean, onToggle: () => void) => {
+    const user = displayUser(id);
+    return <label className="participant-user-option" key={id}><input type="checkbox" checked={checked} onChange={onToggle} /><span><strong>{user.name}</strong><small>{user.meta}</small></span></label>;
+  };
+
+  return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">参训名单</p><h2>参训名单</h2></div></div><section className="panel admin-card participant-editor">
+    <div className="form-grid participant-context-grid"><label>训战<select value={eventId} onChange={(event) => changeEvent(event.target.value)}>{events.map((item) => <option key={item.id} value={item.id}>{item.id} · {statusLabel(item.status)}</option>)}</select></label><label>当前访问模式<input value={selectedEvent?.accessPolicy?.mode === 'RESTRICTED' ? '定向访问' : participantModeLabel(selectedEvent?.participantMode)} readOnly /></label></div>
+    <div className="participant-transfer-heading"><div><strong>员工名单</strong><small>勾选员工后使用中间按钮批量添加或移除；保存后才会写入训战访问范围。</small></div><span>{loaded ? `参赛员工 ${selectedIds.length} 人` : '请先加载名单'}</span></div>
+    <div className="participant-transfer-toolbar"><label className="participant-search"><span>搜索员工</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="姓名、工号或部门" disabled={!loaded} /></label><button type="button" className="secondary-button" disabled={!eventId || busy || loading} onClick={() => void load()}>{loading ? '加载中…' : '加载名单'}</button></div>
+    <div className={`participant-transfer${loaded ? '' : ' participant-transfer-locked'}`}>
+      {!loaded && <div className="participant-transfer-locked-note">请先点击“加载名单”，读取当前训战已经保存的参训员工。</div>}
+      <section className="participant-transfer-pane"><div className="participant-transfer-pane-heading"><div><strong>可选员工</strong><small>{loaded ? `${filteredAvailableUsers.length} 人` : '—'}</small></div><button type="button" className="quiet" disabled={!loaded || !filteredAvailableUsers.length} onClick={selectAllAvailable}>全选当前</button></div><div className="participant-user-list">{loaded && filteredAvailableUsers.map((user) => renderOption(user.id, availableChecked.includes(user.id), () => toggleChecked(user.id, setAvailableChecked, availableChecked)))}{loaded && !filteredAvailableUsers.length && <div className="participant-list-empty">暂无可添加员工</div>}</div></section>
+      <div className="participant-transfer-actions"><button type="button" className="primary compact" disabled={!loaded || !availableChecked.length} onClick={addChecked}>添加所选 <span aria-hidden="true">→</span></button><button type="button" className="secondary-button" disabled={!loaded || !selectedChecked.length} onClick={removeChecked}><span aria-hidden="true">←</span> 移除所选</button></div>
+      <section className="participant-transfer-pane"><div className="participant-transfer-pane-heading"><div><strong>参赛员工</strong><small>{loaded ? `${filteredSelectedIds.length} 人` : '—'}</small></div><button type="button" className="quiet" disabled={!loaded || !filteredSelectedIds.length} onClick={selectAllSelected}>全选当前</button></div><div className="participant-user-list">{loaded && filteredSelectedIds.map((id) => renderOption(id, selectedChecked.includes(id), () => toggleChecked(id, setSelectedChecked, selectedChecked)))}{loaded && !filteredSelectedIds.length && <div className="participant-list-empty">暂无参赛员工</div>}</div></section>
+    </div>
+    <div className="editor-actions participant-editor-actions"><button type="button" className="secondary-button" disabled={!eventId || busy || loading} onClick={() => void load()}>{loading ? '加载中…' : '重新加载名单'}</button><button type="button" className="primary compact" disabled={!loaded || busy || loading} onClick={onSave}>保存名单</button></div>
+  </section></section>;
 }
 
 function EventsSectionLegacy({ events, challenges, overview, eventForm, setEventForm, onCreate, onAction, busy }: { events: EventConfig[]; challenges: Challenge[]; overview: Overview | null; eventForm: EventDraft | null; setEventForm: (form: EventDraft | null) => void; onCreate: () => void; onAction: (event: EventConfig, action: 'start-grading' | 'execute-local' | 'close' | 'reveal') => void; busy: boolean }) {
-  return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">场次编排</p><h2>场次编排</h2></div><button className="primary compact" onClick={() => setEventForm(blankEvent(challenges.flatMap((challenge) => challenge.versions).find((version) => version.status === 'PUBLISHED')?.id ?? '', challenges))}>＋ 新建场次</button></div>{eventForm && <EventEditorLegacy form={eventForm} setForm={setEventForm} challenges={challenges} onCancel={() => setEventForm(null)} onSave={onCreate} busy={busy} />}{!eventForm && <div className="event-admin-list">{events.map((event) => { const stat = overview?.eventStats.find((item) => item.eventId === event.id); return <article className="panel event-admin-card" key={event.id}><div className="event-admin-main"><div className="event-badge">{event.submissionSource === 'GIT_REF' ? '⌘' : '↑'}</div><div><div className="event-admin-title"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><span className={`status-badge status-${event.status.toLowerCase()}`}>{statusLabel(event.status)}</span></div><small>{modeLabel(event.mode)} · {sourceLabel(event.submissionSource)} · {triggerLabel(event.trigger)} · {revealLabel(event.reveal)}</small><div className="event-admin-meta"><span>{stat?.submissionCount ?? 0} 份提交</span><span>{stat?.pendingCount ?? 0} 待处理</span>{event.deliveryConfig?.repository && <span>{event.deliveryConfig.repository}</span>}</div></div></div><div className="event-admin-actions">{event.status === 'OPEN' && event.trigger === 'MANUAL' && <button className="small" disabled={busy} onClick={() => onAction(event, 'start-grading')}>批量安排评估</button>}{event.status === 'OPEN' && <button className="small" disabled={busy} onClick={() => onAction(event, 'execute-local')}>执行评估</button>}{event.status === 'OPEN' && <button className="small danger" disabled={busy} onClick={() => onAction(event, 'close')}>结束场次</button>}{event.status === 'CLOSED' && <button className="small" disabled={busy} onClick={() => onAction(event, 'reveal')}>公布结果</button>}</div></article>; })}{!events.length && <div className="panel empty">暂无场次</div>}</div>}</section>;
+  const now = Date.now();
+  return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">场次编排</p><h2>场次编排</h2></div><button className="primary compact" onClick={() => setEventForm(blankEvent(challenges.flatMap((challenge) => challenge.versions).find((version) => version.status === 'PUBLISHED')?.id ?? '', challenges))}>＋ 新建场次</button></div>{eventForm && <EventEditorLegacy form={eventForm} setForm={setEventForm} challenges={challenges} onCancel={() => setEventForm(null)} onSave={onCreate} busy={busy} />}{!eventForm && <div className="event-admin-list">{events.map((event) => { const stat = overview?.eventStats.find((item) => item.eventId === event.id); return <article className="panel event-admin-card" key={event.id}><div className="event-admin-main"><div className="event-badge"><Icon name={event.submissionSource === 'GIT_REF' ? 'git' : 'upload'} size={18} /></div><div><div className="event-admin-title"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><span className={`status-badge status-${eventDisplayStatus(event, now).toLowerCase()}`}>{eventDisplayLabel(event, now)}</span></div><small>{modeLabel(event.mode)} · {sourceLabel(event.submissionSource)} · {triggerLabel(event.trigger)} · {revealLabel(event.reveal)}</small><div className="event-admin-meta"><span>{stat?.submissionCount ?? 0} 份提交</span><span>{stat?.pendingCount ?? 0} 待处理</span>{event.deliveryConfig?.repository && <span>{event.deliveryConfig.repository}</span>}</div></div></div><div className="event-admin-actions">{event.status === 'OPEN' && event.trigger === 'MANUAL' && <button className="small" disabled={busy} onClick={() => onAction(event, 'start-grading')}>批量安排评估</button>}{event.status === 'OPEN' && <button className="small" disabled={busy} onClick={() => onAction(event, 'execute-local')}>执行评估</button>}{event.status === 'OPEN' && <button className="small danger" disabled={busy} onClick={() => onAction(event, 'close')}>结束场次</button>}{event.status === 'CLOSED' && <button className="small" disabled={busy} onClick={() => onAction(event, 'reveal')}>公布结果</button>}</div></article>; })}{!events.length && <div className="panel empty">暂无场次</div>}</div>}</section>;
 }
 
 function EventEditorLegacy({ form, setForm, challenges, onCancel, onSave, busy }: { form: EventDraft; setForm: (form: EventDraft | null) => void; challenges: Challenge[]; onCancel: () => void; onSave: () => void; busy: boolean }) {
@@ -1443,8 +1744,9 @@ function EventEditorLegacy({ form, setForm, challenges, onCancel, onSave, busy }
   return <section className="panel admin-editor"><div className="admin-card-heading"><div><p className="kicker">场次草稿</p><h3>创建训战场次</h3></div><button className="quiet" onClick={onCancel}>取消</button></div><div className="form-grid"><label>场次 ID<input value={form.id} onChange={(event) => update('id', event.target.value)} /></label><label>赛题版本<select value={form.challengeVersion} onChange={(event) => { const challengeVersion = event.target.value; setForm({ ...form, challengeVersion, trigger: engineSupportsPlatformExecution(challengeVersion, challenges) ? form.trigger : 'IMPORT' }); }}>{versions.map((version) => <option key={version.id} value={version.id}>{version.title} · v{version.version}</option>)}</select></label><label>提交方式<select value={form.submissionSource} onChange={(event) => update('submissionSource', event.target.value as Source)}><option value="UPLOAD">上传 ZIP</option><option value="GIT_REF">Git 仓库路径</option></select></label><label>评测方式<select value={form.trigger} onChange={(event) => { const trigger = event.target.value as Trigger; setForm({ ...form, trigger, pinAt: trigger === 'AUTO' ? 'SUBMIT' : form.pinAt }); }}>{engineSupportsPlatformExecution(form.challengeVersion, challenges) && <><option value="AUTO">自动评测</option><option value="MANUAL">手动触发</option></>}<option value="IMPORT">线下评测</option></select>{!engineSupportsPlatformExecution(form.challengeVersion, challenges) && <small className="field-hint">该赛题的评测引擎为管理员本地命令，只能使用线下结果录入。</small>}</label><label>结果公布<select value={form.reveal} onChange={(event) => update('reveal', event.target.value as EventDraft['reveal'])}><option value="IMMEDIATE">评测后公布</option><option value="ON_RELEASE">公布后可见</option></select></label><label>场次类型<select value={form.mode} onChange={(event) => update('mode', event.target.value as EventDraft['mode'])}><option value="WINDOW">开放窗口</option><option value="LIVE">集中训战</option></select></label><label>开始时间<input type="datetime-local" value={form.startsAt} onChange={(event) => update('startsAt', event.target.value)} /></label><label>结束时间<input type="datetime-local" value={form.endsAt} onChange={(event) => update('endsAt', event.target.value)} /></label>{form.submissionSource === 'GIT_REF' && <><label>Git 仓库路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label><label>Git 版本固定时点<select value={form.pinAt} disabled={form.trigger === 'AUTO'} onChange={(event) => update('pinAt', event.target.value as EventDraft['pinAt'])}><option value="SUBMIT">提交时锁定</option><option value="DEADLINE">截止时锁定</option></select><small className="field-hint">自动评测在提交时锁定版本。</small></label></>}</div><div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy || !versions.length} onClick={onSave}>{busy ? '创建中…' : '创建场次'}</button></div></section>;
 }
 
-function EventsSection({ events, challenges, overview, users, orgUnits, eventForm, setEventForm, eventEditId, onNew, onEdit, onDelete, onCreate, onAction, busy }: { events: EventConfig[]; challenges: Challenge[]; overview: Overview | null; users: AdminUser[]; orgUnits: OrgUnit[]; eventForm: EventDraft | null; setEventForm: (form: EventDraft | null) => void; eventEditId: string; onNew: () => void; onEdit: (event: EventConfig) => void; onDelete: (event: EventConfig) => void; onCreate: () => void; onAction: (event: EventConfig, action: 'start-grading' | 'close' | 'reveal') => void; busy: boolean }) {
-  return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">训战管理</p><h2>训战管理</h2></div><button className="primary compact" onClick={onNew}>＋ 新建训战</button></div>{eventForm && <EventEditor form={eventForm} setForm={setEventForm} challenges={challenges} users={users} orgUnits={orgUnits} editing={Boolean(eventEditId)} onCancel={() => setEventForm(null)} onSave={onCreate} busy={busy} />}{!eventForm && <div className="event-admin-list">{events.map((event) => { const stat = overview?.eventStats.find((item) => item.eventId === event.id); const hasSubmissions = (stat?.submissionCount ?? 0) > 0; return <article className="panel event-admin-card" key={event.id}><div className="event-admin-main"><div className="event-badge">{event.submissionSource === 'GIT_REF' ? '⌘' : '↑'}</div><div><div className="event-admin-title"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><span className={`status-badge status-${event.status.toLowerCase()}`}>{statusLabel(event.status)}</span></div><small>{modeLabel(event.mode)} · {sourceLabel(event.submissionSource)} · {triggerLabel(event.trigger)} · {revealLabel(event.reveal)}</small><div className="event-admin-schedule"><strong>开放时间</strong><span>{eventScheduleLabel(event)}</span></div><div className="event-admin-meta"><span>{accessScopeLabel(event)}</span><span>{stat?.submissionCount ?? 0} 份提交</span><span>{stat?.pendingCount ?? 0} 待处理</span>{event.deliveryConfig?.repository && <span>{event.deliveryConfig.repository}</span>}</div></div></div><div className="event-admin-actions">{event.status !== 'RELEASED' && <button className="small" disabled={busy} onClick={() => onEdit(event)}>编辑训战</button>}{event.status !== 'RELEASED' && <button className="small danger" disabled={busy || hasSubmissions} title={hasSubmissions ? '已有提交的训战不能删除' : '删除训战'} onClick={() => onDelete(event)}>删除训战</button>}{event.status === 'OPEN' && (event.trigger === 'MANUAL' || event.trigger === 'IMPORT') && <button className="small" disabled={busy} onClick={() => onAction(event, 'start-grading')}>选择评测提交</button>}{event.status === 'OPEN' && <button className="small danger" disabled={busy} onClick={() => onAction(event, 'close')}>结束训战</button>}{event.status === 'CLOSED' && <button className="small" disabled={busy} onClick={() => onAction(event, 'reveal')}>公布结果</button>}</div></article>; })}{!events.length && <div className="panel empty">暂无训战</div>}</div>}</section>;
+function EventsSection({ events, challenges, overview, users, orgUnits, eventForm, setEventForm, eventEditId, onNew, onEdit, onDelete, onCreate, onAction, onOpenGuide, busy }: { events: EventConfig[]; challenges: Challenge[]; overview: Overview | null; users: AdminUser[]; orgUnits: OrgUnit[]; eventForm: EventDraft | null; setEventForm: (form: EventDraft | null) => void; eventEditId: string; onNew: () => void; onEdit: (event: EventConfig) => void; onDelete: (event: EventConfig) => void; onCreate: () => void; onAction: (event: EventConfig, action: 'start-grading' | 'close' | 'reveal') => void; onOpenGuide: () => void; busy: boolean }) {
+  const now = Date.now();
+  return <section className="admin-section"><div className="admin-section-heading"><div><p className="kicker">训战管理</p><h2>训战管理</h2></div><div className="admin-section-actions"><button type="button" className="secondary-button admin-guide-button" onClick={onOpenGuide}>说明指导</button><button className="primary compact" onClick={onNew}>＋ 新建训战</button></div></div>{eventForm && <EventEditor form={eventForm} setForm={setEventForm} challenges={challenges} users={users} orgUnits={orgUnits} editing={Boolean(eventEditId)} onCancel={() => setEventForm(null)} onSave={onCreate} busy={busy} />}{!eventForm && <div className="event-admin-list">{events.map((event) => { const stat = overview?.eventStats.find((item) => item.eventId === event.id); const hasSubmissions = (stat?.submissionCount ?? 0) > 0; return <article className="panel event-admin-card" key={event.id}><div className="event-admin-main"><div className="event-badge"><Icon name={event.submissionSource === 'GIT_REF' ? 'git' : 'upload'} size={18} /></div><div><div className="event-admin-title"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><span className={`status-badge status-${eventDisplayStatus(event, now).toLowerCase()}`}>{eventDisplayLabel(event, now)}</span></div><small>{modeLabel(event.mode)} · {sourceLabel(event.submissionSource)} · {triggerLabel(event.trigger)} · {revealLabel(event.reveal)}</small><div className="event-admin-schedule"><strong>开放时间</strong><span>{eventScheduleLabel(event)}</span></div><div className="event-admin-meta"><span>{accessScopeLabel(event)}</span><span>{stat?.submissionCount ?? 0} 份提交</span><span>{stat?.pendingCount ?? 0} 待处理</span>{event.deliveryConfig?.repository && <span>{event.deliveryConfig.repository}</span>}</div></div></div><div className="event-admin-actions">{event.status !== 'RELEASED' && <button className="small" disabled={busy} onClick={() => onEdit(event)}>编辑训战</button>}{event.status !== 'RELEASED' && <button className="small danger" disabled={busy || hasSubmissions} title={hasSubmissions ? '已有提交的训战不能删除' : '删除训战'} onClick={() => onDelete(event)}>删除训战</button>}{event.status === 'OPEN' && (event.trigger === 'MANUAL' || event.trigger === 'IMPORT') && <button className="small" disabled={busy} onClick={() => onAction(event, 'start-grading')}>选择评测提交</button>}{event.status === 'OPEN' && <button className="small danger" disabled={busy} onClick={() => onAction(event, 'close')}>结束训战</button>}{event.status === 'CLOSED' && <button className="small" disabled={busy} onClick={() => onAction(event, 'reveal')}>公布结果</button>}</div></article>; })}{!events.length && <div className="panel empty">暂无训战</div>}</div>}</section>;
 }
 
 function EventEditor({ form, setForm, challenges, users, orgUnits, editing, onCancel, onSave, busy }: { form: EventDraft; setForm: (form: EventDraft | null) => void; challenges: Challenge[]; users: AdminUser[]; orgUnits: OrgUnit[]; editing: boolean; onCancel: () => void; onSave: () => void; busy: boolean }) {
@@ -1452,31 +1754,135 @@ function EventEditor({ form, setForm, challenges, users, orgUnits, editing, onCa
   const versions = challenges.flatMap((challenge) => challenge.versions.filter((version) => version.status === 'PUBLISHED'));
   const departments = orgUnits.filter((unit) => unit.id !== 'org-root').sort((a, b) => a.path.localeCompare(b.path));
   const mentors = users.filter((user) => user.status === 'ACTIVE' && user.roles.includes('mentor')).sort((a, b) => a.employeeNo.localeCompare(b.employeeNo));
-  const selectMany = (field: 'departmentIds' | 'mentorIds', event: ChangeEvent<HTMLSelectElement>) => update(field, [...event.target.selectedOptions].map((option) => option.value));
-  return <section className="panel admin-editor"><div className="admin-card-heading"><div><p className="kicker">训战配置</p><h3>{editing ? '编辑训战' : '创建训战'}</h3><small>训战开放时间、交付方式和访问范围。</small></div><button className="quiet" onClick={onCancel}>取消</button></div><div className="form-grid"><label>训战 ID<input value={form.id} onChange={(event) => update('id', event.target.value)} disabled={editing} /></label><label>赛题版本<select value={form.challengeVersion} onChange={(event) => { const challengeVersion = event.target.value; setForm({ ...form, challengeVersion, trigger: engineSupportsPlatformExecution(challengeVersion, challenges) ? form.trigger : 'IMPORT' }); }}>{versions.map((version) => <option key={version.id} value={version.id}>{version.title} · v{version.version}</option>)}</select></label><label>提交方式<select value={form.submissionSource} onChange={(event) => update('submissionSource', event.target.value as Source)}><option value="UPLOAD">上传交付件</option><option value="GIT_REF">指定 Git 仓路径</option></select></label><label>评测方式<select value={form.trigger} onChange={(event) => { const trigger = event.target.value as Trigger; setForm({ ...form, trigger, pinAt: trigger === 'AUTO' ? 'SUBMIT' : form.pinAt }); }}>{engineSupportsPlatformExecution(form.challengeVersion, challenges) && <><option value="AUTO">自动评测</option><option value="MANUAL">管理员发起</option></>}<option value="IMPORT">导入评测结果</option></select>{!engineSupportsPlatformExecution(form.challengeVersion, challenges) && <small className="field-hint">该赛题使用外部评测引擎，评测完成后导入结果文件。</small>}</label><label>结果公布<select value={form.reveal} onChange={(event) => update('reveal', event.target.value as EventDraft['reveal'])}><option value="IMMEDIATE">评测后公布</option><option value="ON_RELEASE">公布后可见</option></select></label><label>训战类型<select value={form.mode} onChange={(event) => update('mode', event.target.value as EventDraft['mode'])}><option value="WINDOW">开放窗口</option><option value="LIVE">集中训战</option></select></label></div><div className="event-time-config"><div><strong>训战开放时间</strong><span>员工可在该时间窗口内提交交付件。</span></div><div className="form-grid"><label>开始时间 <input required type="datetime-local" value={form.startsAt} onChange={(event) => update('startsAt', event.target.value)} /></label><label>结束时间 <input required type="datetime-local" value={form.endsAt} onChange={(event) => update('endsAt', event.target.value)} /></label></div><small className="field-hint">时间按本地时区保存。</small></div><section className="event-access-config"><div><strong>训战访问范围</strong><span>配置可进入该训战的人员范围。</span></div><div className="form-grid"><label>访问模式<select value={form.accessMode} onChange={(event) => update('accessMode', event.target.value as EventDraft['accessMode'])}><option value="OPEN">全员可见（组织范围内）</option><option value="RESTRICTED">定向访问</option></select></label>{form.accessMode === 'RESTRICTED' && <><label>目标部门<span className="field-hint">可多选</span><select multiple value={form.departmentIds} onChange={(event) => selectMany('departmentIds', event)}>{departments.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><label>指定导师（可选）<span className="field-hint">未指定时对全部导师开放</span><select multiple value={form.mentorIds} onChange={(event) => selectMany('mentorIds', event)}>{mentors.map((user) => <option key={user.id} value={user.id}>{displayPersonName(user.name)} · {user.employeeNo}</option>)}</select></label></>}</div><small className="event-access-help">员工、部门或导师任一范围匹配即可进入。</small></section><div className="form-grid">{form.submissionSource === 'GIT_REF' && <><label>Git 仓路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /><small className="field-hint">GitLab 项目路径。</small></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label><label>Git 版本固定时点<select value={form.pinAt} disabled={form.trigger === 'AUTO'} onChange={(event) => update('pinAt', event.target.value as EventDraft['pinAt'])}><option value="SUBMIT">提交时锁定</option><option value="DEADLINE">截止时锁定</option></select><small className="field-hint">自动评测在提交时锁定版本。</small></label></>}</div><div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy || !versions.length} onClick={onSave}>{busy ? '保存中…' : editing ? '保存训战配置' : '创建训战'}</button></div></section>;
+  const toggleMany = (field: 'departmentIds' | 'mentorIds', id: string) => update(field, form[field].includes(id) ? form[field].filter((value) => value !== id) : [...form[field], id]);
+  return <section className="panel admin-editor"><div className="admin-card-heading"><div><p className="kicker">训战配置</p><h3>{editing ? '编辑训战' : '创建训战'}</h3><small>训战开放时间、交付方式和访问范围。</small></div><button className="quiet" onClick={onCancel}>取消</button></div><div className="form-grid"><label>训战 ID<input value={form.id} onChange={(event) => update('id', event.target.value)} disabled={editing} /></label><label>赛题版本<select value={form.challengeVersion} onChange={(event) => { const challengeVersion = event.target.value; setForm({ ...form, challengeVersion, trigger: engineSupportsPlatformExecution(challengeVersion, challenges) ? form.trigger : 'IMPORT' }); }}>{versions.map((version) => <option key={version.id} value={version.id}>{version.title} · v{version.version}</option>)}</select></label><label>提交方式<select value={form.submissionSource} onChange={(event) => update('submissionSource', event.target.value as Source)}><option value="UPLOAD">上传交付件</option><option value="GIT_REF">指定 Git 仓路径</option></select></label><label>评测方式<select value={form.trigger} onChange={(event) => { const trigger = event.target.value as Trigger; setForm({ ...form, trigger, pinAt: trigger === 'AUTO' ? 'SUBMIT' : form.pinAt }); }}>{engineSupportsPlatformExecution(form.challengeVersion, challenges) && <><option value="AUTO">自动评测</option><option value="MANUAL">管理员发起</option></>}<option value="IMPORT">导入评测结果</option></select>{!engineSupportsPlatformExecution(form.challengeVersion, challenges) && <small className="field-hint">该赛题使用外部评测引擎，评测完成后导入结果文件。</small>}</label><label>结果公布<select value={form.reveal} onChange={(event) => update('reveal', event.target.value as EventDraft['reveal'])}><option value="IMMEDIATE">评测后公布</option><option value="ON_RELEASE">公布后可见</option></select></label><label>训战类型<select value={form.mode} onChange={(event) => update('mode', event.target.value as EventDraft['mode'])}><option value="WINDOW">开放窗口</option><option value="LIVE">集中训战</option></select></label></div><div className="event-time-config"><div><strong>训战开放时间</strong><span>员工可在该时间窗口内提交交付件。</span></div><div className="form-grid"><label>开始时间 <input required type="datetime-local" value={form.startsAt} onChange={(event) => update('startsAt', event.target.value)} /></label><label>结束时间 <input required type="datetime-local" value={form.endsAt} onChange={(event) => update('endsAt', event.target.value)} /></label></div><small className="field-hint">时间按本地时区保存。</small></div><section className="event-access-config"><div><strong>训战访问范围</strong><span>配置可进入该训战的人员范围。</span></div><div className="form-grid"><label>访问模式<select value={form.accessMode} onChange={(event) => update('accessMode', event.target.value as EventDraft['accessMode'])}><option value="OPEN">全员可见（组织范围内）</option><option value="RESTRICTED">定向访问</option></select></label>{form.accessMode === 'RESTRICTED' && <><fieldset className="multi-choice-field"><legend>目标部门</legend><small className="field-hint">勾选一个或多个部门</small><div className="multi-choice-list">{departments.length ? departments.map((unit) => <label className="choice-check" key={unit.id}><input type="checkbox" checked={form.departmentIds.includes(unit.id)} onChange={() => toggleMany('departmentIds', unit.id)} /><span>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</span></label>) : <span className="choice-empty">暂无可选部门</span>}</div></fieldset><fieldset className="multi-choice-field"><legend>指定导师（可选）</legend><small className="field-hint">未指定时对全部导师开放</small><div className="multi-choice-list">{mentors.length ? mentors.map((user) => <label className="choice-check" key={user.id}><input type="checkbox" checked={form.mentorIds.includes(user.id)} onChange={() => toggleMany('mentorIds', user.id)} /><span>{displayPersonName(user.name)} · {user.employeeNo}</span></label>) : <span className="choice-empty">暂无可选导师</span>}</div></fieldset></>}</div><small className="event-access-help">员工、部门或导师任一范围匹配即可进入。</small></section><div className="form-grid">{form.submissionSource === 'GIT_REF' && <><label>Git 仓路径<input value={form.repository} onChange={(event) => update('repository', event.target.value)} /><small className="field-hint">GitLab 项目路径。</small></label><label>分支模板<input value={form.branchTemplate} onChange={(event) => update('branchTemplate', event.target.value)} /></label><label>Git 版本固定时点<select value={form.pinAt} disabled={form.trigger === 'AUTO'} onChange={(event) => update('pinAt', event.target.value as EventDraft['pinAt'])}><option value="SUBMIT">提交时锁定</option><option value="DEADLINE">截止时锁定</option></select><small className="field-hint">自动评测在提交时锁定版本。</small></label></>}</div><div className="editor-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary compact" disabled={busy || !versions.length} onClick={onSave}>{busy ? '保存中…' : editing ? '保存训战配置' : '创建训战'}</button></div></section>;
 }
 
-function CodeAgentRuntimeSection({ config, busy, onSave }: {
+const DEFAULT_OPEN_CODE_COMMAND = 'opencode --prompt "{{prompt}}"';
+const DEFAULT_OPEN_CODE_PROMPT = '请读取批次清单、instruction.md 和 Skills，逐份评测 submissions，并将符合结果契约的结果写入 manifest.resultIndexPath。';
+
+type RuntimeEnvironmentRow = { name: string; value: string; description: string };
+
+function RuntimeEnvironmentGuide({ diagnostics, onOpenEngineGuide }: { diagnostics: CodeAgentRuntimeDiagnostics | null; onOpenEngineGuide: () => void }) {
+  const apiVariables: RuntimeEnvironmentRow[] = [
+    { name: 'NODE_ENV', value: 'production / development', description: '生产环境始终禁止 API 进程直接启动 Code Agent；本地测试保持 development。' },
+    { name: 'CODE_AGENT_RUNTIME_TEST_ENABLED', value: 'true', description: '显式开启管理页“测试启动命令”接口；默认关闭，生产环境即使设置也会被阻断。' },
+    { name: 'CODE_AGENT_RUNTIME_TEST_MAX_SECONDS', value: '10–300', description: '配置测试的最长执行秒数，默认 120；不影响正式评测批次超时。' },
+    { name: 'EMBEDDED_EVALUATION_WORKER', value: 'true / false', description: '是否在 API 进程内嵌入本地 Worker；生产环境应使用 false 并单独启动 Worker。' },
+  ];
+  const workerVariables: RuntimeEnvironmentRow[] = [
+    { name: 'CODE_AGENT_COMMAND', value: 'opencode', description: 'Worker 本地兜底可执行文件；平台配置未启用且没有命令行覆盖时使用。' },
+    { name: 'CODE_AGENT_ARGS_JSON', value: '["--profile","safe"]', description: 'Worker 兜底命令的固定参数，必须是 JSON 字符串数组，不经过 Shell。' },
+    { name: 'CODE_AGENT_ALLOWED_EXECUTABLES', value: 'opencode,codex-evaluation-bridge', description: '可执行文件白名单；设置后平台配置和 Worker 命令都必须命中名称或绝对路径。' },
+    { name: 'CODE_AGENT_BATCH_TIMEOUT_SECONDS', value: '3600', description: 'Worker 执行批次的超时覆盖值，优先级低于 --agent-timeout-seconds。' },
+    { name: 'EVALUATION_WORKER_ID', value: 'worker-local', description: 'Worker 标识，仅用于管理端诊断和日志定位，不参与授权。' },
+    { name: 'EVALUATION_HEARTBEAT_SECONDS', value: '60', description: 'Worker 续租心跳间隔；最小按 Worker 实现保护为 15 秒。' },
+    { name: 'EVALUATION_BATCH_ROOT', value: 'tmp/evaluation-batches', description: 'Worker 批次清单、物化文件和结果索引目录；也可用 --batch-root 覆盖。' },
+    { name: 'EVALUATION_LOG_ROOT', value: 'tmp/evaluation-logs', description: 'Worker 运行日志、Agent 输出和交互记录的独立目录；也可用 --log-root 覆盖，不会随批次清理。' },
+    { name: 'EVALUATION_AGENT_OUTPUT_MAX_BYTES', value: '4194304', description: '单个 Agent stdout/stderr 日志的最大字节数，默认 4 MiB；超出部分会标记为已截断。' },
+    { name: 'EVALUATION_WORKER_LOG_MAX_BYTES', value: '16777216', description: 'worker.log 的最大字节数，默认 16 MiB；达到上限后滚动保留最新记录。' },
+    { name: 'EVALUATION_KEEP_BATCHES', value: 'true / false', description: '本地排查时保留批次目录；生产环境按存储策略清理。' },
+    { name: 'PLATFORM_API', value: 'http://127.0.0.1:3000/api/v1', description: 'Worker 拉取批次使用的 API 地址，也可用 --api 覆盖。' },
+    { name: 'PLATFORM_EMPLOYEE_ID', value: 'w00123', description: 'Worker 请求 API 使用的管理员/服务身份，也可用 --employee 覆盖。' },
+    { name: 'PYTHON', value: '.venv/Scripts/python.exe', description: '评测引擎需要 Python 时使用的解释器路径；未设置则自动探测虚拟环境或 python。' },
+  ];
+  const leaseVariables: RuntimeEnvironmentRow[] = [
+    { name: 'EVALUATION_LEASE_SECONDS', value: '900', description: '单个评测任务租约时长。' },
+    { name: 'EVALUATION_LEASE_MAX_BATCH', value: '20', description: 'Worker 一次领取的评测任务上限。' },
+    { name: 'EVALUATION_BATCH_LEASE_SECONDS', value: '1800', description: '评测批次租约时长；未设置时回退到 EVALUATION_LEASE_SECONDS。' },
+    { name: 'EVALUATION_BATCH_LEASE_MAX', value: '5', description: '一次领取的评测批次数上限，也影响管理端队列并发展示。' },
+  ];
+  const engineVariables: RuntimeEnvironmentRow[] = [
+    { name: 'ENGINE_PACKAGE_ROOT', value: 'tmp/engine-packages', description: '已发布评测引擎包的本地目录；生产环境应使用受控、不可变的包存储。' },
+    { name: 'ENGINE_PACKAGE_MAX_BYTES', value: '33554432', description: '评测引擎包上传大小上限，单位字节。' },
+    { name: 'EXECUTOR_ROOT', value: 'executors', description: '平台已注册评测执行器目录。' },
+    { name: 'LOCAL_WORKSPACE_ROOT', value: '.', description: '本地交付件快照和评测工作区根目录。' },
+    { name: 'ARTIFACT_ROOT', value: 'tmp/artifacts', description: '开发环境上传交付件的本地对象目录；生产环境应切换到对象存储。' },
+    { name: 'ARTIFACT_MAX_BYTES', value: '52428800', description: '上传交付件大小上限，单位字节；赛题交付契约还可以进一步收紧。' },
+    { name: 'GRADER_TIMEOUT_MS', value: '180000', description: '传统 grader 单次执行超时，单位毫秒。' },
+    { name: 'EXTRACT_TIMEOUT_MS', value: '30000', description: '上传包安全解压超时，单位毫秒。' },
+    { name: 'GIT_COMMAND_TIMEOUT_MS', value: '30000', description: '受控 Git 快照命令超时，单位毫秒。' },
+    { name: 'LOCAL_GIT_ROOT', value: 'tmp/git-repos', description: '本地 Git fixture 根目录；生产环境不要接受客户端任意仓库路径。' },
+    { name: 'LOCAL_GRADING_CONCURRENCY', value: '2', description: '仅对内嵌本地评测队列生效；独立 Worker 的并发由租约和部署实例控制。' },
+    { name: 'ENGINE_MAX_WALL_SECONDS', value: '600', description: '评测引擎单次墙钟上限，不能超过平台批次超时。' },
+    { name: 'ENGINE_MAX_MEMORY_MB', value: '2048', description: '评测引擎内存上限，具体沙箱仍以部署策略为准。' },
+    { name: 'ENGINE_PIP_INDEX_URL / ENGINE_PIP_OFFLINE', value: '镜像地址 / true', description: 'PACKAGED 引擎依赖安装源和离线开关；生产环境建议固定内部镜像或离线包。' },
+    { name: 'PYTHON', value: '.venv/Scripts/python.exe', description: '引擎/Grader 使用的 Python 解释器，Worker 与 API 需要使用各自主机可访问的路径。' },
+  ];
+  const renderRows = (rows: RuntimeEnvironmentRow[]) => <div className="runtime-env-table">{rows.map((row) => <div className="runtime-env-row" key={row.name}><code>{row.name}</code><span className="runtime-env-value">{row.value}</span><p>{row.description}</p></div>)}</div>;
+  const workerStartCommand = '$env:CODE_AGENT_ALLOWED_EXECUTABLES = \'opencode\'\n$env:EVALUATION_WORKER_ID = \'worker-local\'\n$env:PLATFORM_API = \'http://127.0.0.1:3000/api/v1\'\nnode scripts/evaluation-worker.mjs --api $env:PLATFORM_API --employee w00123 --worker $env:EVALUATION_WORKER_ID';
+  const bridgeStartCommand = '$env:CODE_AGENT_COMMAND = (Get-Command node).Source\n$bridge = (Resolve-Path ./scripts/code-agent-local-bridge.mjs).Path\n$env:CODE_AGENT_ARGS_JSON = ConvertTo-Json @($bridge) -Compress\nnode scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee w00123';
+  return <section className="panel admin-card code-agent-runtime-card runtime-environment-panel">
+    <div className="runtime-environment-intro"><div><strong>运行环境与变量说明</strong><p>平台只保存批次启动模板；真正执行发生在独立 Worker 主机。下列变量不需要填写到“运行配置”表单，按部署位置设置后重启对应进程。</p></div><div className="runtime-environment-actions"><button type="button" className="secondary-button admin-guide-button" onClick={onOpenEngineGuide}>评测引擎开发指南</button><span className="status-badge">当前 Worker：{diagnostics?.worker.workerId ?? '未设置'}</span></div></div>
+    <div className="runtime-environment-grid">
+      <article className="runtime-env-section"><div className="runtime-env-heading"><div><h3>平台 API</h3><p>由 API 进程读取；管理页测试和诊断只受这些变量影响。</p></div><span>API 进程</span></div>{renderRows(apiVariables)}</article>
+      <article className="runtime-env-section"><div className="runtime-env-heading"><div><h3>Worker 与 Code Agent</h3><p>在运行 <code>scripts/evaluation-worker.mjs</code> 的主机设置。</p></div><span>Worker 主机</span></div>{renderRows(workerVariables)}</article>
+      <article className="runtime-env-section runtime-env-section-wide"><div className="runtime-env-heading"><div><h3>领取租约与并发</h3><p>仅调整 Worker 领取频率和批次数，不会改变评分规则。</p></div><span>Worker / API</span></div>{renderRows(leaseVariables)}</article>
+      <article className="runtime-env-section runtime-env-section-wide"><div className="runtime-env-heading"><div><h3>评测引擎与目录</h3><p>评测环境的路径和资源上限；修改后需重启读取这些变量的进程。</p></div><span>API / Worker</span></div>{renderRows(engineVariables)}</article>
+    </div>
+    <div className="runtime-help-grid">
+      <div className="runtime-help-card"><strong>生效优先级</strong><p><code>--agent-command</code>（Worker 启动参数） &gt; 新建批次冻结的平台配置 &gt; <code>CODE_AGENT_COMMAND</code> + <code>CODE_AGENT_ARGS_JSON</code>。超时顺序为 <code>--agent-timeout-seconds</code> &gt; <code>CODE_AGENT_BATCH_TIMEOUT_SECONDS</code> &gt; 批次冻结值。</p></div>
+      <div className="runtime-help-card"><strong>启用前检查</strong><p>1. 在 Worker 主机执行 <code>Get-Command opencode</code>；2. 将 <code>opencode</code> 加入允许列表（如已设置）；3. 在“运行配置”填好模板、勾选并保存；4. 启动独立 Worker；5. 仅在受控开发环境打开配置测试开关。</p></div>
+    </div>
+    <div className="runtime-command-guide"><div><strong>OpenCode Worker 启动示例（PowerShell）</strong><span>平台配置启用后，Worker 会按冻结命令注入批次清单和任务指令。</span></div><pre>{workerStartCommand}</pre><small>如果只想验证本地批次目录和契约，可先使用仓库内的本地 bridge；它不是模型 Agent，不会产生真实 AI 评测。</small><pre>{bridgeStartCommand}</pre></div>
+    <div className="runtime-path-note"><strong>评测目录</strong><span><code>EVALUATION_BATCH_ROOT</code> 默认是项目下的 <code>tmp/evaluation-batches</code>；每个批次包含 <code>batch-manifest.json</code>、物化交付件和 <code>result-index.json</code>。日志独立写入 <code>EVALUATION_LOG_ROOT</code>（默认 <code>tmp/evaluation-logs/&lt;workerId&gt;</code>），包括 <code>worker.log</code>、每批次的 <code>interaction.jsonl</code>、<code>agent.stdout.log</code> 和 <code>agent.stderr.log</code>。目录属于 Worker 主机，不由浏览器上传。</span></div>
+  </section>;
+}
+
+function CodeAgentRuntimeSection({ config, diagnostics, busy, onSave, onTest, onOpenGuide }: {
   config: CodeAgentRuntimeConfig;
+  diagnostics: CodeAgentRuntimeDiagnostics | null;
   busy: boolean;
   onSave: (input: Pick<CodeAgentRuntimeConfig, 'enabled' | 'commandLine' | 'prompt' | 'timeoutSeconds'>) => void;
+  onTest: (input: Pick<CodeAgentRuntimeConfig, 'commandLine' | 'prompt' | 'timeoutSeconds'>) => Promise<CodeAgentRuntimeTestResult | null>;
+  onOpenGuide: () => void;
 }) {
   const [form, setForm] = useState({ enabled: config.enabled, commandLine: config.commandLine, prompt: config.prompt, timeoutSeconds: config.timeoutSeconds });
-  useEffect(() => setForm({ enabled: config.enabled, commandLine: config.commandLine, prompt: config.prompt, timeoutSeconds: config.timeoutSeconds }), [config]);
+  const [testResult, setTestResult] = useState<CodeAgentRuntimeTestResult | null>(null);
+  const [runtimeTab, setRuntimeTab] = useState<'runtime' | 'environment'>('runtime');
+  const [engineGuideOpen, setEngineGuideOpen] = useState(false);
+  useEffect(() => {
+    setForm({ enabled: config.enabled, commandLine: config.commandLine, prompt: config.prompt, timeoutSeconds: config.timeoutSeconds });
+    setTestResult(null);
+  }, [config]);
   const status = form.enabled ? '平台配置已启用' : '使用 Worker 本地配置';
+  const sourceLabel: Record<CodeAgentRuntimeDiagnostics['worker']['source'], string> = {
+    PLATFORM: '平台配置', ENVIRONMENT: 'Worker 环境变量', CLI_OVERRIDE_UNKNOWN: 'Worker 命令行覆盖（API 不可见）', NONE: '未找到',
+  };
+  const testStatusLabel: Record<CodeAgentRuntimeTestResult['status'], string> = { PASS: '通过', FAIL: '失败', BLOCKED: '已阻断', TIMEOUT: '超时' };
+  const restoreDefaults = () => {
+    const defaults = diagnostics?.defaults ?? { enabled: false, commandLine: DEFAULT_OPEN_CODE_COMMAND, prompt: DEFAULT_OPEN_CODE_PROMPT, timeoutSeconds: 3600 };
+    setForm({ ...defaults });
+    setTestResult(null);
+  };
+  const runTest = async () => {
+    const result = await onTest({ commandLine: form.commandLine, prompt: form.prompt, timeoutSeconds: form.timeoutSeconds });
+    setTestResult(result);
+  };
   return <section className="admin-section">
-    <div className="admin-section-heading"><div><p className="kicker">评测环境</p><h2>Code Agent 运行配置</h2></div><span className={`status-badge ${form.enabled ? 'status-open' : 'status-closed'}`}>{status}</span></div>
-    <section className="panel admin-card code-agent-runtime-card">
-      <div className="runtime-config-heading"><div><strong>批次启动配置</strong><span>新建评测批次会冻结当前配置。</span></div><label className="check-label"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} /> 使用平台配置</label></div>
-      <div className="runtime-config-grid">
-        <label className="span-2">启动命令<textarea className="mono-value" rows={3} value={form.commandLine} onChange={(event) => setForm({ ...form, commandLine: event.target.value })} /><small className="field-hint">可用占位符：{'{{prompt}}'}、{'{{manifestPath}}'}、{'{{batchDir}}'}。命令不经过系统 Shell。</small></label>
-        <label className="span-2">任务指令<textarea rows={5} value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} /><small className="field-hint">Worker 会追加批次清单、Skills、评测引擎和结果写入要求。</small></label>
-        <label>批次超时（秒）<input className="mono-value" type="number" min="60" max="21600" value={form.timeoutSeconds} onChange={(event) => setForm({ ...form, timeoutSeconds: Number(event.target.value) })} /></label>
-        <div className="runtime-config-meta"><span>当前可执行文件</span><strong className="mono-value">{config.executable || '未配置'}</strong><small className="mono-value">配置校验值 {config.configHash.slice(0, 16)}</small></div>
+    <div className="admin-section-heading"><div><p className="kicker">评测环境</p><h2>Code Agent 运行配置</h2></div><div className="admin-section-actions"><button type="button" className="secondary-button admin-guide-button" onClick={onOpenGuide}>说明指导</button><span className={`status-badge ${form.enabled ? 'status-open' : 'status-closed'}`}>{status}</span></div></div>
+    <div className="runtime-tabs" role="tablist" aria-label="评测环境配置页签"><button type="button" role="tab" aria-selected={runtimeTab === 'runtime'} className={runtimeTab === 'runtime' ? 'active' : ''} onClick={() => setRuntimeTab('runtime')}>运行配置</button><button type="button" role="tab" aria-selected={runtimeTab === 'environment'} className={runtimeTab === 'environment' ? 'active' : ''} onClick={() => setRuntimeTab('environment')}>环境配置</button></div>
+    {runtimeTab === 'environment' ? <RuntimeEnvironmentGuide diagnostics={diagnostics} onOpenEngineGuide={() => setEngineGuideOpen(true)} /> : <section className="panel admin-card code-agent-runtime-card">
+      <div className="runtime-config-heading"><div><strong>批次启动配置</strong><span>新建评测批次会冻结当前配置；未启用平台配置时由 Worker 本地环境接管。</span></div><label className="check-label"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} /> 使用平台配置</label></div>
+       <div className="runtime-diagnostics-grid">
+         <article className="runtime-source-card"><div><span>平台配置（已保存）</span><b>{config.enabled ? '已启用' : '未启用'}</b></div><strong className="mono-value">{config.executable || '未配置可执行文件'}</strong><small>{config.enabled ? '新建批次会使用此可执行文件。' : config.executable ? 'OpenCode 默认模板，当前未启用。' : '尚未保存启动命令。'} · 校验值 {config.configHash.slice(0, 16)}</small></article>
+        <article className="runtime-source-card"><div><span>Worker 本地配置</span><b>{diagnostics ? sourceLabel[diagnostics.worker.source] : '加载中…'}</b></div><strong className="mono-value">{diagnostics?.worker.executable ?? '未发现可执行文件'}</strong><small>{diagnostics?.worker.mode === 'EMBEDDED' ? '内嵌 Worker' : '外部 Worker'} · {diagnostics?.worker.commandPreview ?? 'CODE_AGENT_COMMAND 未设置'}</small>{Boolean(diagnostics?.worker.args.length) && <small className="mono-value">固定参数：{diagnostics?.worker.args.join(' ')}</small>}</article>
       </div>
-      <div className="runtime-security-note"><strong>运行凭据</strong><span>模型令牌和访问凭据由 Worker 环境变量提供，不写入启动命令或任务指令。</span></div>
-      <div className="editor-actions"><button className="primary compact" disabled={busy || (form.enabled && !form.commandLine.trim())} onClick={() => onSave(form)}>{busy ? '保存中…' : '保存运行配置'}</button></div>
-    </section>
+      <div className="runtime-config-grid">
+        <label className="span-2">启动命令<textarea className="mono-value" rows={3} value={form.commandLine} onChange={(event) => setForm({ ...form, commandLine: event.target.value })} placeholder={'例如：opencode --prompt "{{prompt}}"'} /><small className="field-hint">可用占位符：{'{{prompt}}'}、{'{{manifestPath}}'}、{'{{batchDir}}'}。命令不经过系统 Shell，只按可执行文件 + 参数启动。</small></label>
+        <label className="span-2">任务指令<textarea rows={5} value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} placeholder="例如：只处理批次清单中的 submissions，按 instruction 和 Skills 执行评测。" /><small className="field-hint">Worker 会追加批次清单、Skills、评测引擎和结果写入要求；令牌请放在 Worker 环境变量。</small></label>
+        <label>批次超时（秒）<input className="mono-value" type="number" min="60" max="21600" value={form.timeoutSeconds} onChange={(event) => setForm({ ...form, timeoutSeconds: Number(event.target.value) })} /></label>
+          <div className="runtime-config-meta"><span>当前可执行文件（已保存）</span><strong className="mono-value">{config.executable || '未配置'}</strong><small>{config.enabled ? '已启用' : config.executable ? '默认模板，未启用' : '未配置'} · 允许列表：{diagnostics?.allowedExecutables.length ? diagnostics.allowedExecutables.join(', ') : '未设置（不限制）'}</small></div>
+      </div>
+      <div className="runtime-help-grid">
+        <div className="runtime-help-card"><strong>为什么会显示“未配置”？</strong><p>平台默认关闭 Code Agent。启用平台配置后，新批次会使用这里的启动命令；保持关闭时，Worker 只能从启动参数 <code>--agent-command</code> 或环境变量 <code>CODE_AGENT_COMMAND</code> 加 <code>CODE_AGENT_ARGS_JSON</code> 取得命令。API 无法读取已经启动的 Worker 命令行参数，所以页面会明确标注“不可见”。平台配置是全局设置，只有全局管理员可以保存。</p></div>
+        <div className="runtime-help-card"><strong>当前是否可以运行</strong><p>{diagnostics?.worker.reason ?? '正在读取 Worker 配置诊断…'}</p><p>{diagnostics?.test.enabled ? '测试安全开关已开启；点击测试时会使用当前表单内容，不要求先保存。' : diagnostics?.test.reason ?? '运行测试状态加载中…'}</p><p>外部 Worker 与 API 分离时，页面只显示 API 能看到的诊断；不会把 Worker 主机上不可读取的命令行伪装成“已配置”。</p></div>
+      </div>
+      <div className="runtime-security-note"><strong>安全边界</strong><span>运行测试只创建合成批次清单，不包含学员交付件；默认不允许 API 启动外部进程，开发环境需显式设置 CODE_AGENT_RUNTIME_TEST_ENABLED=true，生产环境始终由独立 Worker 执行。</span></div>
+       <div className="editor-actions runtime-editor-actions"><button className="secondary-button" disabled={busy || !diagnostics} onClick={restoreDefaults}>恢复 OpenCode 默认</button><button className="secondary-button" disabled={busy || !form.commandLine.trim()} onClick={() => void runTest()}>测试启动命令</button><button className="primary compact" disabled={busy || (form.enabled && !form.commandLine.trim())} onClick={() => onSave(form)}>{busy ? '保存中…' : '保存运行配置'}</button></div>
+      {testResult && <section className={`runtime-test-result runtime-test-${testResult.status.toLowerCase()}`}><div className="runtime-test-result-heading"><div><strong>配置测试：{testStatusLabel[testResult.status]}</strong><span>{testResult.message}</span></div><span className="status-badge">{testResult.durationMs} ms</span></div><dl><div><dt>可执行文件</dt><dd className="mono-value">{testResult.executable ?? '未解析'}</dd></div><div><dt>退出状态</dt><dd className="mono-value">{testResult.exitCode ?? testResult.signal ?? '未启动'}</dd></div><div><dt>工作目录</dt><dd className="mono-value">{testResult.workingDirectory}</dd></div></dl>{(testResult.stdout || testResult.stderr) && <details><summary>查看进程输出</summary>{testResult.stdout && <pre>{testResult.stdout}</pre>}{testResult.stderr && <pre>{testResult.stderr}</pre>}</details>}</section>}
+     </section>}
+    {engineGuideOpen && <EvaluationEngineGuideDialog onClose={() => setEngineGuideOpen(false)} />}
   </section>;
 }
 
@@ -1500,6 +1906,7 @@ function GradingSection({ submissions, events, challenges, users, queue, selecte
   onImport: () => Promise<boolean>;
   busy: boolean;
 }) {
+  const now = Date.now();
   const [selectedEventId, setSelectedEventId] = useState('');
   const [expandedSubmissionId, setExpandedSubmissionId] = useState('');
   const [resultImportOpen, setResultImportOpen] = useState(false);
@@ -1552,7 +1959,7 @@ function GradingSection({ submissions, events, challenges, users, queue, selecte
     return <>
       <div className="grading-detail-back"><button className="quiet" onClick={() => { setSelectedEventId(''); setExpandedSubmissionId(''); closeResultImport(); }}>← 返回评测列表</button></div>
       <div className="grading-event-detail">
-        <div className="grading-detail-heading"><div><p className="kicker">赛题评测</p><h3>{versionTitle(event.challengeVersion, challenges)}</h3><small>{eventScheduleLabel(event)}</small></div><span className={`status-badge status-${event.status.toLowerCase()}`}>{statusLabel(event.status)}</span></div>
+        <div className="grading-detail-heading"><div><p className="kicker">赛题评测</p><h3>{versionTitle(event.challengeVersion, challenges)}</h3><small>{eventScheduleLabel(event)}</small></div><span className={`status-badge status-${eventDisplayStatus(event, now).toLowerCase()}`}>{eventDisplayLabel(event, now)}</span></div>
         <div className="grading-detail-facts"><span>赛制：{modeLabel(event.mode)}</span><span>提交：{sourceLabel(event.submissionSource)}</span><span>评测方式：{triggerLabel(event.trigger)}</span><span>{rows.length} 份提交</span></div>
         <div className="grading-event-actions"><button className="quiet" disabled={busy || !rows.length} onClick={() => onSelectEvent(event.id)}>全选</button><button className="quiet" disabled={busy || !selectedCount} onClick={() => onClearEvent(event.id)}>清除</button>{event.trigger === 'MANUAL' && <button className="primary compact" disabled={busy || !selectedActionCount} onClick={() => onStartSelected(event.id)}>发起评测</button>}{event.trigger === 'IMPORT' && <button className="primary compact" disabled={busy || !selectedActionCount} onClick={() => onPrepareInput(event.id)}>导出评测任务</button>}<button className="secondary-button compact" disabled={busy} onClick={() => setResultImportOpen((current) => !current)}>{resultImportOpen ? '收起结果导入' : '导入评测结果'}</button><span className="grading-selected-count">已选 {selectedCount}/{rows.length}</span></div>
         <div className="grading-submission-list">{rows.map((submission) => { const subject = subjectFor(submission); const expanded = expandedSubmissionId === submission.id; return <div className="grading-submission-block" key={submission.id}><div className="grading-row"><label className="grading-check"><input type="checkbox" checked={selectedSet.has(submission.id)} onChange={() => onToggle(submission.id)} /><span className="grading-avatar">{(subject?.name ?? submission.subjectId).slice(-2)}</span></label><div><strong>{displayPersonName(subject?.name ?? submission.subjectId)}</strong><small>{subject?.employeeNo ?? submission.subjectId} · {sourceLabel(submission.snapshot.sourceType)} · {submissionDate(submission)}</small></div><span className={`status-badge status-${submission.state.toLowerCase()}`}>{statusText(submission)}</span><div className="row-actions"><button className="small" onClick={() => setExpandedSubmissionId(expanded ? '' : submission.id)}>{expanded ? '收起详情' : '查看提交'}</button>{submission.snapshot.artifactUri && <button className="small" disabled={busy} onClick={() => onDownload(submission)}>下载交付件</button>}{submission.resultId && <button className="small" disabled={busy} onClick={() => onRegrade(submission)}>重新评测</button>}{['WAITING_TRIGGER', 'RECEIVED', 'FAILED'].includes(submission.state) && event.trigger === 'MANUAL' && <button className="small" disabled={busy} onClick={() => onSubmission(submission)}>发起评测</button>}</div></div>{expanded && renderSubmissionDetails(submission)}</div>; })}{!rows.length && <div className="empty">暂无提交记录</div>}</div>
@@ -1571,27 +1978,36 @@ function GradingSection({ submissions, events, challenges, users, queue, selecte
   return <section className="admin-section">
     <div className="admin-section-heading"><div><p className="kicker">评测中心</p><h2>评测中心</h2></div><div className="grading-queue-summary"><span className="status-pill">{submissions.filter((row) => !row.resultId).length} 条待处理</span>{queue && <small>评测队列：进行中 {queue.running}/{queue.maxConcurrency} · 等待 {queue.queued}</small>}</div></div>
     <div className="admin-grading-grid">
-      <section className="panel admin-card grading-selection-card">{selectedGroup ? renderEventDetail(selectedGroup) : <><div className="admin-card-heading"><div><p className="kicker">训战列表</p><h3>选择赛题</h3></div></div><div className="grading-event-catalog">{groups.map(({ event, rows }) => { const pending = rows.filter((row) => !row.resultId).length; const completed = rows.length - pending; return <button type="button" className="grading-event-card" key={event.id} onClick={() => { setSelectedEventId(event.id); setExpandedSubmissionId(''); }}><span className="grading-event-card-main"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><small>{eventScheduleLabel(event)}</small></span><span className="grading-event-card-meta"><b>{statusLabel(event.status)}</b><span>{rows.length} 份提交</span><span>{completed} 已完成 · {pending} 待处理</span></span><span className="grading-event-card-arrow">打开 →</span></button>; })}{!groups.length && <div className="empty">暂无可评测训战</div>}</div></>}</section>
+      <section className="panel admin-card grading-selection-card">{selectedGroup ? renderEventDetail(selectedGroup) : <><div className="admin-card-heading"><div><p className="kicker">训战列表</p><h3>选择赛题</h3></div></div><div className="grading-event-catalog">{groups.map(({ event, rows }) => { const pending = rows.filter((row) => !row.resultId).length; const completed = rows.length - pending; return <button type="button" className="grading-event-card" key={event.id} onClick={() => { setSelectedEventId(event.id); setExpandedSubmissionId(''); }}><span className="grading-event-card-main"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><small>{eventScheduleLabel(event)}</small></span><span className="grading-event-card-meta"><b>{eventDisplayLabel(event, now)}</b><span>{rows.length} 份提交</span><span>{completed} 已完成 · {pending} 待处理</span></span><span className="grading-event-card-arrow">打开 →</span></button>; })}{!groups.length && <div className="empty">暂无可评测训战</div>}</div></>}</section>
     </div>
   </section>;
 }
 
-function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMessage }: { users: AdminUser[]; orgUnits: OrgUnit[]; adminAccess: AdminAccess; busy: boolean; onSaved: () => Promise<void>; onMessage: (message: string) => void }) {
+function OrganizationSection({ users, orgUnits, currentUserId, adminAccess, busy, onSaved, onMessage }: { users: AdminUser[]; orgUnits: OrgUnit[]; currentUserId: string; adminAccess: AdminAccess; busy: boolean; onSaved: () => Promise<void>; onMessage: (message: string) => void }) {
   const pageSize = 8;
   const rootUnit = orgUnits.find((unit) => unit.level === 0) ?? orgUnits[0];
   const rootUnitId = rootUnit?.id ?? 'org-root';
-  const [unitForm, setUnitForm] = useState({ id: '', name: '', label: '部门', parentId: rootUnitId });
+  const [unitForm, setUnitForm] = useState({ id: '', name: '', parentId: rootUnitId });
   const [userForm, setUserForm] = useState({ orgUnitId: '', roles: ['learner'] });
   const [editingId, setEditingId] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState(rootUnitId);
   const [collapsedOrgIds, setCollapsedOrgIds] = useState<Set<string>>(new Set());
   const [addingUnit, setAddingUnit] = useState(false);
   const [editingUnitId, setEditingUnitId] = useState('');
-  const [unitEditForm, setUnitEditForm] = useState({ name: '', label: '部门' });
-  const [deletingUnitId, setDeletingUnitId] = useState('');
+  const [unitEditForm, setUnitEditForm] = useState({ name: '' });
+  const [deletingUnitId, setDeletingUnitIdState] = useState('');
+  const setDeletingUnitId = (value: string) => {
+    if (!value) {
+      setDeletingUnitIdState('');
+      return;
+    }
+    void onSaved().then(() => setDeletingUnitIdState(value)).catch((error) => onMessage(error instanceof Error ? error.message : '无法刷新部门信息，请稍后重试'));
+  };
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [serverUserPage, setServerUserPage] = useState<UserPage | null>(null);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [batchOrgUnitId, setBatchOrgUnitId] = useState('');
   const [saving, setSaving] = useState(false);
   const orgById = new Map(orgUnits.map((unit) => [unit.id, unit]));
   const unitTrail = (unit: OrgUnit, includeSelf = true) => {
@@ -1622,13 +2038,25 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
   const manageableUnits = orgUnits.filter((unit) => unit.level !== 0 && canManageUnit(unit));
   const creatableParents = orgUnits.filter(canManageUnit);
   const selectedUnit = orgById.get(selectedOrgId);
+  const editingUnit = editingUnitId ? orgById.get(editingUnitId) : undefined;
+  const newUnitParent = orgById.get(unitForm.parentId);
+  const newUnitLevel = newUnitParent ? newUnitParent.level + 1 : 0;
+  const unitForUser = (user: AdminUser): OrgUnit | undefined => {
+    const byId = orgById.get(user.orgUnitId);
+    if (byId) return byId;
+    const path = user.orgPath?.trim();
+    if (!path) return undefined;
+    return orgUnits
+      .filter((unit) => unit.level > 0 && (path === unit.path || path.startsWith(unit.path)))
+      .sort((left, right) => right.path.length - left.path.length)[0];
+  };
   const unitContainsUser = (unit: OrgUnit, user: AdminUser) => {
     if (unit.level === 0) return true;
-    const userUnit = orgById.get(user.orgUnitId);
+    const userUnit = unitForUser(user);
     return Boolean(userUnit && (userUnit.path === unit.path || userUnit.path.startsWith(unit.path)));
   };
   const localUsersInScope = users.filter((user) => {
-    if (selectedOrgId === '__unassigned__') return !orgById.has(user.orgUnitId);
+    if (selectedOrgId === '__unassigned__') return !unitForUser(user);
     return selectedUnit ? unitContainsUser(selectedUnit, user) : true;
   });
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN');
@@ -1644,9 +2072,12 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
   const pageUsers = serverPaging && serverUserPage ? serverUserPage.items : localFilteredUsers.slice((page - 1) * pageSize, page * pageSize);
   const pageStart = Math.max(1, Math.min(page - 2, totalPages - 4));
   const pageNumbers = Array.from({ length: Math.min(5, totalPages) }, (_, index) => pageStart + index);
-  const unassignedCount = users.filter((user) => !orgById.has(user.orgUnitId)).length;
+  const unassignedCount = users.filter((user) => !unitForUser(user)).length;
   const selectedChildCount = selectedUnit ? (childrenByParent.get(selectedUnit.id)?.length ?? 0) : 0;
-  const selectedDirectUserCount = selectedUnit ? users.filter((user) => user.orgUnitId === selectedUnit.id).length : 0;
+  const selectedDirectUserCount = selectedUnit ? users.filter((user) => {
+    const userUnit = unitForUser(user);
+    return userUnit?.id === selectedUnit.id && (user.orgUnitId === selectedUnit.id || user.orgPath === selectedUnit.path);
+  }).length : 0;
   const selectedIsScopeRoot = Boolean(selectedUnit && adminAccess.level === 'DEPARTMENT' && adminAccess.scopeOrgPaths.some((scope) => scope === selectedUnit.path));
   const selectedCanManage = Boolean(selectedUnit && canManageUnit(selectedUnit));
   const deleteBlockReason = !selectedUnit || selectedUnit.level === 0
@@ -1664,9 +2095,14 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
     ...(adminAccess.level === 'GLOBAL' ? [{ value: 'global_admin', label: '全局管理员' }, { value: 'department_admin', label: '部门管理员' }] : []),
   ];
   const canConfigureUser = (user: AdminUser) => adminAccess.level === 'GLOBAL' || !editableRoles(user).some((role) => ['global_admin', 'department_admin'].includes(role));
+  const selectedUserSet = new Set(selectedUserIds);
+  const selectablePageUsers = pageUsers.filter(canConfigureUser);
+  const allPageUsersSelected = selectablePageUsers.length > 0 && selectablePageUsers.every((user) => selectedUserSet.has(user.id));
+  const editingUser = editingId ? users.find((user) => user.id === editingId) : undefined;
+  const protectingSelfGlobalAdmin = Boolean(editingUser && editingUser.id === currentUserId && editableRoles(editingUser).includes('global_admin'));
 
   useEffect(() => { setPage((current) => Math.min(current, totalPages)); }, [totalPages]);
-  useEffect(() => { setPage(1); }, [selectedOrgId, query]);
+  useEffect(() => { setPage(1); setSelectedUserIds([]); setBatchOrgUnitId(''); }, [selectedOrgId, query]);
   useEffect(() => {
     if (!serverPaging) { setServerUserPage(null); return; }
     let active = true;
@@ -1690,27 +2126,62 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
     setEditingId(user.id);
     setUserForm({ orgUnitId: user.orgUnitId, roles: editableRoles(user) });
   };
-  const toggleRole = (role: string) => setUserForm((current) => ({ ...current, roles: current.roles.includes(role) ? current.roles.filter((item) => item !== role) : [...current.roles, role] }));
+  const toggleRole = (role: string) => setUserForm((current) => {
+    if (protectingSelfGlobalAdmin && role === 'global_admin' && current.roles.includes(role)) return current;
+    return { ...current, roles: current.roles.includes(role) ? current.roles.filter((item) => item !== role) : [...current.roles, role] };
+  });
   const submitUser = () => {
     if (!editingId) { onMessage('员工首次登录后自动登记'); return; }
     if (!userForm.roles.length) { onMessage('至少保留一个角色'); return; }
+    if (protectingSelfGlobalAdmin && !userForm.roles.includes('global_admin')) { onMessage('全局管理员不能移除自己的全局管理员权限'); return; }
     void save(() => request(`/users/${editingId}`, { method: 'PATCH', body: JSON.stringify({ orgUnitId: userForm.orgUnitId, roles: userForm.roles }) }), '员工配置已保存').then((success) => { if (success) clearEdit(); });
   };
+  const toggleUserSelection = (user: AdminUser) => {
+    if (!canConfigureUser(user)) return;
+    setSelectedUserIds((current) => current.includes(user.id) ? current.filter((id) => id !== user.id) : [...current, user.id]);
+  };
+  const toggleCurrentPageSelection = () => {
+    const pageIds = selectablePageUsers.map((user) => user.id);
+    setSelectedUserIds((current) => allPageUsersSelected ? current.filter((id) => !pageIds.includes(id)) : [...new Set([...current, ...pageIds])]);
+  };
+  const batchMoveUsers = async () => {
+    const selectedIds = [...selectedUserIds];
+    const targetUnit = orgById.get(batchOrgUnitId);
+    if (!selectedIds.length) { onMessage('请先勾选需要调整的员工'); return; }
+    if (!targetUnit || targetUnit.level === 0) { onMessage('请选择目标部门'); return; }
+    if (!canManageUnit(targetUnit)) { onMessage('目标部门不在当前管理员权限范围内'); return; }
+    if (!window.confirm(`确认将已选 ${selectedIds.length} 名员工调整到“${targetUnit.name}”吗？`)) return;
+    setSaving(true);
+    try {
+      const result = await request<{ requested: number; updated: AdminUser[] }>('/users/batch-department', {
+        method: 'PATCH',
+        body: JSON.stringify({ userIds: selectedIds, orgUnitId: targetUnit.id }),
+      });
+      await onSaved();
+      setSelectedUserIds([]);
+      setBatchOrgUnitId('');
+      onMessage(`已将 ${result.updated.length} 名员工调整到“${targetUnit.name}”`);
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : '批量调整部门失败，请稍后重试');
+    } finally {
+      setSaving(false);
+    }
+  };
   const departmentFor = (user: AdminUser) => {
-    const unit = orgUnits.find((item) => item.id === user.orgUnitId);
+    const unit = unitForUser(user);
     if (unit) {
       const parentTrail = unitTrail(unit, false).map((item) => item.name);
-      return { name: unit.name, meta: parentTrail.length ? parentTrail.join(' / ') : unit.label };
+      return { name: unit.name, meta: parentTrail.length ? parentTrail.join(' / ') : organizationLevelLabel(unit.level) };
     }
     if (user.departmentHint) return { name: '未配置部门', meta: `SSO 部门：${user.departmentHint}` };
     return { name: '未配置部门', meta: '待分配' };
   };
   const createUnit = async () => {
     if (!unitForm.id.trim() || !unitForm.name.trim()) { onMessage('请填写部门编号和名称'); return; }
-    const success = await save(() => request('/org-units', { method: 'POST', body: JSON.stringify(unitForm) }), '部门已创建');
+    const success = await save(() => request('/org-units', { method: 'POST', body: JSON.stringify({ ...unitForm, label: organizationLevelLabel(newUnitLevel) }) }), '部门已创建');
     if (success) {
       setSelectedOrgId(unitForm.id.trim());
-      setUnitForm({ id: '', name: '', label: '部门', parentId: rootUnitId });
+      setUnitForm({ id: '', name: '', parentId: rootUnitId });
       setAddingUnit(false);
     }
   };
@@ -1718,23 +2189,28 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
     const preferredParent = parentId ? orgById.get(parentId) : selectedUnit;
     const parent = preferredParent && canManageUnit(preferredParent) ? preferredParent : creatableParents[0];
     if (!parent) { onMessage('当前权限范围内暂无可维护部门'); return; }
-    setUnitForm({ id: '', name: '', label: '部门', parentId: parent.id });
+    setUnitForm({ id: '', name: '', parentId: parent.id });
     setAddingUnit(true);
     setEditingUnitId('');
     setDeletingUnitId('');
   };
   const startEditingUnit = (unit: OrgUnit) => {
-    setUnitEditForm({ name: unit.name, label: unit.label });
+    setUnitEditForm({ name: unit.name });
     setEditingUnitId(unit.id);
     setAddingUnit(false);
     setDeletingUnitId('');
   };
   const updateUnit = async () => {
     if (!editingUnitId || !unitEditForm.name.trim()) { onMessage('请填写部门名称'); return; }
-    const success = await save(() => request(`/org-units/${editingUnitId}`, { method: 'PATCH', body: JSON.stringify(unitEditForm) }), '部门信息已保存');
+    const success = await save(() => request(`/org-units/${editingUnitId}`, { method: 'PATCH', body: JSON.stringify({ ...unitEditForm, ...(editingUnit ? { label: organizationLevelLabel(editingUnit.level) } : {}) }) }), '部门信息已保存');
     if (success) setEditingUnitId('');
   };
   const deleteUnit = async (unit: OrgUnit) => {
+    if (deleteBlockReason) {
+      setDeletingUnitId('');
+      onMessage(deleteBlockReason);
+      return;
+    }
     const nextSelection = unit.parentId ?? rootUnitId;
     const success = await save(() => request(`/org-units/${unit.id}`, { method: 'DELETE' }), '部门已删除');
     if (success) {
@@ -1755,9 +2231,10 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
     <div className="organization-workspace">
       <section className="panel admin-card organization-users-card">
         <div className="admin-card-heading organization-users-heading"><div><p className="kicker">员工管理</p><h3>{editingId ? '配置员工' : '员工列表'}</h3></div><label className="employee-search"><span>搜索</span><input aria-label="搜索员工" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="姓名、工号或部门" /></label></div>
-        {editingId && <div className="employee-editor"><div className="edit-user-summary">{(() => { const user = users.find((item) => item.id === editingId); return user ? <><strong>{displayPersonName(user.name)}</strong><span>{user.employeeNo}</span></> : null; })()}</div><div className="form-grid"><label>所属部门<select value={userForm.orgUnitId} onChange={(event) => setUserForm({ ...userForm, orgUnitId: event.target.value })}>{adminAccess.level === 'GLOBAL' && <option value="">未配置部门</option>}{manageableUnits.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><fieldset><legend>角色</legend><div className="checkbox-list">{roleOptions.map((role) => <label className="check-label" key={role.value}><input type="checkbox" checked={userForm.roles.includes(role.value)} onChange={() => toggleRole(role.value)} />{role.label}</label>)}</div></fieldset></div><div className="editor-actions"><button className="secondary-button" onClick={clearEdit}>取消</button><button className="primary compact" disabled={busy || saving} onClick={submitUser}>保存配置</button></div></div>}
+        {editingId && <div className="employee-editor"><div className="edit-user-summary">{(() => { const user = users.find((item) => item.id === editingId); return user ? <><strong>{displayPersonName(user.name)}</strong><span>{user.employeeNo}</span></> : null; })()}</div><div className="form-grid"><label>所属部门<select value={userForm.orgUnitId} onChange={(event) => setUserForm({ ...userForm, orgUnitId: event.target.value })}>{adminAccess.level === 'GLOBAL' && <option value="">未配置部门</option>}{manageableUnits.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><fieldset><legend>角色</legend><div className="checkbox-list">{roleOptions.map((role) => { const protectedRole = protectingSelfGlobalAdmin && role.value === 'global_admin'; return <label className="check-label" key={role.value}><input type="checkbox" checked={userForm.roles.includes(role.value)} disabled={protectedRole} onChange={() => toggleRole(role.value)} />{role.label}</label>; })}</div>{protectingSelfGlobalAdmin && <small className="muted">全局管理员不能移除自己的全局管理员权限</small>}</fieldset></div><div className="editor-actions"><button className="secondary-button" onClick={clearEdit}>取消</button><button className="primary compact" disabled={busy || saving} onClick={submitUser}>保存配置</button></div></div>}
         <div className="employee-list-toolbar"><div><strong>{selectedLabel}</strong><span>{totalUsers} 人</span></div>{(selectedOrgId !== rootUnitId || query) && <button className="small" onClick={() => { setSelectedOrgId(rootUnitId); setQuery(''); }}>清除筛选</button>}</div>
-        <div className="admin-table-wrap organization-user-table"><table className="admin-table"><thead><tr><th>员工</th><th>部门</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>{pageUsers.map((user) => { const department = departmentFor(user); const configurable = canConfigureUser(user); return <tr key={user.id}><td><strong>{displayPersonName(user.name)}</strong><small>{user.employeeNo}</small></td><td><div className="department-cell"><strong>{department.name}</strong><small>{department.meta}</small></div></td><td><div className="role-list">{roleLabels(user.roles).map((role) => <span className="role-tag" key={role}>{role}</span>)}</div></td><td><span className={`status-badge status-${user.status.toLowerCase()}`}>{user.status === 'ACTIVE' ? '在职' : '已停用'}</span></td><td>{configurable ? <button className="small" onClick={() => edit(user)}>配置</button> : <span className="organization-action-note">权限受限</span>}</td></tr>; })}</tbody></table>{!pageUsers.length && <div className="empty">暂无员工</div>}</div>
+        <div className="employee-batch-toolbar"><div className="employee-batch-selection"><button className="small" type="button" onClick={toggleCurrentPageSelection} disabled={!selectablePageUsers.length || saving}>{allPageUsersSelected ? '取消全选本页' : '全选本页'}</button><button className="small" type="button" onClick={() => setSelectedUserIds([])} disabled={!selectedUserIds.length || saving}>清除选择</button><span>已选 {selectedUserIds.length} 人</span></div><div className="employee-batch-actions"><label><span>调整到部门</span><select aria-label="批量调整到部门" value={batchOrgUnitId} onChange={(event) => setBatchOrgUnitId(event.target.value)} disabled={saving || busy}><option value="">请选择目标部门</option>{manageableUnits.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level - 1))}{unit.name}</option>)}</select></label><button className="primary compact" type="button" onClick={() => void batchMoveUsers()} disabled={busy || saving || !selectedUserIds.length || !batchOrgUnitId}>批量调整部门</button></div></div>
+        <div className="admin-table-wrap organization-user-table"><table className="admin-table"><thead><tr><th><label className="employee-select-all"><input type="checkbox" checked={allPageUsersSelected} onChange={toggleCurrentPageSelection} disabled={!selectablePageUsers.length || saving} aria-label="全选当前页可调整员工" /><span>员工</span></label></th><th>部门</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>{pageUsers.map((user) => { const department = departmentFor(user); const configurable = canConfigureUser(user); return <tr key={user.id}><td><div className="employee-row-identity"><input type="checkbox" checked={selectedUserSet.has(user.id)} onChange={() => toggleUserSelection(user)} disabled={!configurable || saving} aria-label={`选择${displayPersonName(user.name)}`} /><div><strong>{displayPersonName(user.name)}</strong><small>{user.employeeNo}</small></div></div></td><td><div className="department-cell"><strong>{department.name}</strong><small>{department.meta}</small></div></td><td><div className="role-list">{roleLabels(user.roles).map((role) => <span className="role-tag" key={role}>{role}</span>)}</div></td><td><span className={`status-badge status-${user.status.toLowerCase()}`}>{user.status === 'ACTIVE' ? '在职' : '已停用'}</span></td><td>{configurable ? <button className="small" onClick={() => edit(user)}>配置</button> : <span className="organization-action-note">权限受限</span>}</td></tr>; })}</tbody></table>{!pageUsers.length && <div className="empty">暂无员工</div>}</div>
         <div className="table-pagination"><span>第 {page} / {totalPages} 页 · 共 {totalUsers} 人</span><div><button className="small" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</button>{pageNumbers.map((number) => <button className={`small page-number${page === number ? ' active' : ''}`} key={number} onClick={() => setPage(number)}>{number}</button>)}<button className="small" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>下一页</button></div></div>
       </section>
       <aside className="organization-side">
@@ -1769,9 +2246,9 @@ function OrganizationSection({ users, orgUnits, adminAccess, busy, onSaved, onMe
             const collapsed = collapsedOrgIds.has(unit.id);
             return <div className={`organization-tree-row${selectedOrgId === unit.id ? ' selected' : ''}`} style={{ paddingLeft: `${6 + Math.max(0, unit.level) * 16}px` }} role="treeitem" aria-expanded={children.length ? !collapsed : undefined} key={unit.id}>{children.length ? <button type="button" className="organization-tree-toggle" aria-label={`${collapsed ? '展开' : '收起'}${unit.name}`} onClick={() => toggleOrg(unit)}>{collapsed ? '+' : '−'}</button> : <span className="organization-tree-spacer" />}<button type="button" className="organization-tree-select" onClick={() => selectOrg(unit.id)}><span className={`organization-tree-mark${unit.level === 0 ? ' root' : ''}`} aria-hidden="true" /><strong>{unit.name}</strong><span>{count} 人</span></button></div>;
           })}{unassignedCount > 0 && <div className={`organization-tree-row organization-unassigned${selectedOrgId === '__unassigned__' ? ' selected' : ''}`} role="treeitem"><span className="organization-tree-spacer" /><button type="button" className="organization-tree-select" onClick={() => selectOrg('__unassigned__')}><span className="organization-tree-mark unassigned" aria-hidden="true" /><strong>未配置部门</strong><span>{unassignedCount} 人</span></button></div>}</div>
-          {selectedUnit && <div className="department-summary"><div className="department-summary-heading"><div><strong>{selectedUnit.name}</strong><span>{unitTrail(selectedUnit, false).map((unit) => unit.name).join(' / ') || '组织根节点'}</span></div><span className="role-tag">{selectedUnit.label}</span></div><dl><div><dt>部门编号</dt><dd>{selectedUnit.id}</dd></div><div><dt>直属员工</dt><dd>{selectedDirectUserCount} 人</dd></div><div><dt>下级部门</dt><dd>{selectedChildCount} 个</dd></div></dl>{selectedCanManage && <div className="department-summary-actions"><button className="small" type="button" onClick={() => startEditingUnit(selectedUnit)}>编辑</button>{selectedUnit.level > 0 && <button className="small danger" type="button" disabled={Boolean(deleteBlockReason)} onClick={() => setDeletingUnitId(selectedUnit.id)}>删除</button>}</div>}{selectedCanManage && selectedUnit.level > 0 && deleteBlockReason && <small className="department-delete-block">{deleteBlockReason}</small>}{deletingUnitId === selectedUnit.id && <div className="department-delete-confirm"><strong>删除“{selectedUnit.name}”？</strong><span>删除后无法恢复。</span><div><button className="small" type="button" onClick={() => setDeletingUnitId('')}>取消</button><button className="small danger" type="button" disabled={busy || saving} onClick={() => void deleteUnit(selectedUnit)}>确认删除</button></div></div>}</div>}
-          {editingUnitId && <div className="department-create-form department-edit-form"><strong>编辑部门</strong><label>部门名称<input value={unitEditForm.name} onChange={(event) => setUnitEditForm({ ...unitEditForm, name: event.target.value })} /></label><label>组织类型<select value={unitEditForm.label} onChange={(event) => setUnitEditForm({ ...unitEditForm, label: event.target.value })}><option value="集团">集团</option><option value="事业群">事业群</option><option value="一级组织">一级组织</option><option value="二级组织">二级组织</option><option value="部门">部门</option><option value="团队">团队</option></select></label><div className="department-form-actions"><button className="small" type="button" onClick={() => setEditingUnitId('')}>取消</button><button className="primary compact" disabled={busy || saving} onClick={() => void updateUnit()}>保存修改</button></div></div>}
-          {addingUnit && <div className="department-create-form"><strong>新增部门</strong><label>部门名称<input value={unitForm.name} onChange={(event) => setUnitForm({ ...unitForm, name: event.target.value })} /></label><label>部门编号<input value={unitForm.id} onChange={(event) => setUnitForm({ ...unitForm, id: event.target.value })} /></label><label>上级部门<select value={unitForm.parentId} onChange={(event) => setUnitForm({ ...unitForm, parentId: event.target.value })}>{creatableParents.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level))}{unit.name}</option>)}</select></label><label>组织类型<select value={unitForm.label} onChange={(event) => setUnitForm({ ...unitForm, label: event.target.value })}><option value="事业群">事业群</option><option value="一级组织">一级组织</option><option value="二级组织">二级组织</option><option value="部门">部门</option><option value="团队">团队</option></select></label><button className="primary compact" disabled={busy || saving} onClick={() => void createUnit()}>保存部门</button></div>}
+          {selectedUnit && <div className="department-summary"><div className="department-summary-heading"><div><strong>{selectedUnit.name}</strong><span>{unitTrail(selectedUnit, false).map((unit) => unit.name).join(' / ') || '组织根节点'}</span></div><span className="role-tag">{organizationLevelLabel(selectedUnit.level)}</span></div><dl><div><dt>部门编号</dt><dd>{selectedUnit.id}</dd></div><div><dt>直属员工</dt><dd>{selectedDirectUserCount} 人</dd></div><div><dt>下级部门</dt><dd>{selectedChildCount} 个</dd></div></dl>{selectedCanManage && <div className="department-summary-actions"><button className="small" type="button" onClick={() => startEditingUnit(selectedUnit)}>编辑</button>{selectedUnit.level > 0 && <button className="small danger" type="button" disabled={Boolean(deleteBlockReason)} onClick={() => setDeletingUnitId(selectedUnit.id)}>删除</button>}</div>}{selectedCanManage && selectedUnit.level > 0 && deleteBlockReason && <small className="department-delete-block">{deleteBlockReason}</small>}{deletingUnitId === selectedUnit.id && <div className="department-delete-confirm"><strong>删除“{selectedUnit.name}”？</strong><span>删除后无法恢复。</span><div><button className="small" type="button" onClick={() => setDeletingUnitId('')}>取消</button><button className="small danger" type="button" disabled={busy || saving} onClick={() => void deleteUnit(selectedUnit)}>确认删除</button></div></div>}</div>}
+          {editingUnitId && <div className="department-create-form department-edit-form"><strong>编辑部门</strong><label>部门名称<input value={unitEditForm.name} onChange={(event) => setUnitEditForm({ ...unitEditForm, name: event.target.value })} /></label><label>组织层级<input value={editingUnit ? organizationLevelLabel(editingUnit.level) : '自动识别'} readOnly /><small className="field-hint">根据组织树层级自动识别，不可手工修改。</small></label><div className="department-form-actions"><button className="small" type="button" onClick={() => setEditingUnitId('')}>取消</button><button className="primary compact" disabled={busy || saving} onClick={() => void updateUnit()}>保存修改</button></div></div>}
+          {addingUnit && <div className="department-create-form"><strong>新增部门</strong><label>部门名称<input value={unitForm.name} onChange={(event) => setUnitForm({ ...unitForm, name: event.target.value })} /></label><label>部门编号<input value={unitForm.id} onChange={(event) => setUnitForm({ ...unitForm, id: event.target.value })} /></label><label>上级部门<select value={unitForm.parentId} onChange={(event) => setUnitForm({ ...unitForm, parentId: event.target.value })}>{creatableParents.map((unit) => <option key={unit.id} value={unit.id}>{'　'.repeat(Math.max(0, unit.level))}{unit.name}</option>)}</select></label><label>组织层级<input value={organizationLevelLabel(newUnitLevel)} readOnly /><small className="field-hint">根据所选上级部门自动识别，不可手工修改。</small></label><button className="primary compact" disabled={busy || saving} onClick={() => void createUnit()}>保存部门</button></div>}
         </section>
       </aside>
     </div>

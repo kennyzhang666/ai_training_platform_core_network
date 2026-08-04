@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ForbiddenException } from '@nestjs/common';
-import { buildCodeAgentRuntimeConfig, parseCommandLine } from '../src/code-agent-runtime';
+import { buildCodeAgentRuntimeConfig, codeAgentRuntimeDiagnostics, defaultCodeAgentRuntimeConfig, DEFAULT_CODE_AGENT_COMMAND, DEFAULT_CODE_AGENT_PROMPT, parseCommandLine } from '../src/code-agent-runtime';
 import { PlatformStore } from '../src/store';
 
 test('Code Agent command configuration is tokenized without invoking a shell', () => {
@@ -40,6 +40,34 @@ test('only a global administrator can configure the Code Agent runtime', () => {
   const saved = store.updateCodeAgentRuntimeConfig({ enabled: true, commandLine: 'opencode --prompt "{{prompt}}"', prompt: '执行赛题评测。', timeoutSeconds: 3600 }, 'w00123');
   assert.equal(saved.enabled, true);
   assert.equal(saved.executable, 'opencode');
+});
+
+test('runtime diagnostics exposes defaults and explains the Worker precedence safely', () => {
+  const config = defaultCodeAgentRuntimeConfig();
+  const diagnostics = codeAgentRuntimeDiagnostics(config);
+  assert.equal(diagnostics.schemaVersion, '1.0');
+  assert.deepEqual(diagnostics.defaults, {
+    enabled: false,
+    commandLine: DEFAULT_CODE_AGENT_COMMAND,
+    prompt: DEFAULT_CODE_AGENT_PROMPT,
+    timeoutSeconds: 3600,
+  });
+  assert.equal(diagnostics.platform.configHash, config.configHash);
+  assert.equal(diagnostics.worker.cliOverrideVisible, false);
+  assert.ok(['PLATFORM', 'ENVIRONMENT', 'NONE'].includes(diagnostics.worker.source));
+  assert.equal(typeof diagnostics.test.reason, 'string');
+});
+
+test('runtime diagnostics reads the Worker fallback executable and fixed args', () => {
+  const diagnostics = codeAgentRuntimeDiagnostics(defaultCodeAgentRuntimeConfig(), {
+    CODE_AGENT_COMMAND: 'node',
+    CODE_AGENT_ARGS_JSON: '["--profile", "safe"]',
+    EMBEDDED_EVALUATION_WORKER: 'false',
+  });
+  assert.equal(diagnostics.worker.source, 'ENVIRONMENT');
+  assert.equal(diagnostics.worker.executable, 'node');
+  assert.deepEqual(diagnostics.worker.args, ['--profile', 'safe']);
+  assert.equal(diagnostics.worker.canResolveExecutable, true);
 });
 
 test('an evaluation batch freezes the Code Agent runtime selected at creation', () => {

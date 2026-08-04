@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
@@ -20,12 +20,14 @@ test('Worker materialises a frozen batch, invokes the Code Agent bridge and impo
     embedded: process.env.EMBEDDED_EVALUATION_WORKER,
     project: process.env.PROJECT_ROOT,
     artifacts: process.env.ARTIFACT_ROOT,
+    logs: process.env.EVALUATION_LOG_ROOT,
   };
   process.env.PLATFORM_DATA_FILE = ':memory:';
   process.env.ALLOW_ANONYMOUS_LOCAL = 'false';
   process.env.EMBEDDED_EVALUATION_WORKER = 'false';
   process.env.PROJECT_ROOT = projectRoot;
   process.env.ARTIFACT_ROOT = join(sandbox, 'artifacts');
+  process.env.EVALUATION_LOG_ROOT = join(sandbox, 'logs');
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), { logger: false });
   await app.listen(0, '127.0.0.1');
   try {
@@ -71,6 +73,23 @@ test('Worker materialises a frozen batch, invokes the Code Agent bridge and impo
     ], { cwd: projectRoot, timeout: 45_000, windowsHide: true, env: { ...process.env } });
     assert.match(worker.stdout, /完成批次/);
     assert.match(worker.stdout, /成功 2/);
+    const workerLogPath = join(sandbox, 'logs', 'worker-e2e', 'worker.log');
+    assert.equal(existsSync(workerLogPath), true);
+    const workerLog = readFileSync(workerLogPath, 'utf8');
+    assert.match(workerLog, /"event":"worker.start"/);
+    assert.match(workerLog, /"event":"batch.completed"/);
+    const findFiles = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name);
+      return entry.isDirectory() ? findFiles(path) : statSync(path).isFile() ? [path] : [];
+    });
+    const logFiles = findFiles(join(sandbox, 'logs'));
+    const interactionPath = logFiles.find((path) => path.endsWith('interaction.jsonl'));
+    assert.ok(interactionPath);
+    const interaction = readFileSync(interactionPath, 'utf8');
+    assert.match(interaction, /"event":"batch.start"/);
+    assert.match(interaction, /"event":"agent.start"/);
+    assert.equal(logFiles.some((path) => path.endsWith('agent.stdout.log')), true);
+    assert.equal(logFiles.some((path) => path.endsWith('agent.stderr.log')), true);
 
     for (const [index, submission] of selected.entries()) {
       const loaded = await fetch(`${baseUrl}/api/v1/submissions/${submission.id}`, { headers: { 'x-employee-id': `w0012${index + 4}` } });
@@ -91,6 +110,7 @@ test('Worker materialises a frozen batch, invokes the Code Agent bridge and impo
       EMBEDDED_EVALUATION_WORKER: previous.embedded,
       PROJECT_ROOT: previous.project,
       ARTIFACT_ROOT: previous.artifacts,
+      EVALUATION_LOG_ROOT: previous.logs,
     })) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }

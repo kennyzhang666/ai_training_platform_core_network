@@ -65,6 +65,8 @@ model AppUser {
   id           String   @id
   employeeNo   String   @unique
   name         String
+  nickname     String?
+  avatarDataUrl String?
   orgUnitId    String?
   orgPath      String?
   departmentHint   String?

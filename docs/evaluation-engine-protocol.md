@@ -124,6 +124,34 @@ Worker --agent-command 显式覆盖
 
 命令不会经过系统 Shell，因此管道、重定向、命令拼接和环境变量赋值不会被解释。模型令牌等凭据只能由 Worker 运行环境注入。生产主机可设置 `CODE_AGENT_ALLOWED_EXECUTABLES=opencode,...`，限制平台配置允许启动的程序。
 
+## 管理端配置诊断与连通性测试
+
+全局管理员可以在“管理后台 → 评测环境”查看三组信息：
+
+- **默认配置**：平台内置为关闭平台配置、OpenCode 默认启动命令 `opencode --prompt "{{prompt}}"`、默认任务指令“请读取批次清单、instruction.md 和 Skills，逐份评测 submissions，并将符合结果契约的结果写入 manifest.resultIndexPath。”和 3600 秒超时；“恢复 OpenCode 默认”只会把表单恢复为这组值，点击保存后才会写入平台。默认模板不会自动启用，需先确认 Worker 已安装并允许启动 `opencode`。
+- **平台配置**：启用后由 API 在创建评测批次时解析并冻结 `executable` 与 `args`；页面显示当前可执行文件、配置校验值和允许列表。
+- **Worker 本地配置**：读取 API 进程可见的 `CODE_AGENT_COMMAND`、`CODE_AGENT_ARGS_JSON`、`EMBEDDED_EVALUATION_WORKER` 和 `EVALUATION_WORKER_ID`。Worker 启动参数 `--agent-command` 只存在于 Worker 进程，API 无法读取，因此诊断会明确标注为“命令行覆盖（API 不可见）”，不能把它误认为未配置。
+
+当 Worker 与 API 部署在不同主机或容器时，API 只能展示它实际收到的进程级诊断；Worker 主机上的环境变量和命令行不会自动同步到管理页。此时应在 Worker 主机按“本地联调”示例配置，并以 Worker 启动输出和批次租约状态为准。
+
+页面的“测试启动命令”使用管理员当前表单内容创建合成清单，并只在非生产环境且显式设置 `CODE_AGENT_RUNTIME_TEST_ENABLED=true` 时以 `shell: false` 启动一次。测试不会带入学员交付件，也不会创建评测批次；输出仅保留截断后的标准输出/错误并遮蔽常见凭据字段。未打开安全开关时接口仍返回 `BLOCKED` 及原因，便于区分“配置错误”和“执行权限未开放”。
+
+## Worker 日志与 Agent 交互记录
+
+Worker 默认将运行日志写入项目下的 `tmp/evaluation-logs/<workerId>/`，也可以通过 `EVALUATION_LOG_ROOT` 或 `--log-root` 指定独立目录。日志目录不会随评测批次清理，便于追查领取、续租、Agent 启动、退出和批次完成状态：
+
+```text
+tmp/evaluation-logs/
+└─ <workerId>/
+   ├─ worker.log                         # Worker 生命周期和批次状态（JSON Lines）
+   └─ batches/<batchId>/<leaseId>/
+      ├─ interaction.jsonl               # Agent 启动参数（脱敏）、阶段事件、输出预览、退出信息
+      ├─ agent.stdout.log                 # Agent 标准输出（脱敏、默认最多 4 MiB）
+      └─ agent.stderr.log                 # Agent 标准错误（脱敏、默认最多 4 MiB）
+```
+
+`EVALUATION_AGENT_OUTPUT_MAX_BYTES` 可调整单个 stdout/stderr 文件上限（16 KiB–64 MiB），`EVALUATION_WORKER_LOG_MAX_BYTES` 控制 `worker.log` 上限（256 KiB–256 MiB，默认 16 MiB，达到上限后滚动保留最新记录）。日志会遮蔽常见 token、密钥、密码、Cookie 和 Authorization 字段，并在超过上限时写入截断标记；不要把学员源码或长期凭据主动写进任务指令。日志仅落在 Worker 主机，不会通过 API 返回给浏览器。
+
 ## Code Agent 批次职责
 
 Worker 不直接判断得分。Code Agent 或 bridge 必须：

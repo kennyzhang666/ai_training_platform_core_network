@@ -32,6 +32,63 @@ export interface CodeAgentRuntimeConfig extends CodeAgentRuntimeInput {
   updatedBy: string;
 }
 
+export type CodeAgentRuntimeWorkerSource = 'PLATFORM' | 'ENVIRONMENT' | 'CLI_OVERRIDE_UNKNOWN' | 'NONE';
+
+/**
+ * Sanitised runtime information shown to a global administrator.  The API
+ * process can inspect environment variables shared with a co-located Worker,
+ * but it cannot see command-line arguments of an already running Worker.
+ */
+export interface CodeAgentRuntimeDiagnostics {
+  schemaVersion: '1.0';
+  defaults: Pick<CodeAgentRuntimeInput, 'enabled' | 'commandLine' | 'prompt' | 'timeoutSeconds'>;
+  platform: CodeAgentRuntimeConfig;
+  worker: {
+    mode: 'EMBEDDED' | 'EXTERNAL';
+    workerId: string | null;
+    source: CodeAgentRuntimeWorkerSource;
+    commandConfigured: boolean;
+    executable: string | null;
+    args: string[];
+    commandPreview: string | null;
+    cliOverrideVisible: false;
+    canResolveExecutable: boolean;
+    reason: string;
+  };
+  allowedExecutables: string[];
+  test: {
+    enabled: boolean;
+    maxTimeoutSeconds: number;
+    canExecute: boolean;
+    reason: string;
+  };
+}
+
+export interface CodeAgentRuntimeTestInput {
+  commandLine?: string;
+  prompt?: string;
+  timeoutSeconds?: number;
+}
+
+export type CodeAgentRuntimeTestStatus = 'PASS' | 'FAIL' | 'BLOCKED' | 'TIMEOUT';
+
+export interface CodeAgentRuntimeTestResult {
+  schemaVersion: '1.0';
+  status: CodeAgentRuntimeTestStatus;
+  message: string;
+  executable: string | null;
+  args: string[];
+  workingDirectory: string;
+  manifestPath: string | null;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  exitCode: number | null;
+  signal: string | null;
+  stdout: string;
+  stderr: string;
+}
+
 export type CodeAgentRuntimeSnapshot = Pick<
   CodeAgentRuntimeConfig,
   'schemaVersion' | 'executable' | 'args' | 'prompt' | 'timeoutSeconds' | 'configHash'
@@ -438,6 +495,10 @@ export interface AppUser {
   id: string;
   employeeNo: string;
   name: string;
+  /** Optional employee-managed display name; the SSO name remains canonical. */
+  nickname?: string;
+  /** A validated, small image data URL for the employee avatar. */
+  avatarDataUrl?: string;
   orgUnitId: string;
   orgPath: string;
   /** Raw SSO department retained only as a matching hint when no unit matches. */

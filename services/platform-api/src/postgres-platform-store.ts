@@ -137,8 +137,8 @@ export async function synchronizeNormalized(db: Prisma.TransactionClient, state:
   for (const user of state.users) {
     await db.appUser.upsert({
       where: { id: user.id },
-      update: { employeeNo: user.employeeNo, name: user.name, orgUnitId: user.orgUnitId || null, orgPath: user.orgPath || null, departmentHint: user.departmentHint ?? null, departmentSource: user.departmentSource ?? null, roles: jsonValue(user.roles, []), status: user.status },
-      create: { id: user.id, employeeNo: user.employeeNo, name: user.name, orgUnitId: user.orgUnitId || null, orgPath: user.orgPath || null, departmentHint: user.departmentHint ?? null, departmentSource: user.departmentSource ?? null, roles: jsonValue(user.roles, []), status: user.status },
+      update: { employeeNo: user.employeeNo, name: user.name, nickname: user.nickname ?? null, avatarDataUrl: user.avatarDataUrl ?? null, orgUnitId: user.orgUnitId || null, orgPath: user.orgPath || null, departmentHint: user.departmentHint ?? null, departmentSource: user.departmentSource ?? null, roles: jsonValue(user.roles, []), status: user.status },
+      create: { id: user.id, employeeNo: user.employeeNo, name: user.name, nickname: user.nickname ?? null, avatarDataUrl: user.avatarDataUrl ?? null, orgUnitId: user.orgUnitId || null, orgPath: user.orgPath || null, departmentHint: user.departmentHint ?? null, departmentSource: user.departmentSource ?? null, roles: jsonValue(user.roles, []), status: user.status },
     });
     if (user.roleBindings?.length) {
       await db.roleBinding.createMany({ data: user.roleBindings.map((binding) => ({ userId: user.id, role: binding.role, scopeOrgPath: binding.scopeOrgPath })), skipDuplicates: true });

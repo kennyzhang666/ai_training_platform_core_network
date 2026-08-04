@@ -5,7 +5,6 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const projectRoot = resolve(__dirname, '..', '..', '..');
 const serviceRoot = resolve(__dirname, '..');
 const script = join(serviceRoot, 'scripts', 'migrate-json-to-postgres.mjs');
 
@@ -18,17 +17,37 @@ function dryRun(source: string): string {
 }
 
 test('JSON migration dry-run reports graph statistics without opening a database', () => {
-  const output = JSON.parse(dryRun(join(projectRoot, 'tmp', 'platform-data.json'))) as {
-    dryRun: boolean;
-    errors: unknown[];
-    stats: Record<string, { read: number }>;
-  };
-  assert.equal(output.dryRun, true);
-  assert.deepEqual(output.errors, []);
-  assert.equal(output.stats.orgUnits.read, 4);
-  assert.equal(output.stats.users.read, 12);
-  assert.equal(output.stats.challenges.read, 6);
-  assert.equal(output.stats.events.read, 5);
+  const directory = mkdtempSync(join(tmpdir(), 'migration-stats-'));
+  const source = join(directory, 'platform-data.json');
+  writeFileSync(source, JSON.stringify({
+    orgUnits: [
+      { id: 'org-root', path: '/', level: 0, label: '集团', name: '华为' },
+      { id: 'org-demo', parentId: 'org-root', path: '/1/', level: 1, label: '部门', name: 'AI 工程团队' },
+    ],
+    users: [
+      { id: 'w00123', employeeNo: 'w00123', name: '本地开发用户', orgUnitId: 'org-demo', roles: ['global_admin'] },
+      { id: 'w00124', employeeNo: 'w00124', name: '本地学员 A', orgUnitId: 'org-demo', roles: ['learner'] },
+      { id: 'w00126', employeeNo: 'w00126', name: '本地学员 B', orgUnitId: 'org-demo', roles: ['learner'] },
+      { id: 'w00133', employeeNo: 'w00133', name: '本地导师', orgUnitId: 'org-demo', roles: ['mentor'] },
+    ],
+    challenges: [{ id: 'parking-fee-01', versions: [{ id: 'parking-fee-01@1', challengeId: 'parking-fee-01', version: 1 }] }],
+    events: [{ id: 'event-local', challengeVersion: 'parking-fee-01@1' }],
+  }), 'utf8');
+  try {
+    const output = JSON.parse(dryRun(source)) as {
+      dryRun: boolean;
+      errors: unknown[];
+      stats: Record<string, { read: number }>;
+    };
+    assert.equal(output.dryRun, true);
+    assert.deepEqual(output.errors, []);
+    assert.equal(output.stats.orgUnits.read, 2);
+    assert.equal(output.stats.users.read, 4);
+    assert.equal(output.stats.challenges.read, 1);
+    assert.equal(output.stats.events.read, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('JSON migration dry-run rejects broken references and duplicate keys before PostgreSQL', () => {

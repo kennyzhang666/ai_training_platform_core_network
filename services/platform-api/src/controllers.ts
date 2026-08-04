@@ -3,10 +3,10 @@ import { createHash } from 'node:crypto';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { PlatformStore } from './store';
+import { assertEventSubmissionWindow, PlatformStore } from './store';
 import type { UserListQuery, UserListSortBy, UserListSortOrder } from './store';
 import type { SubmissionListQuery } from './repository';
-import { Announcement, Challenge, ChallengeCategory, ChallengeVersion, CodeAgentRuntimeInput, EvaluationEngineConfig, EventConfig, HardProblem, HardProblemReviewStatus, HardProblemSolutionVisibility, Season, SubmissionSnapshot, SsoIdentity } from './domain';
+import { Announcement, Challenge, ChallengeCategory, ChallengeVersion, CodeAgentRuntimeDiagnostics, CodeAgentRuntimeInput, CodeAgentRuntimeTestInput, EvaluationEngineConfig, EventConfig, HardProblem, HardProblemReviewStatus, HardProblemSolutionVisibility, Season, SubmissionSnapshot, SsoIdentity } from './domain';
 import { validateEvaluationResult } from './contract-validator';
 import { ArtifactStore } from './artifact-store';
 import { GradingExecutor, GRADING_EXECUTOR } from './grading-executor';
@@ -24,6 +24,7 @@ import { PlatformReadService } from './platform-read-service';
 import { PostgresDomainUnitOfWork } from './postgres-domain-unit-of-work';
 import { PlatformMetrics } from './metrics';
 import { EvaluationContractCatalogService } from './evaluation-contract-catalog';
+import { CodeAgentRuntimeTestService } from './code-agent-runtime-test';
 
 type UserQueryValue = string | string[] | undefined;
 type UserListRequestQuery = Record<string, UserQueryValue>;
@@ -88,6 +89,54 @@ function parseUserListQuery(input: UserListRequestQuery): UserListQuery {
   };
 }
 
+const PROFILE_NICKNAME_MAX_LENGTH = 32;
+const PROFILE_AVATAR_MAX_BYTES = 256 * 1024;
+const PROFILE_AVATAR_MIME = /^(image\/png|image\/jpeg|image\/webp)$/;
+
+type UserProfilePatch = { nickname?: string | null; avatarDataUrl?: string | null };
+
+function validAvatarBytes(mime: string, bytes: Buffer): boolean {
+  if (mime === 'image/png') return bytes.length >= 24
+    && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    && bytes.subarray(12, 16).toString('ascii') === 'IHDR';
+  if (mime === 'image/jpeg') return bytes.length >= 4
+    && bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))
+    && bytes.subarray(bytes.length - 2).equals(Buffer.from([0xff, 0xd9]));
+  return bytes.length >= 20 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+}
+
+function parseAvatarDataUrl(value: unknown): string | null {
+  if (value === null || value === '') return null;
+  if (typeof value !== 'string') throw new BadRequestException('avatarDataUrl must be a PNG, JPEG, or WebP data URL');
+  if (value.length > 360_000) throw new BadRequestException(`avatarDataUrl must be a valid image no larger than ${PROFILE_AVATAR_MAX_BYTES} bytes`);
+  const match = /^data:(image\/png|image\/jpeg|image\/webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match || !PROFILE_AVATAR_MIME.test(match[1]) || match[2].length % 4 !== 0) {
+    throw new BadRequestException('avatarDataUrl must be a PNG, JPEG, or WebP data URL');
+  }
+  const bytes = Buffer.from(match[2], 'base64');
+  if (!bytes.length || bytes.length > PROFILE_AVATAR_MAX_BYTES || Buffer.from(bytes).toString('base64') !== match[2] || !validAvatarBytes(match[1], bytes)) {
+    throw new BadRequestException(`avatarDataUrl must be a valid image no larger than ${PROFILE_AVATAR_MAX_BYTES} bytes`);
+  }
+  return `data:${match[1]};base64,${bytes.toString('base64')}`;
+}
+
+function parseUserProfilePatch(input: unknown): UserProfilePatch {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('profile patch must be an object');
+  const body = input as Record<string, unknown>;
+  const unknownKeys = Object.keys(body).filter((key) => key !== 'nickname' && key !== 'avatarDataUrl');
+  if (unknownKeys.length) throw new BadRequestException(`unsupported profile field: ${unknownKeys[0]}`);
+  const patch: UserProfilePatch = {};
+  if (Object.prototype.hasOwnProperty.call(body, 'nickname')) {
+    if (body.nickname !== null && typeof body.nickname !== 'string') throw new BadRequestException('nickname must be a string or null');
+    const nickname = typeof body.nickname === 'string' ? body.nickname.trim() : '';
+    if ([...nickname].length > PROFILE_NICKNAME_MAX_LENGTH) throw new BadRequestException(`nickname must be at most ${PROFILE_NICKNAME_MAX_LENGTH} characters`);
+    patch.nickname = nickname || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'avatarDataUrl')) patch.avatarDataUrl = parseAvatarDataUrl(body.avatarDataUrl);
+  if (!Object.keys(patch).length) throw new BadRequestException('at least one profile field is required');
+  return patch;
+}
+
 @Controller('/api/v1')
 export class PlatformController {
   constructor(
@@ -107,6 +156,7 @@ export class PlatformController {
     @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorage,
     @Inject(PlatformMetrics) private readonly metrics: PlatformMetrics,
     @Inject(EvaluationContractCatalogService) private readonly contractCatalog: EvaluationContractCatalogService,
+    @Inject(CodeAgentRuntimeTestService) private readonly codeAgentRuntimeTest: CodeAgentRuntimeTestService,
   ) {}
 
   private localWorkspaceHash(workspacePath: string): string {
@@ -232,6 +282,12 @@ export class PlatformController {
   @Get('/me')
   me(@Headers('x-employee-id') employeeId?: string) {
     return this.store.getUser(this.actor(employeeId));
+  }
+
+  @Patch('/me/profile')
+  async updateMyProfile(@Body() body: unknown, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.userDirectory.updateProfile(actorId, parseUserProfilePatch(body), actorId);
   }
 
   /**
@@ -468,10 +524,24 @@ export class PlatformController {
     return this.domainUnitOfWork.read((store) => store.getCodeAgentRuntimeConfig(actorId));
   }
 
+  @Get('/admin/code-agent-runtime/diagnostics')
+  async codeAgentRuntimeDiagnostics(@Headers('x-employee-id') employeeId?: string): Promise<CodeAgentRuntimeDiagnostics> {
+    const actorId = this.requireGlobalAdmin(employeeId);
+    return this.domainUnitOfWork.read((store) => store.getCodeAgentRuntimeDiagnostics(actorId));
+  }
+
   @Put('/admin/code-agent-runtime')
   async updateCodeAgentRuntime(@Body() body: CodeAgentRuntimeInput, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireGlobalAdmin(employeeId);
     return this.domainUnitOfWork.run((store) => store.updateCodeAgentRuntimeConfig(body, actorId));
+  }
+
+  @Post('/admin/code-agent-runtime/test')
+  @HttpCode(200)
+  async testCodeAgentRuntime(@Body() body: CodeAgentRuntimeTestInput = {}, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireGlobalAdmin(employeeId);
+    const current = await this.domainUnitOfWork.read((store) => store.getCodeAgentRuntimeConfig(actorId));
+    return this.codeAgentRuntimeTest.run(body ?? {}, current);
   }
 
   @Get('/admin/capabilities')
@@ -526,6 +596,15 @@ export class PlatformController {
   @Get('/users/:userId')
   async user(@Param('userId') userId: string, @Headers('x-employee-id') employeeId?: string) {
     return this.userDirectory.get(userId, this.actor(employeeId));
+  }
+
+  @Patch('/users/batch-department')
+  async updateUsersDepartment(@Body() body: { userIds?: unknown; orgUnitId?: unknown; actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.requireAdmin(employeeId);
+    const { actorId: _ignoredActorId, userIds, orgUnitId } = body ?? {};
+    if (!Array.isArray(userIds) || userIds.some((id) => typeof id !== 'string')) throw new BadRequestException('员工列表格式不正确');
+    if (typeof orgUnitId !== 'string') throw new BadRequestException('请选择目标部门');
+    return this.userDirectory.updateDepartmentBatch(userIds, orgUnitId, actorId);
   }
 
   @Patch('/users/:userId')
@@ -632,8 +711,9 @@ export class PlatformController {
   }
 
   @Get('/seasons/:seasonId/leaderboard')
-  async leaderboard(@Param('seasonId') seasonId: string) {
-    return this.domainUnitOfWork.read((store) => store.leaderboard(seasonId));
+  async leaderboard(@Param('seasonId') seasonId: string, @Headers('x-employee-id') employeeId?: string) {
+    const actorId = this.actor(employeeId);
+    return this.domainUnitOfWork.read((store) => store.leaderboard(seasonId, actorId));
   }
 
   @Get('/seasons/:seasonId')
@@ -666,7 +746,7 @@ export class PlatformController {
     const actorId = this.actor(employeeId);
     return this.domainUnitOfWork.read((store) => {
       store.assertSelfOrAdmin(actorId, subjectId);
-      return store.capabilities(subjectId);
+      return store.capabilities(subjectId, { includeDepartmentStats: store.canViewDepartmentStats(actorId, subjectId) });
     });
   }
 
@@ -736,8 +816,10 @@ export class PlatformController {
     const actorId = this.actor(employeeId);
     const context = await this.domainUnitOfWork.read((store) => {
       store.assertSelfOrAdmin(actorId, body.subjectId);
+      const event = store.getEvent(body.eventId, actorId);
+      assertEventSubmissionWindow(event);
       if (body.snapshot.artifactUri) this.assertRegisteredArtifactInStore(store, body.eventId, body.subjectId, body.snapshot.artifactUri);
-      return { version: store.challengeVersionForEvent(body.eventId) };
+      return { event, version: store.challengeVersionForEvent(body.eventId) };
     });
     const snapshot = this.normalizeSnapshot(body.snapshot);
     const version = context.version;
@@ -764,7 +846,9 @@ export class PlatformController {
     const context = await this.domainUnitOfWork.read((store) => {
       store.assertSelfOrAdmin(actorId, body.subjectId);
       store.assertSubmissionSubject(eventId, body.subjectId);
-      return { event: store.getEvent(eventId, actorId), version: store.challengeVersionForEvent(eventId) };
+      const event = store.getEvent(eventId, actorId);
+      assertEventSubmissionWindow(event);
+      return { event, version: store.challengeVersionForEvent(eventId) };
     });
     const event = context.event;
     if (body.artifactBase64 && body.snapshot.workspacePath) throw new BadRequestException('provide either artifactBase64 or workspacePath, not both');
@@ -851,7 +935,9 @@ export class PlatformController {
     const context = await this.domainUnitOfWork.read((store) => {
       store.assertSelfOrAdmin(actorId, body.subjectId);
       store.assertSubmissionSubject(eventId, body.subjectId);
-      return { event: store.getEvent(eventId, actorId), version: store.challengeVersionForEvent(eventId) };
+      const event = store.getEvent(eventId, actorId);
+      assertEventSubmissionWindow(event);
+      return { event, version: store.challengeVersionForEvent(eventId) };
     });
     const event = context.event;
     let snapshot = this.normalizeSnapshot({ ...body.snapshot, ...(this.localGit.enabled ? { workspacePath: undefined } : {}), sourceType: 'GIT_REF' });
@@ -1057,7 +1143,9 @@ export class PlatformController {
     const event = await this.domainUnitOfWork.read((store) => {
       store.assertSelfOrAdmin(actorId, subjectId);
       store.assertSubmissionSubject(eventId, subjectId);
-      return store.getEvent(eventId, actorId);
+      const event = store.getEvent(eventId, actorId);
+      assertEventSubmissionWindow(event);
+      return event;
     });
     if (event.submissionSource !== 'UPLOAD') throw new BadRequestException({ code: 'UPLOAD_SOURCE_NOT_ALLOWED', message: '该训战不接受文件上传' });
     const fileName = String(body.fileName).trim();
@@ -1210,7 +1298,8 @@ export class PlatformController {
     const actorId = this.actor(employeeId);
     return this.domainUnitOfWork.read((store) => {
       store.assertCanViewSubmission(actorId, submissionId);
-      return store.getReport(submissionId);
+      const submission = store.getSubmission(submissionId);
+      return store.getReport(submissionId, { includeDepartmentStats: store.canViewDepartmentStats(actorId, submission.subjectId) });
     });
   }
 }

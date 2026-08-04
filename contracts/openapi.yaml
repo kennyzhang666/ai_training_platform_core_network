@@ -44,6 +44,22 @@ paths:
       responses:
         '200':
           description: 当前用户
+  /api/v1/me/profile:
+    patch:
+      operationId: updateCurrentUserProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMyProfile' }
+      responses:
+        '200':
+          description: current user profile updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { description: invalid nickname or avatar }
+        '403': { description: only the current user may update this profile }
   /api/v1/auth/sso:
     post:
       operationId: syncSsoIdentity
@@ -406,6 +422,33 @@ paths:
             application/json: { schema: { $ref: '#/components/schemas/CodeAgentRuntimeConfig' } }
         '400': { description: 命令或超时配置不合法 }
         '403': { description: 需要全局管理员权限 }
+  /api/v1/admin/code-agent-runtime/diagnostics:
+    get:
+      operationId: getCodeAgentRuntimeDiagnostics
+      summary: 查看 Code Agent 平台与 Worker 配置诊断
+      description: 返回默认配置、平台冻结配置、Worker 环境变量可见配置和运行测试安全开关；Worker 命令行参数不会被 API 读取。
+      responses:
+        '200':
+          description: Code Agent 配置诊断
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/CodeAgentRuntimeDiagnostics' } }
+        '403': { description: 需要全局管理员权限 }
+  /api/v1/admin/code-agent-runtime/test:
+    post:
+      operationId: testCodeAgentRuntime
+      summary: 受控试运行 Code Agent 配置
+      description: 仅在非生产环境并显式设置 CODE_AGENT_RUNTIME_TEST_ENABLED=true 时执行管理员配置的可执行文件；测试使用合成清单，不包含学员交付件，且不经过系统 Shell。
+      requestBody:
+        required: false
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/CodeAgentRuntimeTestInput' } }
+      responses:
+        '200':
+          description: 试运行结果（通过、失败、超时或被安全开关阻断）
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/CodeAgentRuntimeTestResult' } }
+        '400': { description: 命令、任务指令或超时配置不合法 }
+        '403': { description: 需要全局管理员权限 }
   /api/v1/org-units:
     get:
       operationId: listOrgUnits
@@ -504,6 +547,22 @@ paths:
               schema: { $ref: '#/components/schemas/UserPage' }
         '400': { description: 分页或筛选参数不合法 }
         '403': { description: 需要管理员权限或超出管理员组织范围 }
+  /api/v1/users/batch-department:
+    patch:
+      operationId: batchUpdateUserDepartment
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/UserDepartmentBatchPatch' } }
+      responses:
+        '200':
+          description: 批量调整部门完成
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDepartmentBatchResult' }
+        '400': { description: 员工列表或目标部门不合法 }
+        '403': { description: 需要管理员权限或超出管理员组织范围 }
+        '404': { description: 员工或目标部门不存在 }
   /api/v1/users/{userId}:
     get:
       operationId: getUser
@@ -756,7 +815,14 @@ paths:
           required: true
           schema: { type: string }
       responses:
-        '200': { description: 榜单 }
+        '200':
+          description: 仅返回赛季前三名；普通员工只返回昵称，管理员额外返回姓名和工号
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 3
+                items: { $ref: '#/components/schemas/LeaderboardRow' }
   /api/v1/profiles/{subjectId}:
     get:
       operationId: getProfile
@@ -1372,6 +1438,65 @@ components:
             configHash: { type: string, pattern: '^[a-f0-9]{64}$' }
             updatedAt: { type: string, format: date-time }
             updatedBy: { type: string }
+    CodeAgentRuntimeDiagnostics:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, defaults, platform, worker, allowedExecutables, test]
+      properties:
+        schemaVersion: { type: string, enum: ['1.0'] }
+        defaults: { $ref: '#/components/schemas/CodeAgentRuntimeInput' }
+        platform: { $ref: '#/components/schemas/CodeAgentRuntimeConfig' }
+        worker:
+          type: object
+          additionalProperties: false
+          required: [mode, workerId, source, commandConfigured, executable, args, commandPreview, cliOverrideVisible, canResolveExecutable, reason]
+          properties:
+            mode: { type: string, enum: [EMBEDDED, EXTERNAL] }
+            workerId: { type: [string, 'null'] }
+            source: { type: string, enum: [PLATFORM, ENVIRONMENT, CLI_OVERRIDE_UNKNOWN, NONE] }
+            commandConfigured: { type: boolean }
+            executable: { type: [string, 'null'] }
+            args: { type: array, items: { type: string } }
+            commandPreview: { type: [string, 'null'] }
+            cliOverrideVisible: { type: boolean, enum: [false] }
+            canResolveExecutable: { type: boolean }
+            reason: { type: string }
+        allowedExecutables: { type: array, items: { type: string } }
+        test:
+          type: object
+          additionalProperties: false
+          required: [enabled, maxTimeoutSeconds, canExecute, reason]
+          properties:
+            enabled: { type: boolean }
+            maxTimeoutSeconds: { type: integer, minimum: 10, maximum: 300 }
+            canExecute: { type: boolean }
+            reason: { type: string }
+    CodeAgentRuntimeTestInput:
+      type: object
+      additionalProperties: false
+      properties:
+        commandLine: { type: string, maxLength: 4096 }
+        prompt: { type: string, maxLength: 16000 }
+        timeoutSeconds: { type: integer, minimum: 60, maximum: 21600 }
+    CodeAgentRuntimeTestResult:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, status, message, executable, args, workingDirectory, manifestPath, startedAt, finishedAt, durationMs, exitCode, signal, stdout, stderr]
+      properties:
+        schemaVersion: { type: string, enum: ['1.0'] }
+        status: { type: string, enum: [PASS, FAIL, BLOCKED, TIMEOUT] }
+        message: { type: string }
+        executable: { type: [string, 'null'] }
+        args: { type: array, maxItems: 64, items: { type: string } }
+        workingDirectory: { type: string }
+        manifestPath: { type: [string, 'null'] }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        durationMs: { type: integer, minimum: 0 }
+        exitCode: { type: [integer, 'null'] }
+        signal: { type: [string, 'null'] }
+        stdout: { type: string, maxLength: 32768 }
+        stderr: { type: string, maxLength: 32768 }
     OrgUnitInput:
       type: object
       required: [id, name]
@@ -1443,10 +1568,38 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [role, scopeOrgPath]
+              required: [role, scopeOrgPath]
             properties:
               role: { type: string }
               scopeOrgPath: { type: string }
+    UserDepartmentBatchPatch:
+      type: object
+      additionalProperties: false
+      required: [userIds, orgUnitId]
+      properties:
+        userIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, minLength: 1 }
+        orgUnitId: { type: string, description: 目标部门编号；仅全局管理员可传空字符串解除部门归属 }
+    UserDepartmentBatchResult:
+      type: object
+      additionalProperties: false
+      required: [requested, updated]
+      properties:
+        requested: { type: integer, minimum: 1 }
+        updated:
+          type: array
+          items: { $ref: '#/components/schemas/User' }
+    UpdateMyProfile:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        nickname: { type: [string, 'null'], maxLength: 32, description: employee display nickname; null clears it }
+        avatarDataUrl: { type: [string, 'null'], maxLength: 349551, description: validated PNG JPEG or WebP data URL; null clears it }
     User:
       type: object
       additionalProperties: false
@@ -1455,6 +1608,8 @@ components:
         id: { type: string }
         employeeNo: { type: string }
         name: { type: string }
+        nickname: { type: string }
+        avatarDataUrl: { type: string, description: validated avatar data URL }
         orgUnitId: { type: string }
         orgPath: { type: string }
         departmentHint: { type: string }
@@ -1997,6 +2152,21 @@ components:
         aggregate: { type: object, additionalProperties: true }
         profiles: { type: array, items: { type: object, additionalProperties: true } }
         profilePageInfo: { $ref: '#/components/schemas/ListPageInfo' }
+    LeaderboardRow:
+      type: object
+      additionalProperties: false
+      required: [rank, nickname, score, points, total, submissions, isSelf]
+      properties:
+        rank: { type: integer, minimum: 1, maximum: 3 }
+        nickname: { type: string, description: 榜单公开展示昵称；未设置时返回未设置昵称 }
+        score: { type: number, description: 赛季累计成绩 }
+        points: { type: integer, minimum: 0, description: 赛季积分 }
+        total: { type: integer, minimum: 0, description: 赛季积分兼容字段 }
+        submissions: { type: integer, minimum: 0, description: 已计入榜单的参赛场次 }
+        isSelf: { type: boolean, description: 当前登录员工是否为该榜单项 }
+        subjectId: { type: string, description: 仅管理员可见的用户标识 }
+        name: { type: string, description: 仅管理员可见的真实姓名 }
+        employeeNo: { type: string, description: 仅管理员可见的工号 }
     CapabilityProfile:
       type: object
       required: [subjectId, summary, dimensions, domains, skills, trend, capabilityCatalogVersion]
@@ -2005,7 +2175,7 @@ components:
         capabilityCatalogVersion: { type: string, example: '1.0' }
         summary:
           type: object
-          required: [gradedSubmissions, overallAverage, latestTotal, delta, strongestDimension, focusDimension, strongestDomain, focusDomain, totalCapabilityDomains, evaluatedCapabilityDomains]
+          required: [gradedSubmissions, overallAverage, latestTotal, delta, strongestDimension, focusDimension, strongestDomain, focusDomain, totalCapabilityDomains, evaluatedCapabilityDomains, departmentStatsVisible]
           properties:
             gradedSubmissions: { type: integer, minimum: 0 }
             overallAverage: { type: [number, 'null'], minimum: 0, maximum: 100 }
@@ -2020,6 +2190,10 @@ components:
             totalSkillItems: { type: integer, minimum: 0 }
             evaluatedSkillItems: { type: integer, minimum: 0 }
             zoneStats: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+            departmentAverage: { type: [number, 'null'], minimum: 0, maximum: 100, description: 普通员工无权限时返回 null，前端显示 * }
+            departmentMedian: { type: [number, 'null'], minimum: 0, maximum: 100, description: 普通员工无权限时返回 null，前端显示 * }
+            departmentPercentile: { type: [number, 'null'], minimum: 0, maximum: 100, description: 普通员工无权限时返回 null，前端显示 * }
+            departmentStatsVisible: { type: boolean, description: 是否有权查看部门平均、中位数和百分位等统计 }
         dimensions:
           type: array
           items: { $ref: '#/components/schemas/CapabilityDimension' }
@@ -2038,6 +2212,16 @@ components:
         recommendations: { type: array, items: { type: string } }
         trend: { type: array, items: { type: object, additionalProperties: true } }
         zoneStats: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        departmentComparison:
+          type: object
+          required: [orgPath, participantCount, average, median, percentile]
+          properties:
+            orgPath: { type: string }
+            participantCount: { type: integer, minimum: 0 }
+            average: { type: [number, 'null'], minimum: 0, maximum: 100 }
+            median: { type: [number, 'null'], minimum: 0, maximum: 100 }
+            percentile: { type: [number, 'null'], minimum: 0, maximum: 100 }
+        departmentStatsVisible: { type: boolean }
         lastUpdated: { type: [string, 'null'], format: date-time }
     CapabilityDimension:
       type: object

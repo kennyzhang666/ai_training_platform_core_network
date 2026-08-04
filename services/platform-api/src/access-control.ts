@@ -31,6 +31,15 @@ export function resolveAdminAccess(user: AppUser): AdminAccess {
   throw new ForbiddenException('administrator role is required');
 }
 
+/** Return whether a user retains effective global administration access. */
+export function hasGlobalAdminAccess(user: AppUser): boolean {
+  try {
+    return resolveAdminAccess(user).level === 'GLOBAL';
+  } catch {
+    return false;
+  }
+}
+
 export function assertAdminOrgScope(access: AdminAccess, targetOrgPath: string): void {
   if (access.level === 'GLOBAL' || access.scopeOrgPaths.some((scope) => orgPathIncludes(scope, targetOrgPath))) return;
   throw new ForbiddenException('organization scope does not allow this operation');

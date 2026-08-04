@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PlatformStore } from '../src/store';
 
 const uploadSnapshot = {
@@ -16,6 +16,62 @@ test('database startup can opt out of local demo fixtures', () => {
   const store = new PlatformStore({ dataFile: ':memory:', seed: false });
   assert.deepEqual(store.exportState().users, []);
   assert.deepEqual(store.exportState().events, []);
+});
+
+test('file startup compacts the legacy local fixture to the supported demo roster', () => {
+  const dataFile = join(__dirname, '..', 'tmp', `store-minimal-${process.pid}-${Date.now()}.json`);
+  mkdirSync(dirname(dataFile), { recursive: true });
+  try {
+    const legacy = new PlatformStore(':memory:').exportState();
+    legacy.participants = [
+      { eventId: 'event-local', subjectId: 'w00124', orgPathSnapshot: '/1/12/125/', importedAt: '2026-08-01T00:00:00.000Z' },
+      { eventId: 'event-local', subjectId: 'w00127', orgPathSnapshot: '/1/12/125/', importedAt: '2026-08-01T00:00:00.000Z' },
+    ];
+    writeFileSync(dataFile, JSON.stringify(legacy), 'utf8');
+    const store = new PlatformStore({ dataFile, seedProfile: 'MINIMAL' });
+    const state = store.exportState();
+    assert.deepEqual(state.orgUnits.map((unit) => unit.id), ['org-root', 'org-125']);
+    assert.deepEqual(state.challenges.map((challenge) => challenge.id), ['parking-fee-01']);
+    assert.deepEqual(state.events.map((event) => event.id), ['event-local']);
+    assert.deepEqual(state.users.map((user) => ({ id: user.id, roles: user.roles })), [
+      { id: 'w00123', roles: ['global_admin'] },
+      { id: 'w00124', roles: ['learner'] },
+      { id: 'w00126', roles: ['learner'] },
+      { id: 'w00133', roles: ['mentor'] },
+    ]);
+    assert.deepEqual(state.users.map((user) => ({ id: user.id, name: user.name })), [
+      { id: 'w00123', name: '本地开发用户' },
+      { id: 'w00124', name: '本地学员 A' },
+      { id: 'w00126', name: '本地学员 B' },
+      { id: 'w00133', name: '本地导师' },
+    ]);
+    assert.deepEqual(state.events[0].accessPolicy, {
+      mode: 'RESTRICTED',
+      subjectIds: ['w00124', 'w00126'],
+      departmentIds: ['org-125'],
+      mentorIds: ['w00133'],
+    });
+    assert.deepEqual(state.participants.map((participant) => participant.subjectId).sort(), ['w00124', 'w00126']);
+  } finally {
+    rmSync(dataFile, { force: true });
+  }
+});
+
+test('deleting the local demo event and challenge keeps the empty state after restart', () => {
+  const dataFile = join(__dirname, '..', 'tmp', `store-empty-demo-${process.pid}-${Date.now()}.json`);
+  mkdirSync(dirname(dataFile), { recursive: true });
+  try {
+    const first = new PlatformStore(dataFile);
+    first.deleteEvent('event-local', 'w00123');
+    first.deleteChallenge('parking-fee-01', 'w00123');
+
+    const second = new PlatformStore(dataFile);
+    assert.deepEqual(second.listEvents('w00123'), []);
+    assert.ok(second.listChallenges('w00123').every((challenge) => challenge.status === 'ARCHIVED'));
+    assert.equal(second.exportState().localDemoSeedEnabled, false);
+  } finally {
+    rmSync(dataFile, { force: true });
+  }
 });
 
 test('file user adapter applies scoped filtering, stable ordering, and pagination', () => {
@@ -39,6 +95,34 @@ test('manual upload submission waits for administrator trigger', () => {
   const run = store.startGrading(submission.id, 'admin-1');
   assert.equal(run.triggerType, 'MANUAL');
   assert.equal(store.getSubmission(submission.id).state, 'QUEUED');
+});
+
+test('submission is rejected outside the event time window', () => {
+  const store = new PlatformStore(':memory:');
+  const current = Date.now();
+  const future = store.createEvent({
+    id: 'event-window-future',
+    challengeVersion: 'parking-fee-01@1',
+    submissionSource: 'UPLOAD',
+    trigger: 'IMPORT',
+    reveal: 'IMMEDIATE',
+    mode: 'WINDOW',
+    startsAt: new Date(current + 60 * 60 * 1000).toISOString(),
+    endsAt: new Date(current + 2 * 60 * 60 * 1000).toISOString(),
+  });
+  const past = store.createEvent({
+    id: 'event-window-past',
+    challengeVersion: 'parking-fee-01@1',
+    submissionSource: 'UPLOAD',
+    trigger: 'IMPORT',
+    reveal: 'IMMEDIATE',
+    mode: 'WINDOW',
+    startsAt: new Date(current - 2 * 60 * 60 * 1000).toISOString(),
+    endsAt: new Date(current - 60 * 60 * 1000).toISOString(),
+  });
+  const snapshot = { ...uploadSnapshot, submittedAt: new Date(current).toISOString() };
+  assert.throws(() => store.createSubmission(future.id, 'w00123', snapshot), /window has not started/);
+  assert.throws(() => store.createSubmission(past.id, 'w00123', snapshot), /window has ended/);
 });
 
 test('manual grading and external input preparation honor exact submission selection', () => {
@@ -111,6 +195,39 @@ test('global administrator can maintain departments and mentors while scoped ope
   assert.equal(mentor.orgPath, '/1/12/125/org-new/');
   assert.deepEqual(store.updateUser(mentor.id, { orgUnitId: unit.id, roles: ['mentor'] }, 'w00123').roles, ['mentor']);
   assert.equal(store.updateOrgUnit(unit.id, { name: '新业务组（调整）' }, 'w00123').name, '新业务组（调整）');
+});
+
+test('global administrator cannot remove their own global administrator access', () => {
+  const store = new PlatformStore(':memory:');
+  assert.throws(
+    () => store.updateUser('w00123', { roles: ['learner'] }, 'w00123'),
+    ForbiddenException,
+  );
+
+  const retained = store.updateUser('w00123', { roles: ['global_admin'], roleBindings: [] }, 'w00123');
+  assert.deepEqual(retained.roles, ['global_admin']);
+  assert.ok(retained.roleBindings?.some((binding) => binding.role === 'global_admin' && binding.scopeOrgPath === '/'));
+});
+
+test('employees can update and clear only their own profile fields', () => {
+  const store = new PlatformStore(':memory:');
+  const avatarDataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+  const updated = store.updateUserProfile('w00124', { nickname: 'Parking Hero', avatarDataUrl }, 'w00124');
+  assert.equal(updated.nickname, 'Parking Hero');
+  assert.equal(updated.avatarDataUrl, avatarDataUrl);
+  assert.throws(() => store.updateUserProfile('w00124', { nickname: 'Nope' }, 'w00123'), /只能修改自己的个人资料/);
+  const cleared = store.updateUserProfile('w00124', { nickname: null, avatarDataUrl: null }, 'w00124');
+  assert.equal(cleared.nickname, undefined);
+  assert.equal(cleared.avatarDataUrl, undefined);
+});
+
+test('an empty department can be deleted after all employees are unassigned', () => {
+  const store = new PlatformStore({ dataFile: ':memory:', seedProfile: 'MINIMAL' });
+  for (const user of store.exportState().users) {
+    store.updateUser(user.id, { orgUnitId: '', roles: user.roles }, 'w00123');
+  }
+  store.deleteOrgUnit('org-125', 'w00123');
+  assert.deepEqual(store.exportState().orgUnits.map((unit) => unit.id), ['org-root']);
 });
 
 test('department deletion protects the organization tree and assigned employees', () => {
@@ -476,6 +593,22 @@ test('a capability profile only aggregates the subject own deliveries', () => {
   assert.equal(adminCapabilities.summary.gradedSubmissions, 0);
 });
 
+test('department capability statistics require an in-scope administrator', () => {
+  const store = new PlatformStore(':memory:');
+  const employee = store.capabilities('w00124', { includeDepartmentStats: false }) as {
+    summary: { departmentStatsVisible: boolean; departmentAverage: number | null; departmentMedian: number | null; departmentPercentile: number | null };
+    dimensions: Array<{ peerMedianPercent: number | null; peerCount: number; vsPeerMedian: number | null }>;
+  };
+  assert.equal(store.canViewDepartmentStats('w00124', 'w00124'), false);
+  assert.equal(store.canViewDepartmentStats('w00134', 'w00124'), true);
+  assert.equal(store.canViewDepartmentStats('w00123', 'w00124'), true);
+  assert.equal(employee.summary.departmentStatsVisible, false);
+  assert.equal(employee.summary.departmentAverage, null);
+  assert.equal(employee.summary.departmentMedian, null);
+  assert.equal(employee.summary.departmentPercentile, null);
+  assert.ok(employee.dimensions.every((item) => item.peerMedianPercent === null && item.peerCount === 0 && item.vsPeerMedian === null));
+});
+
 // Season points are derived from the event rank. Two identical scores have the
 // same rank, so they must earn the same points regardless of tie-break order.
 test('equal event scores share a rank and earn the same season points', () => {
@@ -484,8 +617,8 @@ test('equal event scores share a rank and earn the same season points', () => {
   store.createSeason({ id: 'season-tie', name: '并列赛季', eventIds: [importEvent.id], status: 'RUNNING' }, 'admin-test');
   const template = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'contracts', 'examples', 'evaluation-result.valid.json'), 'utf8')) as Record<string, any>;
 
-  const subjects = ['w00124', 'w00126', 'w00125'] as const;
-  const totals = [70, 70, 40];
+  const subjects = ['w00124', 'w00126', 'w00125', 'w00127'] as const;
+  const totals = [70, 70, 40, 30];
   subjects.forEach((subjectId, index) => {
     const snapshotHash = String(index + 1).repeat(64).slice(0, 64);
     const artifactHash = String((index + 5) % 10).repeat(64).slice(0, 64);
@@ -514,8 +647,21 @@ test('equal event scores share a rank and earn the same season points', () => {
   const points = new Map(board.map((row) => [row.subjectId, row.points]));
   assert.equal(points.get('w00124'), points.get('w00126'));
   assert.equal(points.get('w00124'), 100);
-  // Ranks are 1, 1, 3 of 3 participants: round(100 * (1 - 2/3)) = 33.
-  assert.equal(points.get('w00125'), 33);
+  // Ranks are 1, 1, 3, 4 of 4 participants: round(100 * (1 - 2/4)) = 50.
+  assert.equal(points.get('w00125'), 50);
+
+  const employeeBoard = store.leaderboard('season-tie', 'w00124') as Array<Record<string, unknown>>;
+  assert.equal(employeeBoard.length, 3);
+  assert.equal(employeeBoard[0].nickname, '未设置昵称');
+  assert.equal(employeeBoard[0].subjectId, undefined);
+  assert.equal(employeeBoard[0].name, undefined);
+  assert.equal(employeeBoard[0].employeeNo, undefined);
+
+  const adminBoard = store.leaderboard('season-tie', 'w00123') as Array<Record<string, unknown>>;
+  assert.equal(adminBoard.length, 3);
+  assert.equal(adminBoard[0].subjectId, 'w00124');
+  assert.equal(adminBoard[0].name, '本地学员 A');
+  assert.equal(adminBoard[0].employeeNo, 'w00124');
 });
 
 // Every attempt must keep its own immutable record. The grader derives its

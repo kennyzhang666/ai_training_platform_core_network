@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CAPABILITY_DOMAINS, CAPABILITY_ITEMS, CAPABILITY_ITEM_BY_KEY } from '../src/capability-catalog';
 
-test('v1 capability catalog keeps eight domains and sixteen traceable rubric points', () => {
+test('v1.1 capability catalog keeps eight domains and sixteen traceable rubric points', () => {
   assert.equal(CAPABILITY_DOMAINS.length, 8);
   assert.equal(CAPABILITY_ITEMS.length, 16);
   for (const domain of CAPABILITY_DOMAINS) {

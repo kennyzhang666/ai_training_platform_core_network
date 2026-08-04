@@ -126,6 +126,8 @@ export interface UserPatch {
   orgUnitId?: string;
   roles?: readonly string[];
   roleBindings?: readonly { role: string; scopeOrgPath: string }[];
+  nickname?: string | null;
+  avatarDataUrl?: string | null;
 }
 
 export interface AuditAppendInput {
