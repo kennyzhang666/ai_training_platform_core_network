@@ -15,6 +15,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = join(root, 'apps', 'web', 'public', 'evaluation-engine-development-kit.md');
 const zipOutput = join(root, 'apps', 'web', 'public', 'evaluation-engine-development-kit.zip');
 
+// The bundle version must follow the release, not a literal that silently goes
+// stale one version after somebody edits it.
+const kitVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+
 const explicitFiles = [
   'AGENTS.md',
   'README.md',
@@ -70,7 +74,7 @@ const sections = files.map((path) => {
 const outputText = [
   '# AI 评测引擎开发资料包',
   '',
-  '> 版本：0.8.1。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。',
+  `> 版本：${kitVersion}。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。`,
   '',
   '## 使用方式',
   '',
@@ -110,6 +114,11 @@ const zipEntries = [
 ];
 
 const python = process.env.PYTHON ?? (existsSync(join(root, '.venv', 'Scripts', 'python.exe')) ? join(root, '.venv', 'Scripts', 'python.exe') : 'python');
+// The archive must be reproducible: identical inputs have to produce identical
+// bytes. `ZipFile.write` stamps each entry with the source file's mtime and
+// `writestr` stamps GUIDE.md with the current time, so every build produced a
+// new binary and dirtied the working tree even when nothing had changed.
+// Pin the DOS epoch, a fixed mode and a fixed entry order instead.
 const zipBuild = [
   'import json, pathlib, sys, zipfile',
   'payload = json.loads(sys.argv[1])',
@@ -117,10 +126,18 @@ const zipBuild = [
   'output = pathlib.Path(payload["output"])',
   'output.parent.mkdir(parents=True, exist_ok=True)',
   'if output.exists(): output.unlink()',
-  'with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:',
-  '    for item in payload["entries"]:',
-  '        archive.write(root / item["source"], item["target"] )',
-  '    archive.writestr("GUIDE.md", payload["guide"] + "\\n")',
+  'EPOCH = (1980, 1, 1, 0, 0, 0)',
+  'def entry(name):',
+  '    info = zipfile.ZipInfo(name, date_time=EPOCH)',
+  '    info.compress_type = zipfile.ZIP_DEFLATED',
+  '    info.create_system = 3',
+  '    info.external_attr = 0o644 << 16',
+  '    return info',
+  'items = sorted(payload["entries"], key=lambda item: item["target"])',
+  'with zipfile.ZipFile(output, "w") as archive:',
+  '    for item in items:',
+  '        archive.writestr(entry(item["target"]), (root / item["source"]).read_bytes())',
+  '    archive.writestr(entry("GUIDE.md"), payload["guide"].encode("utf-8") + b"\\n")',
 ].join('\n');
 execFileSync(python, ['-c', zipBuild, JSON.stringify({ root, output: zipOutput, entries: zipEntries, guide })], { encoding: 'utf8', cwd: root });
 console.log(`evaluation engine kit: ${relative(root, output)}`);
