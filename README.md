@@ -1,6 +1,6 @@
 # 分组核心网AI能力提升平台
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.1`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.2`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
 
 ## 当前能力
 
@@ -90,7 +90,7 @@ pnpm acceptance:local
 - [`CHANGELOG.md`](CHANGELOG.md)：逐版本详细记录；
 - [`contracts/openapi.yaml`](contracts/openapi.yaml)：API 契约；
 - [`docs/evaluation-engine-protocol.md`](docs/evaluation-engine-protocol.md)：Worker、Code Agent 和评测引擎协议；
-+ [`docs/v0.8-development-manual.md`](docs/v0.8-development-manual.md)：v0.8.1 评测运行环境与管理运营开发手册；
+- [`docs/v0.8-development-manual.md`](docs/v0.8-development-manual.md)：v0.8.x 评测运行环境、管理运营与身份层约束开发手册；
 - [`docs/submission-contract.md`](docs/submission-contract.md)：交付目录契约；
 - [`docs/capability-model.md`](docs/capability-model.md)：能力模型；
 - [`AI训战平台设计方案.html`](AI训战平台设计方案.html)：原始产品设计参考。

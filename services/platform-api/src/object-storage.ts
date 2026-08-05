@@ -160,7 +160,6 @@ export class LocalObjectStorage implements ObjectStorage {
     if (session.completed) return { size: session.completed.size, sha256: session.completed.sha256 };
     if (session.uploaded) throw new BadRequestException('upload has already been received');
     if (!bytes.length || bytes.length !== session.declaredSize) throw new BadRequestException('uploaded size does not match the declared size');
-    if (bytes.length > session.declaredSize) throw new BadRequestException('uploaded object is too large');
     const content = Buffer.from(bytes);
     const metadata = { size: content.length, sha256: createHash('sha256').update(content).digest('hex') };
     await writeFile(session.stagingPath, content, { flag: 'wx' });

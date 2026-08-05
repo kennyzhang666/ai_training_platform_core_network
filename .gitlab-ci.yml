@@ -16,6 +16,10 @@ default:
     - corepack prepare pnpm@11.8.0 --activate
     - pnpm config set store-dir .pnpm-store
     - pnpm install --frozen-lockfile
+    # `postinstall` only runs when the install actually does work. A warm
+    # node_modules would otherwise leave the Prisma client ungenerated and
+    # every job that imports it would fail at runtime.
+    - pnpm --filter @ai-training/platform-api prisma:generate
 
 lint:
   stage: lint

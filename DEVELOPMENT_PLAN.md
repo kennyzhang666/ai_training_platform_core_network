@@ -1,9 +1,9 @@
 # AI 能力训战平台开发总览
 
-> 当前版本：`v0.8.1`
+> 当前版本：`v0.8.2`
 > 更新日期：2026-08-05
-> 当前阶段：v0.8.1 管理端交互状态和赛题生命周期修复已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
-> 发布范围：在 v0.8.0 评测运行环境和管理运营纵切面基础上，补齐禁用控件鼠标反馈、垃圾箱赛题永久删除、审计保护和对应契约/回归测试。
+> 当前阶段：v0.8.2 全局代码评审缺陷修复已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
+> 发布范围：在 v0.8.1 基础上修复 OIDC `ES256` 验签、JWKS 密钥轮换、Prisma Client 生成缺失和身份 Guard 健康检查豁免范围，不含新功能。
 > 文档职责：项目架构、整体设计、版本沿革、当前边界、后续路线和 Codex 交接入口
 
 ## 1. 如何使用和维护本文档
@@ -200,7 +200,7 @@ Platform API 校验、重算、幂等保存
 
 员工只能看到按训战揭晓策略开放的结果；管理员在权限范围内可进行运营和复核。
 
-## 5. 当前实现状态（v0.8.1）
+## 5. 当前实现状态（v0.8.2）
 
 ### 5.1 已可本地验收
 
@@ -305,6 +305,24 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 - OpenAPI、独立评测资料包、中文错误提示和存储/API 回归测试已同步。
 
 版本验证记录：`pnpm --filter @ai-training/platform-api test`（123 项，122 通过、1 项显式跳过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm lint`、`pnpm --filter @ai-training/web build` 和 `git diff --check` 通过；根目录、Web、API 版本均为 `0.8.1`。
+
+### 5.6 v0.8.2 发布状态（2026-08-05）
+
+本次为全局代码评审后的缺陷修复版本，不含新功能。四个问题都属于「代码看起来正确、但在真实目标环境才会暴露」的类型，因此每项都补齐了能复现该缺陷的回归测试：
+
+- **OIDC `ES256` 验签恒失败**（`services/platform-api/src/identity.ts`）。`ES256` 一直在允许算法列表中，但 JOSE 的裸 `r||s` 签名转 DER 时对长度使用了长格式（`0x30 0x81 len`）。ES256 的 DER body 恒小于 128 字节，而 OpenSSL 只接受该区间的最短长度格式，因此每一个 `ES256` 令牌都会以 `identity token signature is invalid` 被拒。缺陷「失败关闭」，不构成绕过，但任何使用 EC 签名密钥的身份提供方都无法登录。已改为按长度选择最短 DER 编码，并新增使用真实 P-256 密钥对的回归测试；同时验证长度合法的伪造签名仍被拒绝。
+- **JWKS 密钥轮换期间认证中断**（同文件）。签名密钥集缓存 5 分钟且遇到未知 `kid` 直接 401，身份提供方轮换密钥后全部请求会失败到缓存过期。已改为未知 `kid` 时强制刷新一次缓存后再判定，并新增轮换回归测试（断言只额外拉取一次、真正未知的 `kid` 仍被拒）。
+- **Prisma Client 未生成导致全新克隆和 CI 失败**。`pnpm install` 之后没有任何环节执行 `prisma generate`，`pnpm test` 会在 `repository-factory.test.ts` 抛出 `@prisma/client did not initialize yet`。已为 API 包增加 `postinstall` 钩子；由于 `postinstall` 只在安装真正执行时触发，GitLab CI 的 `before_script` 另外显式执行一次 `prisma:generate`，覆盖 `node_modules` 命中缓存的情况。
+- **身份 Guard 健康检查豁免过宽**（`identity-guard.ts`）。原先按 `url.endsWith('/health')` 放行，任何未来以 `/health` 结尾的路由都会被无声地放进免认证范围。已改为精确匹配 `/api/v1/health`（先剥离查询串和结尾斜杠）。
+
+另清理了本地对象存储 `put` 中位于严格相等校验之后、永远不可达的大小分支，并修正了 `DEVELOPMENT_PLAN.md` / `README.md` 专项文档索引中 `+` 误写为 `-` 的列表项与缺失的标题前空行。
+
+本轮没有数据库迁移、没有 API 契约变更，也没有 JSON Schema 变更；`contracts/openapi.yaml` 与实现保持一致。
+
+版本验证记录：`pnpm lint`、`pnpm test`（125 项，124 通过、1 项显式跳过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm build`、`pnpm acceptance:local`（1/1）和 `git diff --check` 全部通过；根目录、Web、API 版本均为 `0.8.2`。两个身份缺陷的回归测试均已用「先还原缺陷、确认测试失败，再恢复修复、确认测试通过」的方式验证过其有效性。
+
+尚未解决的风险（本轮未改变）：服务端仍未对赛题富文本做白名单清洗，浏览器端 `sanitizeRichText` 不构成服务端保证；Worker 的 `safeExtract` 不再独立校验解压后体积，依赖 API 入库前的校验；真实目标环境的身份网关、Worker 服务身份、对象存储策略和沙箱资源限制仍待验收。
+
 ## 6. 版本沿革
 
 详细变更和修复见 `CHANGELOG.md`，这里仅保留交接所需的架构演进。
@@ -322,6 +340,7 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 | `v0.7.0` | 2026-08-04 | 发布生产数据与身份底座纵切面、规范化 PostgreSQL 迁移、W1 组织/人员 Repository、持久化上传会话、CAS 写入保护及备份恢复演练；目标环境上线门禁仍待执行。 |
 | `v0.8.0` | 2026-08-05 | 发布正式评测运行环境纵切面、OpenCode 配置诊断与测试、Worker 日志/交互记录、独立评测引擎资料包、批量调部门和品牌体验更新；生产沙箱与目标环境门禁仍待复验。 |
 | `v0.8.1` | 2026-08-05 | 修复禁用控件鼠标反馈，新增垃圾箱赛题永久删除、关联训战保护、审计记录及对应契约和回归测试。 |
+| `v0.8.2` | 2026-08-05 | 全局代码评审缺陷修复：修复 OIDC `ES256` 验签恒失败、JWKS 密钥轮换认证中断、Prisma Client 生成缺失导致的 CI 失败，并收紧身份 Guard 健康检查豁免范围。 |
 
 ## 7. 后续开发路线
 
@@ -388,6 +407,16 @@ v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录
 2. 接入真实 OIDC/JWKS 与 Worker 服务身份，执行组织/角色/场次访问矩阵及审计留存验收；
 3. 在目标环境复验 PostgreSQL 迁移、JSON 导入、备份恢复、并发租约，并补容量压测和安全扫描；
 4. 复核 OpenAPI、Schema、迁移、CHANGELOG 和回滚清单后，在目标环境完成 v0.8.x 的身份、对象存储、Worker 沙箱和回滚门禁。
+
+### 8.1 v0.8.2 评审提出的优先事项
+
+以下条目来自 v0.8.2 的全局代码评审，按建议顺序排列。前两项是本轮发现但未修复的真实缺口，应优先于 §7.3 的功能开发。
+
+1. **服务端富文本白名单清洗（安全，最高优先级）。** 赛题详情 `description` 以 `dangerouslySetInnerHTML` 渲染给全体参与者，但清洗只发生在浏览器端的 `apps/web/src/rich-text.ts`。任何能调用赛题写接口的账号都可以绕过前端直接 POST 原始 HTML，存储的内容会原样返回给所有人。应在 API 写入路径上做同一套标签/属性白名单清洗，并对已有数据做一次性回填；前端清洗保留为纵深防御，但不能当作保证。§7.3 已列出该项，建议提前到下一个版本。
+2. **Worker 解压的独立体积上限。** `scripts/evaluation-worker.mjs` 的 `safeExtract` 正确拒绝了绝对路径、`..` 和符号链接，但没有自己的解压后体积上限，完全依赖 API 入库前的 `validateArchive`。Worker 是独立进程且未来会从对象存储直接物化，应在解压侧也强制 `maxFiles` / `maxExpandedBytes`，让防护不依赖调用方。
+3. **拆分 `store.ts` 与 `admin.tsx`。** 两个文件分别为 240KB 和 228KB，`PlatformStore` 同时承担状态机、授权、审计和持久化四种职责。这是当前最大的可维护性风险，也是 §7.3 前端模块化的前置条件。建议按领域（赛题/训战、提交/评测、组织/人员、报告/画像）逐个切出窄接口，每次迁移保持测试绿色，不要一次性重写。
+4. **补齐身份层的算法矩阵测试。** 本轮的 `ES256` 缺陷之所以能发布，是因为 `identity.test.ts` 只覆盖了 `RS256`。允许列表中的每个算法（`RS256`/`RS384`/`RS512`/`ES256`）都应有一条使用真实密钥对的正向用例，新增算法时同步补充。
+5. **让契约测试覆盖 `postinstall` 之类的环境前置。** 建议在 CI 增加一个从干净容器执行 `pnpm install && pnpm test` 的作业，避免再次出现「本地绿、全新克隆红」的偏差。
 
 开始任务前还应检查：
 
@@ -471,7 +500,7 @@ git diff --check
 - `contracts/evaluation-contract-catalog.json`：Git 固定的评测输入/输出下拉目录；
 - `docs/evaluation-contract-authoring.md`：管理员与 AI 开发赛题时的契约选择、示例和配置说明；
 - `docs/evaluation-engine-protocol.md`：评测引擎、Worker 与 Code Agent ABI；
-+ `docs/v0.8-development-manual.md`：v0.8.1 评测运行环境、Worker 可观测性和管理运营开发手册；
+- `docs/v0.8-development-manual.md`：v0.8.x 评测运行环境、Worker 可观测性、管理运营和身份层约束开发手册；
 - `docs/submission-contract.md`：赛题交付目录规范；
 - `docs/capability-model.md`：四维、16 点与八能力域计算模型；
 - `docs/architecture/grading-flow.md`：当前评测数据流；

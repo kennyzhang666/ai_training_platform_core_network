@@ -111,9 +111,9 @@ interface JsonWebKeySet { keys: Array<Record<string, unknown>> }
 
 let jwksCache: { url: string; expiresAt: number; value: JsonWebKeySet } | undefined;
 
-async function loadJwks(url: string): Promise<JsonWebKeySet> {
+async function loadJwks(url: string, forceRefresh = false): Promise<JsonWebKeySet> {
   const cached = jwksCache;
-  if (cached && cached.url === url && cached.expiresAt > Date.now()) return cached.value;
+  if (!forceRefresh && cached && cached.url === url && cached.expiresAt > Date.now()) return cached.value;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
@@ -142,8 +142,12 @@ function ecdsaJoseToDer(signature: Buffer): Buffer {
     return Buffer.concat([Buffer.from([0x02, value.length]), value]);
   };
   const body = Buffer.concat([integer(signature.subarray(0, half)), integer(signature.subarray(half))]);
-  if (body.length >= 128) return Buffer.concat([Buffer.from([0x30, 0x82, body.length >> 8, body.length & 0xff]), body]);
-  return Buffer.concat([Buffer.from([0x30, 0x81, body.length]), body]);
+  // DER requires the shortest possible length encoding. OpenSSL rejects the
+  // long form for lengths below 128, so an ES256 signature (body <= 72 bytes)
+  // must use the single-byte short form or verification always fails.
+  if (body.length < 128) return Buffer.concat([Buffer.from([0x30, body.length]), body]);
+  if (body.length < 256) return Buffer.concat([Buffer.from([0x30, 0x81, body.length]), body]);
+  return Buffer.concat([Buffer.from([0x30, 0x82, body.length >> 8, body.length & 0xff]), body]);
 }
 
 async function verifyOidcToken(token: string, config: IdentityConfig): Promise<AuthenticatedActor> {
@@ -155,8 +159,15 @@ async function verifyOidcToken(token: string, config: IdentityConfig): Promise<A
   const kid = headerPart.kid;
   if (typeof algorithm !== 'string' || typeof kid !== 'string') unauthorized('identity token header is incomplete');
   if (!['RS256', 'RS384', 'RS512', 'ES256'].includes(algorithm)) unauthorized('identity token algorithm is not allowed');
-  const jwks = await loadJwks(config.oidcJwksUrl!);
-  const jwk = jwks.keys.find((key) => key.kid === kid);
+  let jwks = await loadJwks(config.oidcJwksUrl!);
+  let jwk = jwks.keys.find((key) => key.kid === kid);
+  if (!jwk) {
+    // The issuer may have rotated signing keys since the last fetch. Refresh
+    // once before rejecting, otherwise every request fails for the remaining
+    // cache lifetime after a rotation.
+    jwks = await loadJwks(config.oidcJwksUrl!, true);
+    jwk = jwks.keys.find((key) => key.kid === kid);
+  }
   if (!jwk) unauthorized('identity token signing key is unknown');
   let publicKey: ReturnType<typeof createPublicKey>;
   try {

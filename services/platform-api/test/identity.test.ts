@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { generateKeyPairSync, createSign } from 'node:crypto';
+import { generateKeyPairSync, createSign, sign as signBuffer } from 'node:crypto';
 import { authenticateHeaders, loadIdentityConfig, resetIdentityKeyCache, trustedGatewaySignature, IdentityConfig } from '../src/identity';
 
 test('production identity configuration cannot silently fall back to local headers', () => {
@@ -73,6 +73,98 @@ test('OIDC mode verifies issuer, audience, expiry, key id and signature', async 
     assert.equal(actor.department, '/test/');
     await assert.rejects(authenticateHeaders({ authorization: 'Bearer invalid.token.value' }, config), /malformed/);
     await assert.rejects(authenticateHeaders({ authorization: `Bearer ${signingInput}.AA` }, config), /signature is invalid/);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    resetIdentityKeyCache();
+  }
+});
+
+/**
+ * ES256 is advertised in the accepted algorithm list, so it must actually
+ * verify. JOSE carries the signature as raw r||s and OpenSSL expects DER with
+ * the shortest possible length encoding; a long-form length made every ES256
+ * token fail closed with "signature is invalid".
+ */
+test('OIDC mode accepts an ES256 token signed by the published JWKS key', async () => {
+  resetIdentityKeyCache();
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const jwk = publicKey.export({ format: 'jwk' }) as Record<string, unknown>;
+  jwk.kid = 'ec-key';
+  const server = createServer((request, response) => {
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ keys: [jwk] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const config: IdentityConfig = {
+    mode: 'OIDC', allowAnonymousLocal: false, oidcIssuer: 'https://issuer.test', oidcAudience: 'platform-api',
+    oidcJwksUrl: `http://127.0.0.1:${address.port}/jwks`, oidcEmployeeClaim: 'employeeNo', oidcNameClaim: 'name', oidcDepartmentClaim: 'department',
+    gatewayMaxAgeSeconds: 90, clockSkewSeconds: 30,
+  };
+  const header = base64Url(JSON.stringify({ alg: 'ES256', typ: 'JWT', kid: 'ec-key' }));
+  const payload = base64Url(JSON.stringify({ iss: config.oidcIssuer, aud: config.oidcAudience, employeeNo: 'worker-77', name: 'EC Worker', department: '/test/', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 60 }));
+  const signingInput = `${header}.${payload}`;
+  const signature = signBuffer('sha256', Buffer.from(signingInput), { key: privateKey, dsaEncoding: 'ieee-p1363' });
+  const token = `${signingInput}.${signature.toString('base64url')}`;
+  try {
+    const actor = await authenticateHeaders({ authorization: `Bearer ${token}` }, config);
+    assert.equal(actor.authenticationType, 'OIDC');
+    assert.equal(actor.employeeNo, 'worker-77');
+    assert.equal(actor.department, '/test/');
+    // A forged r||s of the correct length must still be rejected.
+    const forged = `${signingInput}.${Buffer.alloc(64, 7).toString('base64url')}`;
+    await assert.rejects(authenticateHeaders({ authorization: `Bearer ${forged}` }, config), /signature is invalid/);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    resetIdentityKeyCache();
+  }
+});
+
+/**
+ * The JWKS response is cached for five minutes. Without a forced refresh on an
+ * unknown key id, every request fails for the rest of that window as soon as
+ * the issuer rotates its signing keys.
+ */
+test('an unknown key id refreshes the cached JWKS instead of failing until it expires', async () => {
+  resetIdentityKeyCache();
+  const first = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const rotated = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const firstJwk = { ...(first.publicKey.export({ format: 'jwk' }) as Record<string, unknown>), kid: 'key-1' };
+  const rotatedJwk = { ...(rotated.publicKey.export({ format: 'jwk' }) as Record<string, unknown>), kid: 'key-2' };
+  let rotatedYet = false;
+  let fetches = 0;
+  const server = createServer((request, response) => {
+    fetches += 1;
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ keys: rotatedYet ? [rotatedJwk] : [firstJwk] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const config: IdentityConfig = {
+    mode: 'OIDC', allowAnonymousLocal: false, oidcIssuer: 'https://issuer.test', oidcAudience: 'platform-api',
+    oidcJwksUrl: `http://127.0.0.1:${address.port}/jwks`, oidcEmployeeClaim: 'employeeNo', oidcNameClaim: 'name', oidcDepartmentClaim: 'department',
+    gatewayMaxAgeSeconds: 90, clockSkewSeconds: 30,
+  };
+  const tokenFor = (kid: string, key: import('node:crypto').KeyObject): string => {
+    const header = base64Url(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid }));
+    const payload = base64Url(JSON.stringify({ iss: config.oidcIssuer, aud: config.oidcAudience, employeeNo: 'worker-99', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 60 }));
+    const signingInput = `${header}.${payload}`;
+    const signer = createSign('RSA-SHA256');
+    signer.update(signingInput);
+    signer.end();
+    return `${signingInput}.${signer.sign(key).toString('base64url')}`;
+  };
+  try {
+    assert.equal((await authenticateHeaders({ authorization: `Bearer ${tokenFor('key-1', first.privateKey)}` }, config)).employeeNo, 'worker-99');
+    assert.equal(fetches, 1);
+    rotatedYet = true;
+    // The cache still holds key-1, so this only succeeds if the unknown kid
+    // triggers exactly one forced refresh.
+    assert.equal((await authenticateHeaders({ authorization: `Bearer ${tokenFor('key-2', rotated.privateKey)}` }, config)).employeeNo, 'worker-99');
+    assert.equal(fetches, 2);
+    await assert.rejects(authenticateHeaders({ authorization: `Bearer ${tokenFor('key-3', rotated.privateKey)}` }, config), /signing key is unknown/);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     resetIdentityKeyCache();

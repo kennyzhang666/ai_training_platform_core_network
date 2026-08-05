@@ -24,7 +24,11 @@ export class AuthenticatedActorGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    if (request.method === 'OPTIONS' || request.url?.endsWith('/health')) return true;
+    // Match the health route exactly. `endsWith` would also exempt any future
+    // route whose path happens to end in `/health`, silently widening the
+    // unauthenticated surface.
+    const path = request.url?.split('?')[0]?.replace(/\/+$/, '');
+    if (request.method === 'OPTIONS' || path === '/api/v1/health') return true;
     const actor = await authenticateHeaders(request.headers, this.config);
     request.authenticatedActor = actor;
     if (actor.authenticationType !== 'LOCAL') {

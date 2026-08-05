@@ -4,6 +4,17 @@
 
 暂无已发布变更。
 
+## 0.8.2 - 2026-08-05
+
+全局代码评审后的缺陷修复版本，不含新功能：
+
+- 修复 OIDC `ES256` 令牌永远无法通过验签的缺陷。JOSE 以裸 `r||s` 传递 ECDSA 签名，转换成 DER 时对长度使用了长格式编码；OpenSSL 对小于 128 字节的长度只接受最短格式，因此所有 `ES256` 令牌都会以「signature is invalid」被拒。`ES256` 一直在允许算法列表中，任何签发 EC 密钥的身份提供方都无法登录。新增使用真实 P-256 密钥对的回归测试，并验证长度正确的伪造签名仍被拒绝。
+- 修复 JWKS 密钥轮换期间的认证中断。签名密钥集缓存 5 分钟，遇到未知 `kid` 时直接返回 401；身份提供方轮换密钥后，全部请求会持续失败到缓存过期为止。改为在未知 `kid` 时强制刷新一次缓存，仍找不到才拒绝，并增加轮换回归测试。
+- 修复全新克隆和 CI 上 Prisma Client 未生成导致的失败。`pnpm install` 之后没有任何环节执行 `prisma generate`，`pnpm test` 会在 `repository-factory.test.ts` 抛出「@prisma/client did not initialize yet」。为 `@ai-training/platform-api` 增加 `postinstall` 钩子，并在 GitLab CI 的 `before_script` 中显式生成，避免 `node_modules` 命中缓存时 `postinstall` 不触发。
+- 收紧身份 Guard 的健康检查豁免：由 `url.endsWith('/health')` 改为精确匹配 `/api/v1/health` 路径（忽略查询串和结尾斜杠），避免未来任何以 `/health` 结尾的路由被无声地放进免认证范围。
+- 移除本地对象存储 `put` 中位于严格相等校验之后、永远不可达的大小分支。
+- 修复 `DEVELOPMENT_PLAN.md` 与 `README.md` 专项文档索引中把 `-` 误写为 `+` 的列表项，以及缺失的标题前空行；同步重新生成内嵌该文档的评测引擎资料包。
+
 ## 0.8.1 - 2026-08-05
 
 针对管理端交互和赛题生命周期发布 v0.8.1：
