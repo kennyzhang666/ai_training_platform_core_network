@@ -1,6 +1,6 @@
 # 分组核心网AI能力提升平台
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.3`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.4`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
 
 ## 当前能力
 
@@ -80,6 +80,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 pnpm contract:test
 pnpm grader:test
 pnpm test
+pnpm kit:test
 pnpm build
 pnpm acceptance:local
 ```

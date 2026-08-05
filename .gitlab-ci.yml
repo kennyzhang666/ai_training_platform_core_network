@@ -51,6 +51,7 @@ postgres-integration:
 build:
   stage: build
   script:
+    - pnpm kit:test
     - pnpm build
 
 contract-test:

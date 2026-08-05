@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：0.8.3。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：0.8.4。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -13,7 +13,7 @@
 
 # 评测引擎开发指南
 
-> 版本：0.8.1
+> 版本：0.8.4
 > 用途：供评测引擎开发者和其他 AI 阅读。仓库内 contracts/ 是最终事实来源；本文档不包含员工信息、凭据或运行日志。
 
 ## 1. 平台边界
@@ -283,10 +283,10 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台开发总览
 
-> 当前版本：`v0.8.3`
+> 当前版本：`v0.8.4`
 > 更新日期：2026-08-05
-> 当前阶段：v0.8.3 资料包构建可重复性修复已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
-> 发布范围：在 v0.8.2 缺陷修复基础上，修复评测引擎资料包 ZIP 的构建不确定性和版本号漂移，不含新功能。
+> 当前阶段：v0.8.4 资料包跨平台构建修复已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
+> 发布范围：在 v0.8.3 资料包构建修复基础上，统一 ZIP 文本换行、固定压缩参数并补齐跨平台回归门禁，不含业务新功能。
 > 文档职责：项目架构、整体设计、版本沿革、当前边界、后续路线和 Codex 交接入口
 
 ## 1. 如何使用和维护本文档
@@ -483,7 +483,7 @@ Platform API 校验、重算、幂等保存
 
 员工只能看到按训战揭晓策略开放的结果；管理员在权限范围内可进行运营和复核。
 
-## 5. 当前实现状态（v0.8.3）
+## 5. 当前实现状态（v0.8.4）
 
 ### 5.1 已可本地验收
 
@@ -615,7 +615,18 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 
 发布检查表因此新增一条：`pnpm build` 之后工作区应当保持干净；若 `evaluation-engine-development-kit.zip` 仍被标记为已修改，说明资料包的输入确实发生了变化，应当一并提交，而不是丢弃。
 
-版本验证记录：`pnpm lint`、`pnpm test`（125 项，124 通过、1 项显式跳过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm build`、`pnpm acceptance:local`（1/1）和 `git diff --check` 全部通过；根目录、Web、API 版本均为 `0.8.3`。
+版本验证记录：`pnpm lint`、`pnpm test`（125 项，124 通过、1 项显式跳过）、`pnpm kit:test`（CRLF/LF 资料包回归通过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm build`、`pnpm acceptance:local`（1/1）和 `git diff --check` 全部通过；根目录、Web、API 版本均为 `0.8.3`。
+
+### 5.8 v0.8.4 发布状态（2026-08-05）
+
+本次修复评测引擎资料包的跨平台构建一致性，不涉及平台运行时代码、API 契约、JSON Schema 或数据库迁移：
+
+- ZIP 写入前统一所有文本条目和开发指南的换行符为 LF，避免 Windows CRLF 工作区与 Linux LF 工作区产生不同归档内容；
+- 显式固定 DEFLATE 压缩级别，保留固定 DOS 时间戳、权限位和条目顺序；
+- 新增 `scripts/evaluation-engine-kit.test.mjs` 与 `pnpm kit:test`，将 CRLF/LF 字节一致性回归接入 GitLab CI 构建阶段；
+- README、v0.8 开发手册、CHANGELOG 和独立评测资料包已同步到 `v0.8.4`。
+
+版本验证记录：`pnpm kit:test`（1/1）、`pnpm lint`、`pnpm test`（125 项，124 通过、1 项显式跳过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm build`、连续构建 SHA-256 一致性和 `git diff --check` 全部通过；根目录、Web、API 版本均为 `0.8.4`。
 
 ## 6. 版本沿革
 
@@ -636,6 +647,7 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 | `v0.8.1` | 2026-08-05 | 修复禁用控件鼠标反馈，新增垃圾箱赛题永久删除、关联训战保护、审计记录及对应契约和回归测试。 |
 | `v0.8.2` | 2026-08-05 | 全局代码评审缺陷修复：修复 OIDC `ES256` 验签恒失败、JWKS 密钥轮换认证中断、Prisma Client 生成缺失导致的 CI 失败，并收紧身份 Guard 健康检查豁免范围。 |
 | `v0.8.3` | 2026-08-05 | 修复评测引擎资料包 ZIP 的构建不确定性（固定时间戳、权限位和条目顺序）及资料包版本号漂移。 |
+| `v0.8.4` | 2026-08-05 | 修复资料包 ZIP 的 CRLF/LF 跨平台差异，固定压缩级别，新增构建回归测试并接入 CI。 |
 
 ## 7. 后续开发路线
 
@@ -811,7 +823,7 @@ git diff --check
 
 # 分组核心网AI能力提升平台
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.3`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.4`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
 
 ## 当前能力
 
@@ -891,6 +903,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 pnpm contract:test
 pnpm grader:test
 pnpm test
+pnpm kit:test
 pnpm build
 pnpm acceptance:local
 ```
@@ -6465,8 +6478,8 @@ W0/W1 及相关生产底座已随 v0.7.0 发布：
 
 > 面向开发者：Luna 及后续参与 v0.8.x 的工程人员
 > 基线版本：`v0.8.0`
-> 当前版本：`v0.8.3`
-> 文档状态：v0.8.3 已发布；目标环境沙箱、Worker 服务身份和回滚门禁仍需在内网复验
+> 当前版本：`v0.8.4`
+> 文档状态：v0.8.4 已发布；目标环境沙箱、Worker 服务身份和回滚门禁仍需在内网复验
 > 最后核对日期：2026-08-05
 
 ## 1. 使用方式
@@ -6572,6 +6585,7 @@ pnpm build
 pnpm contract:test
 pnpm grader:test
 pnpm test
+pnpm kit:test
 pnpm acceptance:local
 git diff --check
 ```
@@ -6583,8 +6597,8 @@ git diff --check
 - 多人调部门失败时不会绕过组织范围，成功后员工列表和审计均刷新；
 - 训战开始前/结束后无法进入和提交；
 - 生产构建没有本地身份切换入口；
-- 根目录、Web、API 三个 `package.json` 均为 `0.8.3`；资料包版本行由构建脚本从根 `package.json` 读取，不需要手工同步。
-- `pnpm build` 之后工作区应保持干净。资料包 ZIP 已是可重复构建（固定时间戳、权限位和条目顺序），若它仍显示为已修改，说明输入确实变了，应当一并提交。
+- 根目录、Web、API 三个 `package.json` 均为 `0.8.4`；资料包版本行由构建脚本从根 `package.json` 读取，不需要手工同步。
+- `pnpm build` 之后工作区应保持干净。资料包 ZIP 已是可重复构建（文本统一为 LF，并固定时间戳、权限位、条目顺序和 DEFLATE 压缩级别），若它仍显示为已修改，说明输入确实变了，应当一并提交。
 
 `pnpm test` 依赖已生成的 Prisma Client。全新克隆由 `@ai-training/platform-api` 的 `postinstall` 自动生成；如果 `node_modules` 命中缓存导致 `pnpm install` 判定「Already up to date」，`postinstall` 不会触发，需要手工执行一次：
 
@@ -6917,7 +6931,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {
@@ -6929,6 +6943,7 @@ validates imported results and recomputes score consistency before persistence.
     "dev:web": "pnpm --filter @ai-training/web dev",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
+    "kit:test": "node --test scripts/evaluation-engine-kit.test.mjs",
     "contract:test": "pnpm --filter @ai-training/platform-api contract:test",
     "grader:test": "node scripts/run-grader-tests.mjs",
     "acceptance:local": "pnpm --filter @ai-training/platform-api exec tsx --test test/concurrency.test.ts"

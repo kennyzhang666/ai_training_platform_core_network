@@ -58,14 +58,15 @@ const files = [...new Set([
   ...walk('tools/engine-dev-kit'),
 ])].filter((path) => existsSync(join(root, path))).sort();
 
+const normalizeNewlines = (value) => value.replace(/\r\n?/g, '\n');
+
 const guideSource = readFileSync(join(root, 'apps', 'web', 'src', 'evaluation-engine-guide.ts'), 'utf8');
 const guideMatch = guideSource.match(/String\.raw`([\s\S]*)`;/);
-const guide = guideMatch?.[1]?.replace(/^\n/, '') ?? '# 评测引擎开发指南\n';
+const guide = normalizeNewlines(guideMatch?.[1]?.replace(/^\n/, '') ?? '# 评测引擎开发指南\n');
 
 const sections = files.map((path) => {
   const normalized = path.replaceAll('\\', '/');
-  const contents = readFileSync(join(root, path), 'utf8')
-    .replace(/\r\n/g, '\n')
+  const contents = normalizeNewlines(readFileSync(join(root, path), 'utf8'))
     .replace(/[ \t]+$/gm, '')
     .trimEnd();
   return `\n--- BEGIN FILE: ${normalized} ---\n\n${contents}\n\n--- END FILE: ${normalized} ---\n`;
@@ -118,7 +119,9 @@ const python = process.env.PYTHON ?? (existsSync(join(root, '.venv', 'Scripts', 
 // bytes. `ZipFile.write` stamps each entry with the source file's mtime and
 // `writestr` stamps GUIDE.md with the current time, so every build produced a
 // new binary and dirtied the working tree even when nothing had changed.
-// Pin the DOS epoch, a fixed mode and a fixed entry order instead.
+// Pin the DOS epoch, a fixed mode and a fixed entry order instead. Text
+// entries are normalized to LF before compression so a CRLF checkout on
+// Windows produces the same bytes as an LF checkout on Linux.
 const zipBuild = [
   'import json, pathlib, sys, zipfile',
   'payload = json.loads(sys.argv[1])',
@@ -133,11 +136,15 @@ const zipBuild = [
   '    info.create_system = 3',
   '    info.external_attr = 0o644 << 16',
   '    return info',
+  'def normalized_bytes(path):',
+  '    return path.read_bytes().replace(b"\\r\\n", b"\\n").replace(b"\\r", b"\\n")',
+  'def normalized_bytes_from_text(value):',
+  '    return value.encode("utf-8").replace(b"\\r\\n", b"\\n").replace(b"\\r", b"\\n") + b"\\n"',
   'items = sorted(payload["entries"], key=lambda item: item["target"])',
-  'with zipfile.ZipFile(output, "w") as archive:',
+  'with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:',
   '    for item in items:',
-  '        archive.writestr(entry(item["target"]), (root / item["source"]).read_bytes())',
-  '    archive.writestr(entry("GUIDE.md"), payload["guide"].encode("utf-8") + b"\\n")',
+  '        archive.writestr(entry(item["target"]), normalized_bytes(root / item["source"]))',
+  '    archive.writestr(entry("GUIDE.md"), normalized_bytes_from_text(payload["guide"]))',
 ].join('\n');
 execFileSync(python, ['-c', zipBuild, JSON.stringify({ root, output: zipOutput, entries: zipEntries, guide })], { encoding: 'utf8', cwd: root });
 console.log(`evaluation engine kit: ${relative(root, output)}`);
