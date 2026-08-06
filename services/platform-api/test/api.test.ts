@@ -305,6 +305,21 @@ test('manual upload can be triggered and imported results are idempotent', async
     const run = await started.json() as { id: string; triggerType: string };
     assert.equal(run.triggerType, 'MANUAL');
 
+    const lockedUpload = await fetch(`${baseUrl}/api/v1/events/event-local/submissions:upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        subjectId: 'w00123',
+        artifactBase64: ZIP_FIXTURES.second,
+        fileName: 'submission-v2.zip',
+        snapshot: { sourceType: 'UPLOAD', submittedAt: '2026-08-01T10:01:00Z' },
+      }),
+    });
+    assert.equal(lockedUpload.status, 409);
+    const lockedBody = await lockedUpload.json() as { code?: string; message?: string };
+    assert.equal(lockedBody.code, 'SUBMISSION_EVALUATION_LOCKED');
+    assert.match(lockedBody.message ?? '', /正在评测/);
+
     const createEvent = await fetch(`${baseUrl}/api/v1/events`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

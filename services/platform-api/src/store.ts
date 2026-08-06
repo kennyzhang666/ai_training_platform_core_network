@@ -3324,6 +3324,7 @@ export class PlatformStore {
       (item) => item.eventId === eventId && item.subjectId === subjectId && item.snapshot.snapshotHash === snapshot.snapshotHash,
     );
     if (duplicate) return duplicate;
+    this.assertSubmissionEvaluationUnlocked(eventId, subjectId);
     const challengeVersionSnapshot = event.challengeVersion;
     const challengeVersion = this.getChallengeVersion(challengeVersionSnapshot);
     const submission: SubmissionRecord = {
@@ -3344,6 +3345,29 @@ export class PlatformStore {
     this.audit(subjectId, 'submission.create', `submission:${submission.id}`, undefined, submission);
     this.persist();
     return this.submissions.get(submission.id)!;
+  }
+
+  /**
+   * Once a participant's submission has entered the evaluation queue, the
+   * participant cannot replace it by creating another submission in the same
+   * event.  Keep this check in the domain store so every upload path (JSON,
+   * two-phase object upload, and Git registration) observes the same rule.
+   * A retry of the exact same snapshot is handled by the idempotency check in
+   * createSubmission before this guard is reached.
+   */
+  private assertSubmissionEvaluationUnlocked(eventId: string, subjectId: string): void {
+    for (const submission of this.submissions.values()) {
+      if (submission.eventId !== eventId || submission.subjectId !== subjectId) continue;
+      this.syncSubmissionLifecycle(submission);
+      const run = submission.gradingRunId ? this.runs.get(submission.gradingRunId) : undefined;
+      const active = run ? ['QUEUED', 'RUNNING'].includes(run.status) : ['QUEUED', 'RUNNING'].includes(submission.gradingStatus ?? '');
+      if (active) {
+        throw new ConflictException({
+          code: 'SUBMISSION_EVALUATION_LOCKED',
+          message: '该训战已有提交正在评测，请等待评测完成后再提交新的作品',
+        });
+      }
+    }
   }
 
   /** Validate the subject/participant boundary before a multipart or artifact payload is processed. */

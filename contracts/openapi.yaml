@@ -1041,6 +1041,8 @@ paths:
       responses:
         '201':
           description: 上传快照已登记
+        '409':
+          description: 该学员已有提交正在评测，暂不能提交新的作品
   /api/v1/events/{eventId}/submissions:register-git:
     post:
       operationId: registerGitSubmission
@@ -1055,6 +1057,8 @@ paths:
       responses:
         '201':
           description: Git 快照已登记
+        '409':
+          description: 该学员已有提交正在评测，暂不能提交新的作品
   /api/v1/submissions/{submissionId}/start-grading:
     post:
       operationId: startSubmissionGrading
@@ -1104,6 +1108,7 @@ paths:
           application/json: { schema: { $ref: '#/components/schemas/Submission' } }
       responses:
         '201': { description: 提交已登记 }
+        '409': { description: 该学员已有提交正在评测，暂不能提交新的作品 }
   /api/v1/submissions/{submissionId}:
     get:
       operationId: getSubmission

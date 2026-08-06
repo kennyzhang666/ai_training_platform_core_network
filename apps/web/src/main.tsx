@@ -252,6 +252,7 @@ function humanizeApiMessage(message: string): string {
     [/event .* is not open/i, '当前训战未开放'],
     [/event submission window has not started/i, '训战尚未到开放时间'],
     [/event submission window has ended/i, '训战提交时间已结束'],
+    [/SUBMISSION_EVALUATION_LOCKED|正在评测/i, submissionEvaluationLockMessage],
     [/event .*outside.*scope|subject is not configured/i, '当前账号不在该训战参训范围内'],
     [/subject is disabled/i, '当前账号已停用'],
     [/upload requires|artifactBase64|artifactUri|workspacePath/i, '请选择有效交付件'],
@@ -352,9 +353,18 @@ function eventCanAcceptSubmission(event?: EventConfig, currentTime = Date.now())
 
 function eventWindowMessage(event?: EventConfig, currentTime = Date.now()): string {
   if (!event) return '训战交付入口暂不可用';
+  if (event.status === 'LOCKED') return submissionEvaluationLockMessage;
   if (event.status !== 'OPEN') return '当前训战已结束，无法提交作品';
   return eventWindowState(event, currentTime) === 'BEFORE' ? '训战尚未到开放时间' : '训战提交时间已结束';
 }
+
+function submissionEvaluationInProgress(submission: Submission): boolean {
+  return submission.gradingStatus === 'QUEUED'
+    || submission.gradingStatus === 'RUNNING'
+    || (submission.state === 'QUEUED' && Boolean(submission.gradingRunId));
+}
+
+const submissionEvaluationLockMessage = '该训战已有提交正在评测，请等待评测完成后再提交新的作品';
 
 function eventTitle(event: EventConfig, challenges: Challenge[]): string {
   return challenges.flatMap((challenge) => challenge.versions).find((version) => version.id === event.challengeVersion)?.title ?? event.challengeVersion;
@@ -386,7 +396,7 @@ function statusLabel(status?: string): string {
     OPEN: '进行中', CLOSED: '已结束', RELEASED: '已公布', REVEALED: '已公布',
     WAITING_TRIGGER: '等待评估', WAITING_IMPORT: '等待结果录入', RECEIVED: '已提交',
     QUEUED: '排队中', RUNNING: '评估中', GRADED: '已完成', FAILED: '评估未完成',
-    COMPLETE: '已完成', PASSED: '通过', PARTIAL: '部分完成', REJECTED: '未通过', PUBLISHED: '已发布', DRAFT: '草稿',
+    COMPLETE: '已完成', PASSED: '通过', PARTIAL: '部分完成', REJECTED: '未通过', PUBLISHED: '已发布', DRAFT: '草稿', LOCKED: '评测中，已锁定',
     PENDING: '等待评估', PROCESSING: '评估中', SUCCESS: '已完成', ERROR: '评估未完成', CANCELED: '已取消', CANCELLED: '已取消',
   } as Record<string, string>)[status ?? ''] ?? (status && !/^[A-Z][A-Z0-9_]*$/.test(status) ? status : '—');
 }
@@ -457,16 +467,36 @@ function App() {
   const [profileEditorBusy, setProfileEditorBusy] = useState(false);
   const [profileDraft, setProfileDraft] = useState<{ nickname: string; avatarDataUrl: string }>({ nickname: '', avatarDataUrl: '' });
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [evaluationLockNoticeVisible, setEvaluationLockNoticeVisible] = useState(false);
   const profileHistoryRequestRef = useRef(0);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const evaluationLockNoticeEventRef = useRef('');
 
-  const selectedEvent = useMemo(() => events.find((item) => item.id === eventId), [events, eventId]);
+  const selectedEvent = useMemo(() => {
+    const event = events.find((item) => item.id === eventId);
+    if (!event) return event;
+    const locked = submissions.some((submission) => submission.eventId === event.id && submissionEvaluationInProgress(submission));
+    return locked ? { ...event, status: 'LOCKED' } : event;
+  }, [events, eventId, submissions]);
+  const selectedEventLockKey = selectedEvent?.status === 'LOCKED' ? selectedEvent.id : '';
   const selectedVersion = useMemo(() => challenges.flatMap((challenge) => challenge.versions).find((version) => version.id === challengeVersionId) ?? (selectedEvent && challenges.flatMap((challenge) => challenge.versions).find((version) => version.id === selectedEvent.challengeVersion)), [challenges, challengeVersionId, selectedEvent]);
   const selectedChallenge = useMemo(() => challenges.find((challenge) => challenge.versions.some((version) => version.id === selectedVersion?.id)), [challenges, selectedVersion]);
   const selectedHardProblem = useMemo(() => hardProblems.find((problem) => problem.id === selectedHardProblemId), [hardProblems, selectedHardProblemId]);
   const totalPoints = profile?.stats.totalPoints ?? profile?.history.reduce((sum, item) => sum + (item.points ?? item.total), 0) ?? 0;
   const currentRank = leaderboard.find((row) => row.isSelf || row.subjectId === subjectId)?.rank;
   const adminAccess = adminAccessFor(profile?.subject);
+
+  useEffect(() => {
+    if (selectedEventLockKey) {
+      if (evaluationLockNoticeEventRef.current !== selectedEventLockKey) {
+        evaluationLockNoticeEventRef.current = selectedEventLockKey;
+        setEvaluationLockNoticeVisible(true);
+      }
+      return;
+    }
+    evaluationLockNoticeEventRef.current = '';
+    setEvaluationLockNoticeVisible(false);
+  }, [selectedEventLockKey]);
 
   async function refresh() {
     const [loadedEvents, loadedChallenges, loadedAnnouncements, loadedHardProblems, loadedSubmissionPage, loadedProfile, loadedProfileHistory, loadedCapabilities, loadedLeaderboard] = await Promise.all([
@@ -568,6 +598,30 @@ function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  // A separate, lightweight poll keeps the delivery form aligned with an
+  // administrator or worker changing the evaluation state in another tab.
+  // The authoritative lock remains in the API; this only improves feedback.
+  useEffect(() => {
+    if (view !== 'delivery') return;
+    let cancelled = false;
+    const syncSubmissionStatus = async () => {
+      try {
+        const page = await request<SubmissionPage>(`/submissions?eventId=${encodeURIComponent(eventId)}&page=1&pageSize=100`);
+        if (!cancelled) {
+          setSubmissions((current) => [...current.filter((item) => item.eventId !== eventId), ...page.items]);
+        }
+      } catch {
+        // The next interval or an explicit refresh can recover transient errors.
+      }
+    };
+    void syncSubmissionStatus();
+    const timer = window.setInterval(() => void syncSubmissionStatus(), 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [view, eventId]);
+
   useEffect(() => {
     if (!userMenuOpen) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
@@ -646,6 +700,11 @@ function App() {
   async function submit() {
     if (!selectedEvent) return;
     const currentTime = Date.now();
+    if (submissions.some((submission) => submission.eventId === selectedEvent.id && submissionEvaluationInProgress(submission))) {
+      setMessage(submissionEvaluationLockMessage);
+      setEvaluationLockNoticeVisible(true);
+      return;
+    }
     if (!eventCanAcceptSubmission(selectedEvent, currentTime)) {
       setMessage(eventWindowMessage(selectedEvent, currentTime));
       return;
@@ -677,7 +736,9 @@ function App() {
       setFile(null);
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '提交失败，请稍后重试');
+      const failureMessage = error instanceof Error ? error.message : '提交失败，请稍后重试';
+      setMessage(failureMessage);
+      if (failureMessage.includes('正在评测')) setEvaluationLockNoticeVisible(true);
     } finally {
       setBusy(false);
     }
@@ -721,6 +782,7 @@ function App() {
 
   return (
     <div className="shell">
+      {evaluationLockNoticeVisible && <div className="evaluation-lock-notice" role="alert" aria-live="assertive"><span className="evaluation-lock-notice-icon"><Icon name="clock" size={22} /></span><div className="evaluation-lock-notice-content"><strong>提交暂时锁定</strong><p>{submissionEvaluationLockMessage}</p></div><button type="button" className="evaluation-lock-notice-close" aria-label="关闭评测锁定提示" onClick={() => setEvaluationLockNoticeVisible(false)}>×</button></div>}
       <header className="topbar">
         <button className="brand" onClick={() => setView('home')} aria-label="分组核心网AI能力提升平台"><span className="brand-mark" aria-hidden="true"><img src={BRAND_LOGO_URL} alt="" /></span><span className="brand-copy"><span className="eyebrow">分组核心网</span><strong>AI能力提升平台</strong></span></button>
         <nav className="main-nav" aria-label="主导航">

@@ -97,6 +97,46 @@ test('manual upload submission waits for administrator trigger', () => {
   assert.equal(store.getSubmission(submission.id).state, 'QUEUED');
 });
 
+test('a participant cannot submit another snapshot while an evaluation is queued or running', () => {
+  const store = new PlatformStore(':memory:');
+  const first = store.createSubmission('event-local', 'w00124', uploadSnapshot);
+  const replacementBeforeEvaluation = store.createSubmission('event-local', 'w00124', {
+    ...uploadSnapshot,
+    snapshotHash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+    artifactHash: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+  });
+  assert.notEqual(replacementBeforeEvaluation.id, first.id);
+
+  const run = store.startGrading(replacementBeforeEvaluation.id, 'admin-1');
+  assert.equal(run.status, 'QUEUED');
+  assert.throws(
+    () => store.createSubmission('event-local', 'w00124', {
+      ...uploadSnapshot,
+      snapshotHash: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+      artifactHash: 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+    }),
+    /正在评测/,
+  );
+
+  store.acquireLease(run.id, 'worker-lock-test', 60);
+  assert.throws(
+    () => store.createSubmission('event-local', 'w00124', {
+      ...uploadSnapshot,
+      snapshotHash: '9999999999999999999999999999999999999999999999999999999999999999',
+      artifactHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    }),
+    /正在评测/,
+  );
+
+  store.failRun(run.id, 'test evaluation failure');
+  const retryAfterFailure = store.createSubmission('event-local', 'w00124', {
+    ...uploadSnapshot,
+    snapshotHash: '1111111111111111111111111111111111111111111111111111111111111111',
+    artifactHash: '2222222222222222222222222222222222222222222222222222222222222222',
+  });
+  assert.equal(retryAfterFailure.state, 'WAITING_TRIGGER');
+});
+
 test('submission is rejected outside the event time window', () => {
   const store = new PlatformStore(':memory:');
   const current = Date.now();

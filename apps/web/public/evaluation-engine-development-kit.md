@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：0.8.6。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：0.8.7。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -13,7 +13,7 @@
 
 # 评测引擎开发指南
 
-> 版本：0.8.6
+> 版本：0.8.7
 > 用途：供评测引擎开发者和其他 AI 阅读。仓库内 contracts/ 是最终事实来源；本文档不包含员工信息、凭据或运行日志。
 
 ## 1. 平台边界
@@ -283,10 +283,10 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台开发总览
 
-> 当前版本：`v0.8.6`
+> 当前版本：`v0.8.7`
 > 更新日期：2026-08-06
-> 当前阶段：v0.8.6 UI 体验升级已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
-> 发布范围：在 v0.8.5 LDAP3 登录和生产验收资料基础上，增加统一的轻量 hover、按压、进入和缓动反馈，不修改业务评分契约和数据库迁移。
+> 当前阶段：v0.8.7 评测锁定和提交状态反馈已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
+> 发布范围：在 v0.8.6 UI 体验升级基础上，补齐评测进行中的提交锁定、跨页面状态同步和可关闭提示，不修改评分 Schema 和数据库迁移。
 > 文档职责：项目架构、整体设计、版本沿革、当前边界、后续路线和 Codex 交接入口
 
 ## 1. 如何使用和维护本文档
@@ -483,7 +483,7 @@ Platform API 校验、重算、幂等保存
 
 员工只能看到按训战揭晓策略开放的结果；管理员在权限范围内可进行运营和复核。
 
-## 5. 当前实现状态（v0.8.6）
+## 5. 当前实现状态（v0.8.7）
 
 ### 5.1 已可本地验收
 
@@ -492,6 +492,7 @@ Platform API 校验、重算、幂等保存
 - 训战时间、分区、赛制、交付方式、评测方式、参与部门/人员和导师范围；
 - ZIP 与 Git 固定版本提交、不可变快照和赛题级目录结构校验；
 - 管理员按训战和员工精确选择提交，创建 Code Agent 评测批次；
+- 评测状态锁定：同一学员在同一训战已有排队中或评测中的提交时，交付页显示“评测中，已锁定”并弹出可关闭提示，服务端拒绝新的上传或 Git 提交，评测完成或失败后恢复提交；
 - Worker 租约、心跳、批次恢复、交付件下载、引擎和 Agent 资产物化；
 - 结构化结果导入、Schema 校验、分数重算、可信身份覆盖和幂等保存；
 - 单场详细报告、四维/16 点/八能力域画像及组织聚合画像；管理员能力画像支持按训战筛选全体提交者的 AI 评测聚合；
@@ -650,6 +651,16 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 
 版本验证记录：`pnpm build`、`pnpm lint`、`pnpm test`、`pnpm contract:test`、`pnpm grader:test`、`pnpm kit:test`、`pnpm ldap3:test`、`pnpm acceptance:local` 和 `git diff --check` 全部通过。
 
+### 5.11 v0.8.7 发布状态（2026-08-06）
+
+本次补齐评测进行中的提交锁定和学员端提醒，不新增数据库迁移：
+
+- 同一学员在同一训战存在 `QUEUED` 或 `RUNNING` 评测时，服务端统一拒绝新的上传、Git 和通用提交，并返回稳定错误码 `SUBMISSION_EVALUATION_LOCKED`；相同快照重试仍按原幂等规则返回；
+- 交付页按训战轮询提交状态，显示“评测中，已锁定”并禁用提交按钮；收到跨页面状态变化或竞态 409 时，右上角显示可关闭的锁定提示；
+- OpenAPI、评测引擎资料包、TypeScript 回归测试和版本资料同步更新。
+
+版本验证记录：`pnpm test`（125 项通过、1 项显式跳过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm kit:test`（1/1）、`pnpm acceptance:local`（1/1）、`pnpm lint`、`pnpm build` 和 `git diff --check` 全部通过。
+
 ## 6. 版本沿革
 
 详细变更和修复见 `CHANGELOG.md`，这里仅保留交接所需的架构演进。
@@ -672,6 +683,7 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 | `v0.8.4` | 2026-08-05 | 修复资料包 ZIP 的 CRLF/LF 跨平台差异，固定压缩级别，新增构建回归测试并接入 CI。 |
 | `v0.8.5` | 2026-08-06 | 新增 LDAP3 `TRUSTED_GATEWAY` 登录适配器、Nginx 部署手册、Windows 生产模式验收手册和生产 401 登录跳转。 |
 | `v0.8.6` | 2026-08-06 | 统一管理端和员工端的卡片 hover、按钮反馈、导航指示、列表高亮、进度缓动和页面进入动效。 |
+| `v0.8.7` | 2026-08-06 | 增加评测进行中的同训战提交锁定、跨页面状态同步和可关闭锁定提示。 |
 
 ## 7. 后续开发路线
 
@@ -847,7 +859,7 @@ git diff --check
 
 # 分组核心网AI能力提升平台
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.6`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.7`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
 
 ## 当前能力
 
@@ -3732,6 +3744,8 @@ paths:
       responses:
         '201':
           description: 上传快照已登记
+        '409':
+          description: 该学员已有提交正在评测，暂不能提交新的作品
   /api/v1/events/{eventId}/submissions:register-git:
     post:
       operationId: registerGitSubmission
@@ -3746,6 +3760,8 @@ paths:
       responses:
         '201':
           description: Git 快照已登记
+        '409':
+          description: 该学员已有提交正在评测，暂不能提交新的作品
   /api/v1/submissions/{submissionId}/start-grading:
     post:
       operationId: startSubmissionGrading
@@ -3795,6 +3811,7 @@ paths:
           application/json: { schema: { $ref: '#/components/schemas/Submission' } }
       responses:
         '201': { description: 提交已登记 }
+        '409': { description: 该学员已有提交正在评测，暂不能提交新的作品 }
   /api/v1/submissions/{submissionId}:
     get:
       operationId: getSubmission
@@ -7687,9 +7704,9 @@ W0/W1 及相关生产底座已随 v0.7.0 发布：
 
 > 面向开发者：Luna 及后续参与 v0.8.x 的工程人员
 > 基线版本：`v0.8.0`
-> 当前版本：`v0.8.6`
-> 文档状态：v0.8.6 已发布；目标环境沙箱、Worker 服务身份和回滚门禁仍需在内网复验
-> 最后核对日期：2026-08-05
+> 当前版本：`v0.8.7`
+> 文档状态：v0.8.7 已发布；目标环境沙箱、Worker 服务身份和回滚门禁仍需在内网复验
+> 最后核对日期：2026-08-06
 
 ## 1. 使用方式
 
@@ -7806,7 +7823,7 @@ git diff --check
 - 多人调部门失败时不会绕过组织范围，成功后员工列表和审计均刷新；
 - 训战开始前/结束后无法进入和提交；
 - 生产构建没有本地身份切换入口；
-- 根目录、Web、API 三个 `package.json` 均为 `0.8.6`；资料包版本行由构建脚本从根 `package.json` 读取，不需要手工同步。
+- 根目录、Web、API 三个 `package.json` 均为 `0.8.7`；资料包版本行由构建脚本从根 `package.json` 读取，不需要手工同步。
 - `pnpm build` 之后工作区应保持干净。资料包 ZIP 已是可重复构建（文本统一为 LF，并固定时间戳、权限位、条目顺序和 DEFLATE 压缩级别），若它仍显示为已修改，说明输入确实变了，应当一并提交。
 
 `pnpm test` 依赖已生成的 Prisma Client。全新克隆由 `@ai-training/platform-api` 的 `postinstall` 自动生成；如果 `node_modules` 命中缓存导致 `pnpm install` 判定「Already up to date」，`postinstall` 不会触发，需要手工执行一次：
@@ -8140,7 +8157,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {

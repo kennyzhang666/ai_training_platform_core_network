@@ -5763,3 +5763,59 @@ textarea:hover:not(:disabled) {
     transition-duration: 1ms !important;
   }
 }
+
+/* Evaluation lock feedback: keep the inline state near the submit control,
+   but also surface a dismissible notice when another tab starts grading. */
+.evaluation-lock-notice {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(430px, calc(100vw - 32px));
+  padding: 16px 17px;
+  border: 1px solid #f0d08d;
+  border-radius: 12px;
+  color: #765719;
+  background: linear-gradient(135deg, #fffaf0, #fff4d8);
+  box-shadow: 0 16px 42px rgb(104 76 21 / 18%);
+  animation: evaluation-lock-notice-in 220ms var(--ui-motion-ease) both;
+}
+.evaluation-lock-notice-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: #a87312;
+  background: #ffedbc;
+}
+.evaluation-lock-notice-icon svg { display: block; }
+.evaluation-lock-notice-content { min-width: 0; flex: 1; }
+.evaluation-lock-notice-content strong { display: block; color: #664b15; font-size: 15px; line-height: 1.35; }
+.evaluation-lock-notice-content p { margin: 5px 0 0; color: #806b43; font-size: 13px; line-height: 1.6; }
+.evaluation-lock-notice-close {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: #997c42;
+  background: transparent;
+  font-size: 23px;
+  line-height: 1;
+  cursor: pointer;
+}
+.evaluation-lock-notice-close:hover { color: #664b15; background: rgb(255 255 255 / 70%); }
+@keyframes evaluation-lock-notice-in {
+  from { opacity: 0; transform: translate3d(0, -8px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@media (max-width: 680px) {
+  .evaluation-lock-notice { top: 68px; right: 12px; width: calc(100vw - 24px); padding: 14px; }
+  .evaluation-lock-notice-content p { font-size: 12px; }
+}
