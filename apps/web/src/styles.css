@@ -5519,3 +5519,247 @@ textarea:disabled,
 [aria-disabled='true'] {
   cursor: not-allowed !important;
 }
+
+/* --------------------------------------------------------------------------
+   Micro-interactions: restrained motion for an enterprise workspace
+   -------------------------------------------------------------------------- */
+:root {
+  --ui-motion-fast: 160ms;
+  --ui-motion-base: 240ms;
+  --ui-motion-slow: 520ms;
+  --ui-motion-ease: cubic-bezier(.2, .72, .2, 1);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(circle at 8% -12%, rgba(42, 120, 214, .045), transparent 30rem),
+    var(--ui-bg);
+}
+
+button,
+a,
+input,
+select,
+textarea,
+.panel,
+.stat-card,
+.admin-stat,
+.challenge-card,
+.choice-card,
+.quick-action-grid button,
+.grading-event-card,
+.event-admin-card,
+.capability-domain-card,
+.capability-dimension-row,
+.capability-user-check,
+.runtime-source-card,
+.runtime-help-card,
+.profile-stats article,
+.report-summary-card,
+.report-detail-card {
+  transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+  transition-duration: var(--ui-motion-fast);
+  transition-timing-function: var(--ui-motion-ease);
+}
+
+button:not(:disabled):active,
+.choice-card:active,
+.grading-event-card:active,
+.event-admin-card:active {
+  transform: translateY(1px);
+}
+
+.primary:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(42, 120, 214, .18);
+}
+
+.primary:not(:disabled):active {
+  transform: translateY(0);
+  box-shadow: 0 3px 8px rgba(42, 120, 214, .14);
+}
+
+.panel:hover {
+  border-color: color-mix(in srgb, var(--ui-blue-line) 72%, var(--ui-line));
+}
+
+.stat-card:hover,
+.admin-stat:hover,
+.challenge-card:hover,
+.profile-stats article:hover,
+.report-summary-card:hover,
+.report-detail-card:hover,
+.capability-domain-card:hover,
+.capability-dimension-row:hover,
+.capability-user-check:hover,
+.runtime-source-card:hover,
+.runtime-help-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--ui-blue-line);
+  box-shadow: 0 12px 28px rgba(42, 120, 214, .10);
+}
+
+.stat-icon,
+.admin-stat-icon,
+.activity-icon,
+.choice-icon,
+.capability-domain-index,
+.capability-admin-avatar {
+  transition: transform var(--ui-motion-base) var(--ui-motion-ease), box-shadow var(--ui-motion-base) var(--ui-motion-ease);
+}
+
+.stat-card:hover .stat-icon,
+.admin-stat:hover .admin-stat-icon,
+.activity-row:hover .activity-icon,
+.choice-card:hover .choice-icon,
+.capability-domain-card:hover .capability-domain-index {
+  transform: scale(1.07) rotate(-2deg);
+  box-shadow: 0 5px 12px rgba(42, 120, 214, .12);
+}
+
+.main-nav button::after {
+  position: absolute;
+  right: 14px;
+  bottom: 0;
+  left: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ui-blue);
+  content: '';
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform var(--ui-motion-base) var(--ui-motion-ease), background-color var(--ui-motion-fast) ease;
+}
+
+.main-nav button:hover::after,
+.main-nav button.active::after {
+  transform: scaleX(1);
+}
+
+.admin-sidebar nav button {
+  position: relative;
+  overflow: hidden;
+  transition: color var(--ui-motion-fast) ease, background-color var(--ui-motion-fast) ease, padding-left var(--ui-motion-fast) var(--ui-motion-ease);
+}
+
+.admin-sidebar nav button::before {
+  position: absolute;
+  inset: 7px auto 7px 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--ui-blue);
+  content: '';
+  opacity: 0;
+  transform: scaleY(.3);
+  transition: opacity var(--ui-motion-fast) ease, transform var(--ui-motion-base) var(--ui-motion-ease);
+}
+
+.admin-sidebar nav button:hover {
+  padding-left: 13px;
+}
+
+.admin-sidebar nav button.active::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.admin-table tbody tr,
+.event-monitor-row,
+.audit-mini-row,
+.announcement-admin-row,
+.version-row,
+.submission,
+.leader-row,
+.activity-row,
+.history-row {
+  transition: background-color var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease, transform var(--ui-motion-fast) var(--ui-motion-ease);
+}
+
+.admin-table tbody tr:hover,
+.event-monitor-row:hover,
+.audit-mini-row:hover,
+.announcement-admin-row:hover,
+.version-row:hover,
+.submission:hover,
+.leader-row:hover,
+.activity-row:hover,
+.history-row:hover {
+  background: color-mix(in srgb, var(--ui-blue-soft) 58%, transparent);
+}
+
+.quick-action-grid button:hover,
+.choice-card:hover,
+.grading-event-card:hover,
+.event-admin-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(42, 120, 214, .09);
+}
+
+input,
+select,
+textarea {
+  transition: border-color var(--ui-motion-fast) ease, box-shadow var(--ui-motion-fast) ease, background-color var(--ui-motion-fast) ease;
+}
+
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: #b7cce2;
+  background: #fff;
+}
+
+.progress i,
+.skill-track i,
+.domain-track i,
+.capability-admin-aggregate-row > i span,
+.capability-admin-domain > span i,
+.capability-admin-person-dimensions i b,
+.capability-admin-person-domains i b {
+  transition: width var(--ui-motion-slow) var(--ui-motion-ease), background-color var(--ui-motion-base) ease;
+}
+
+.status-badge,
+.status-pill,
+.dot-label,
+.filter-chip,
+.role-tag {
+  transition: background-color var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease;
+}
+
+@keyframes ui-reveal {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.content-page > .panel,
+.content-page > .home-columns,
+.admin-main > .admin-section,
+.admin-main > .admin-message,
+.profile-page > .panel,
+.report-standalone > .panel {
+  animation: ui-reveal var(--ui-motion-slow) var(--ui-motion-ease) both;
+}
+
+.admin-main > .admin-section:nth-child(2),
+.content-page > .panel:nth-child(2),
+.report-standalone > .panel:nth-child(2) {
+  animation-delay: 45ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}
