@@ -1,7 +1,7 @@
 export const EVALUATION_ENGINE_GUIDE_MARKDOWN = String.raw`
 # 评测引擎开发指南
 
-> 版本：0.8.5
+> 版本：0.8.6
 > 用途：供评测引擎开发者和其他 AI 阅读。仓库内 contracts/ 是最终事实来源；本文档不包含员工信息、凭据或运行日志。
 
 ## 1. 平台边界
