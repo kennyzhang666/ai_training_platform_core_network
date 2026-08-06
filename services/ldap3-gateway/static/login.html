@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" type="image/png" href="/login-logo.png">
+  <title>登录 · 分组核心网 AI能力提升平台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: #172640;
+      background: #f9f9f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #f9f9f7;
+    }
+    .login-card {
+      width: min(100%, 420px);
+      overflow: hidden;
+      border: 1px solid #e5eaf2;
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 12px 34px rgba(20, 48, 90, .055);
+    }
+    .login-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 27px 32px 24px;
+      border-bottom: 1px solid #edf1f6;
+    }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      flex: 0 0 auto;
+      overflow: hidden;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+    }
+    .brand-mark img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      border-radius: inherit;
+    }
+    .brand-mark-fallback {
+      color: #fff;
+      background: linear-gradient(145deg, #3288e6 0%, #1555a4 100%);
+    }
+    .brand-fallback {
+      display: none;
+      font-size: 15px;
+      font-weight: 900;
+      letter-spacing: -.08em;
+    }
+    .brand-mark-fallback .brand-fallback { display: block; }
+    .brand-mark-fallback img { display: none; }
+    }
+    .brand-copy { min-width: 0; }
+    .brand-kicker {
+      display: block;
+      margin-bottom: 4px;
+      color: #8290a3;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      line-height: 1.1;
+    }
+    .brand-title {
+      display: block;
+      color: #172640;
+      font-family: "JetBrains Mono", "PingFang SC", "Microsoft YaHei", ui-monospace, Consolas, monospace;
+      font-size: 17px;
+      font-weight: 850;
+      letter-spacing: -.045em;
+      line-height: 1.2;
+    }
+    .login-body { padding: 27px 32px 30px; }
+    h1 {
+      margin: 0 0 7px;
+      color: #12213a;
+      font-size: 24px;
+      letter-spacing: -.055em;
+    }
+    .login-subtitle {
+      margin: 0 0 22px;
+      color: #7b8899;
+      font-size: 13px;
+    }
+    .form-error {
+      display: none;
+      margin: 0 0 15px;
+      padding: 10px 12px;
+      border: 1px solid rgba(208, 59, 59, .28);
+      border-radius: 7px;
+      color: #b23b3b;
+      background: rgba(208, 59, 59, .05);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .form-error[data-state="visible"] { display: block; }
+    label {
+      display: grid;
+      gap: 7px;
+      margin: 14px 0;
+      color: #536276;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    input {
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 11px;
+      border: 1px solid #d8e1ec;
+      border-radius: 7px;
+      color: #1f2a3d;
+      background: #fff;
+      outline: none;
+      font: inherit;
+    }
+    input:focus {
+      border-color: #176bc2;
+      box-shadow: 0 0 0 3px #e7f2ff;
+    }
+    button {
+      width: 100%;
+      min-height: 44px;
+      margin-top: 9px;
+      border: 0;
+      border-radius: 7px;
+      color: #fff;
+      background: #176bc2;
+      box-shadow: 0 5px 13px rgba(23, 107, 194, .22);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 800;
+    }
+    button:hover { background: #13599e; }
+    button:focus-visible {
+      outline: 3px solid #e7f2ff;
+      outline-offset: 2px;
+    }
+    .login-foot {
+      margin: 18px 0 0;
+      color: #9aa8bb;
+      font-size: 11px;
+      text-align: center;
+    }
+    @media (max-width: 520px) {
+      body { padding: 12px; }
+      .login-header, .login-body { padding-left: 24px; padding-right: 24px; }
+      .login-card { border-radius: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="login-card">
+    <header class="login-header">
+      <div class="brand-mark" aria-hidden="true">
+        <img src="/login-logo.png" alt="" onerror="this.hidden=true; this.parentElement.classList.add('brand-mark-fallback')">
+        <span class="brand-fallback">AI</span>
+      </div>
+      <div class="brand-copy">
+        <span class="brand-kicker">分组核心网</span>
+        <strong class="brand-title">AI能力提升平台</strong>
+      </div>
+    </header>
+    <section class="login-body">
+      <h1>登录</h1>
+      <div class="form-error" role="alert" data-state="{{ERROR_STATE}}">{{ERROR_MESSAGE}}</div>
+      <form method="post" action="/auth/login" autocomplete="on">
+        <input type="hidden" name="csrf" value="{{CSRF}}">
+        <input type="hidden" name="returnTo" value="{{RETURN_TO}}">
+        <label for="userId">
+          工号
+          <input id="userId" name="userId" autocomplete="username" placeholder="请输入工号" maxlength="128" required autofocus>
+        </label>
+        <label for="password">
+          密码
+          <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+        </label>
+        <button type="submit">登录</button>
+      </form>
+      <p class="login-foot">LDAP3域账号统一认证</p>
+    </section>
+  </main>
+</body>
+</html>

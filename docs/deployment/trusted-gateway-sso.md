@@ -179,5 +179,7 @@ VITE_API_BASE=/api/v1
 - `services/platform-api/src/identity.ts`：模式配置、HMAC 验证和 OIDC 验证。
 - `services/platform-api/src/identity-guard.ts`：请求级身份校验和 SSO 首次建档。
 - `services/platform-api/src/user-directory.ts`：工号幂等同步、部门匹配和用户资料。
+- `docs/deployment/ldap3-trusted-gateway.md`：使用内网 LDAP3 校验账号并接入本手册定义的网关协议。
+- `docs/deployment/ldap3-nginx-intranet-deployment.md`：单服务器 Nginx + LDAP3 的逐步部署手册。
 - `.env.example`：本地和生产身份环境变量示例。
 - `docs/architecture/security-boundary.md`：平台整体安全边界。

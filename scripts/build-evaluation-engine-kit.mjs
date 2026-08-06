@@ -31,6 +31,16 @@ const explicitFiles = [
   'docs/v0.7-development-manual.md',
   'docs/v0.8-development-manual.md',
   'docs/deployment/trusted-gateway-sso.md',
+  'docs/deployment/ldap3-trusted-gateway.md',
+  'docs/deployment/ldap3-nginx-intranet-deployment.md',
+  'docs/deployment/windows-production-smoke-test.md',
+  'services/ldap3-gateway/README.md',
+  'services/ldap3-gateway/ldap3_gateway.py',
+  'services/ldap3-gateway/requirements.txt',
+  'services/ldap3-gateway/test_ldap3_gateway.py',
+  'services/ldap3-gateway/.env.example',
+  'services/ldap3-gateway/Dockerfile',
+  'services/ldap3-gateway/static/login.html',
   'scripts/evaluation-worker.mjs',
   'scripts/code-agent-local-bridge.mjs',
   'scripts/build-engine-package.mjs',
@@ -103,7 +113,7 @@ const zipEntries = [
   ...files
     .filter((path) => {
       const normalized = path.replaceAll('\\', '/');
-      return normalized === 'AGENTS.md' || normalized === 'README.md' || normalized === 'DEVELOPMENT_PLAN.md' || normalized === 'package.json' || normalized === 'pnpm-workspace.yaml' || normalized.startsWith('contracts/') || normalized.startsWith('docs/') || normalized.startsWith('scripts/') || normalized.startsWith('executors/') || normalized.startsWith('grader/');
+      return normalized === 'AGENTS.md' || normalized === 'README.md' || normalized === 'DEVELOPMENT_PLAN.md' || normalized === 'package.json' || normalized === 'pnpm-workspace.yaml' || normalized.startsWith('contracts/') || normalized.startsWith('docs/') || normalized.startsWith('scripts/') || normalized.startsWith('executors/') || normalized.startsWith('grader/') || normalized.startsWith('services/ldap3-gateway/');
     })
     .map((path) => {
       const normalized = path.replaceAll('\\', '/');

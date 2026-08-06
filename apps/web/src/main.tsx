@@ -193,6 +193,7 @@ function DeliveryContractNotice({ version }: { version: ChallengeVersion }) {
 }
 
 const API = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:3000/api/v1';
+const AUTH_LOGIN_PATH = import.meta.env.VITE_AUTH_LOGIN_PATH ?? '/auth/login';
 const DEFAULT_EMPLOYEE_ID = import.meta.env.VITE_EMPLOYEE_ID ?? 'w00123';
 const ENABLE_LOCAL_IDENTITY_SWITCHER = import.meta.env.DEV || import.meta.env.VITE_LOCAL_IDENTITY_SWITCHER === 'true';
 const LOCAL_IDENTITY_OPTIONS = [
@@ -277,6 +278,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'content-type': 'application/json', 'x-employee-id': localEmployeeId(), ...(init?.headers ?? {}) },
   });
   if (!response.ok) {
+    if (response.status === 401 && import.meta.env.PROD && typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth/')) {
+      const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      window.location.assign(`${AUTH_LOGIN_PATH}?returnTo=${encodeURIComponent(returnTo)}`);
+    }
     const detail = await response.text();
     let message = '';
     try {

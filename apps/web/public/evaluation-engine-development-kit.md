@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：0.8.4。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：0.8.5。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -13,7 +13,7 @@
 
 # 评测引擎开发指南
 
-> 版本：0.8.4
+> 版本：0.8.5
 > 用途：供评测引擎开发者和其他 AI 阅读。仓库内 contracts/ 是最终事实来源；本文档不包含员工信息、凭据或运行日志。
 
 ## 1. 平台边界
@@ -239,7 +239,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 ## 嵌入的仓库文件
 
-共 56 个文件，按仓库相对路径嵌入。
+共 66 个文件，按仓库相对路径嵌入。
 
 --- BEGIN FILE: AGENTS.md ---
 
@@ -283,10 +283,10 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台开发总览
 
-> 当前版本：`v0.8.4`
-> 更新日期：2026-08-05
-> 当前阶段：v0.8.4 资料包跨平台构建修复已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
-> 发布范围：在 v0.8.3 资料包构建修复基础上，统一 ZIP 文本换行、固定压缩参数并补齐跨平台回归门禁，不含业务新功能。
+> 当前版本：`v0.8.5`
+> 更新日期：2026-08-06
+> 当前阶段：v0.8.5 LDAP3 统一认证和 Windows 生产模式验收资料已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
+> 发布范围：补齐 LDAP3 `TRUSTED_GATEWAY` 登录适配器、Nginx 部署手册、Windows 生产模式验收手册和生产 401 登录跳转，不修改业务评分契约和数据库迁移。
 > 文档职责：项目架构、整体设计、版本沿革、当前边界、后续路线和 Codex 交接入口
 
 ## 1. 如何使用和维护本文档
@@ -483,7 +483,7 @@ Platform API 校验、重算、幂等保存
 
 员工只能看到按训战揭晓策略开放的结果；管理员在权限范围内可进行运营和复核。
 
-## 5. 当前实现状态（v0.8.4）
+## 5. 当前实现状态（v0.8.5）
 
 ### 5.1 已可本地验收
 
@@ -628,6 +628,17 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 
 版本验证记录：`pnpm kit:test`（1/1）、`pnpm lint`、`pnpm test`（125 项，124 通过、1 项显式跳过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm build`、连续构建 SHA-256 一致性和 `git diff --check` 全部通过；根目录、Web、API 版本均为 `0.8.4`。
 
+### 5.9 v0.8.5 发布状态（2026-08-06）
+
+本次补齐内网 LDAP3 登录接入和 Windows 个人电脑生产模式验收，不涉及 API 业务状态机、评分 Schema、OpenAPI 契约或数据库迁移：
+
+- 新增 LDAP3 网关服务，按内网示例完成域账号绑定、工号/姓名/部门解析、HttpOnly 会话、CSRF 和 `TRUSTED_GATEWAY` HMAC 身份头；
+- 生产 Web/API 在可信网关返回 401 时跳转 `/auth/login`，登录页复用平台品牌并提供独立云图标；
+- 新增 Linux Nginx + LDAP3 单服务器部署手册和 Windows Nginx + PostgreSQL + MinIO 生产模式端到端验收手册；
+- 评测引擎资料包、README、CI 和 LDAP3 回归测试同步到 `v0.8.5`。
+
+版本验证记录：`pnpm ldap3:test`（15/15）和 `git diff --check` 已通过；完整构建、全量测试和真实内网 LDAP 登录需在目标环境继续执行。
+
 ## 6. 版本沿革
 
 详细变更和修复见 `CHANGELOG.md`，这里仅保留交接所需的架构演进。
@@ -648,6 +659,7 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 | `v0.8.2` | 2026-08-05 | 全局代码评审缺陷修复：修复 OIDC `ES256` 验签恒失败、JWKS 密钥轮换认证中断、Prisma Client 生成缺失导致的 CI 失败，并收紧身份 Guard 健康检查豁免范围。 |
 | `v0.8.3` | 2026-08-05 | 修复评测引擎资料包 ZIP 的构建不确定性（固定时间戳、权限位和条目顺序）及资料包版本号漂移。 |
 | `v0.8.4` | 2026-08-05 | 修复资料包 ZIP 的 CRLF/LF 跨平台差异，固定压缩级别，新增构建回归测试并接入 CI。 |
+| `v0.8.5` | 2026-08-06 | 新增 LDAP3 `TRUSTED_GATEWAY` 登录适配器、Nginx 部署手册、Windows 生产模式验收手册和生产 401 登录跳转。 |
 
 ## 7. 后续开发路线
 
@@ -823,7 +835,7 @@ git diff --check
 
 # 分组核心网AI能力提升平台
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.4`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.5`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
 
 ## 当前能力
 
@@ -904,6 +916,7 @@ pnpm contract:test
 pnpm grader:test
 pnpm test
 pnpm kit:test
+pnpm ldap3:test
 pnpm build
 pnpm acceptance:local
 ```
@@ -915,6 +928,9 @@ pnpm acceptance:local
 - [`contracts/openapi.yaml`](contracts/openapi.yaml)：API 契约；
 - [`docs/evaluation-engine-protocol.md`](docs/evaluation-engine-protocol.md)：Worker、Code Agent 和评测引擎协议；
 - [`docs/v0.8-development-manual.md`](docs/v0.8-development-manual.md)：v0.8.x 评测运行环境、管理运营与身份层约束开发手册；
+- [`docs/deployment/ldap3-trusted-gateway.md`](docs/deployment/ldap3-trusted-gateway.md)：LDAP3 统一认证网关接入说明；
+- [`docs/deployment/ldap3-nginx-intranet-deployment.md`](docs/deployment/ldap3-nginx-intranet-deployment.md)：内网单服务器 Nginx + LDAP3 部署手册（可直接交给弱模型执行）；
+- [`docs/deployment/windows-production-smoke-test.md`](docs/deployment/windows-production-smoke-test.md)：Windows 个人电脑上的生产模式端到端验收手册；
 - [`docs/submission-contract.md`](docs/submission-contract.md)：交付目录契约；
 - [`docs/capability-model.md`](docs/capability-model.md)：能力模型；
 - [`AI训战平台设计方案.html`](AI训战平台设计方案.html)：原始产品设计参考。
@@ -5143,6 +5159,712 @@ components:
 --- END FILE: contracts/submission-contract.schema.json ---
 
 
+--- BEGIN FILE: docs/deployment/ldap3-nginx-intranet-deployment.md ---
+
+# 内网单服务器部署手册：Nginx + LDAP3 + AI 能力提升平台
+
+> 给内网部署 AI 使用。请严格按顺序执行，不要自行替换认证方案、删除身份头或把 API 端口暴露给用户。
+
+## 0. 目标结果
+
+部署完成后，用户只访问一个地址：
+
+~~~text
+https://ai-platform.intra.example/
+~~~
+
+请求流向固定为：
+
+~~~text
+浏览器
+  ├─ /                 → Nginx → Web 静态文件
+  ├─ /auth/login      → Nginx → LDAP3 网关
+  ├─ /login-logo.png  → Nginx → LDAP3 网关
+  └─ /api/v1/*        → Nginx → LDAP3 /auth/verify → Platform API
+~~~
+
+LDAP3 网关使用内网 LDAP 域账号校验登录，成功后保存 HttpOnly 会话 Cookie。Nginx 每次转发 API 前调用 /auth/verify，把网关返回的签名身份头写入 API 请求。Platform API 只信任签名身份头。
+
+## 1. 不能违反的规则
+
+1. PLATFORM_IDENTITY_MODE 必须是 TRUSTED_GATEWAY。
+2. Platform API 的 3000 端口和 LDAP3 网关的 8081 端口只监听 127.0.0.1，不允许办公网直接访问。
+3. TRUSTED_GATEWAY_HMAC_SECRET 必须在 API 和 LDAP3 网关中完全相同。
+4. LDAP_GATEWAY_SESSION_SECRET 只能放在 LDAP3 网关，不能和 HMAC 密钥复用。
+5. LDAP 密码不能写入 Git、日志、数据库、Nginx 配置或前端代码。
+6. 生产环境使用 HTTPS，并设置 LDAP_GATEWAY_COOKIE_SECURE=true。
+7. 不要设置 PLATFORM_IDENTITY_MODE=LOCAL，不要设置 ALLOW_ANONYMOUS_LOCAL=true。
+
+## 2. 服务器准备
+
+以下命令适用于 Ubuntu/Debian 类 Linux。若内网系统不同，请让系统管理员提供等价的软件包，不要让 AI 自行更换部署方式。
+
+需要的软件：
+
+- Node.js 20 或更高版本；
+- pnpm 11.8.0；
+- Python 3.11 或更高版本；
+- Nginx；
+- Git；
+- OpenSSL；
+- PostgreSQL 和生产对象存储（平台生产模式要求）。
+
+检查版本：
+
+~~~bash
+node --version
+pnpm --version
+python3 --version
+nginx -v
+git --version
+~~~
+
+如果 Node.js 低于 20，先停止部署并升级 Node.js。
+
+创建运行用户和目录：
+
+~~~bash
+sudo useradd --system --home-dir /opt/ai-training-platform --shell /usr/sbin/nologin ai-platform
+sudo mkdir -p /opt/ai-training-platform/deploy
+sudo mkdir -p /etc/nginx/tls
+sudo chown -R ai-platform:ai-platform /opt/ai-training-platform
+~~~
+
+## 3. 获取代码和安装依赖
+
+把 <内网 Git 地址> 替换为实际仓库地址：
+
+~~~bash
+sudo git clone <内网 Git 地址> /opt/ai-training-platform
+sudo chown -R ai-platform:ai-platform /opt/ai-training-platform
+cd /opt/ai-training-platform
+
+sudo -u ai-platform corepack enable
+sudo -u ai-platform corepack prepare pnpm@11.8.0 --activate
+sudo -u ai-platform pnpm install --frozen-lockfile
+
+sudo -u ai-platform python3 -m venv services/ldap3-gateway/.venv
+sudo -u ai-platform services/ldap3-gateway/.venv/bin/python -m pip install --upgrade pip
+sudo -u ai-platform services/ldap3-gateway/.venv/bin/pip install -r services/ldap3-gateway/requirements.txt
+~~~
+
+## 4. 创建 API 环境变量
+
+创建文件：
+
+~~~bash
+sudo install -o ai-platform -g ai-platform -m 600 /dev/null /opt/ai-training-platform/deploy/platform-api.env
+sudo nano /opt/ai-training-platform/deploy/platform-api.env
+~~~
+
+写入下面内容，并替换尖括号中的值：
+
+platform-api.env 会被 systemd 和迁移命令读取；含有空格、# 或 $ 的值必须使用单引号包住。数据库密码中的特殊字符必须先按 URL 规则编码后再放入 DATABASE_URL。
+
+~~~env
+NODE_ENV=production
+HOST=127.0.0.1
+PORT=3000
+
+PLATFORM_IDENTITY_MODE=TRUSTED_GATEWAY
+TRUSTED_GATEWAY_HMAC_SECRET=<复制同一条随机密钥到 LDAP3 网关>
+TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+
+PLATFORM_REPOSITORY=postgres
+DATABASE_URL=postgresql://<数据库用户>:<数据库密码>@<数据库地址>:5432/<数据库名>
+
+OBJECT_STORAGE_MODE=s3
+OBJECT_STORAGE_BUCKET=<对象存储桶>
+OBJECT_STORAGE_REGION=<对象存储区域>
+OBJECT_STORAGE_ENDPOINT=<内网对象存储地址>
+OBJECT_STORAGE_ACCESS_KEY_ID=<对象存储访问密钥>
+OBJECT_STORAGE_SECRET_ACCESS_KEY=<对象存储私钥>
+OBJECT_STORAGE_FORCE_PATH_STYLE=true
+OBJECT_STORAGE_PREFIX=platform
+
+PROJECT_ROOT=/opt/ai-training-platform
+ARTIFACT_ROOT=/opt/ai-training-platform/tmp/artifacts
+ENGINE_PACKAGE_ROOT=/opt/ai-training-platform/tmp/engine-packages
+LOCAL_WORKSPACE_ROOT=/opt/ai-training-platform
+EMBEDDED_EVALUATION_WORKER=false
+CORS_ORIGINS=https://ai-platform.intra.example
+~~~
+
+生成 HMAC 密钥的方法：
+
+~~~bash
+openssl rand -hex 32
+~~~
+
+执行一次，把输出复制到 TRUSTED_GATEWAY_HMAC_SECRET。再执行一次，把输出作为 LDAP_GATEWAY_SESSION_SECRET。不要把生成结果发给 AI 或写入聊天记录。
+
+## 5. 创建 LDAP3 网关环境变量
+
+创建文件：
+
+~~~bash
+sudo install -o ai-platform -g ai-platform -m 600 /dev/null /opt/ai-training-platform/deploy/ldap3-gateway.env
+sudo nano /opt/ai-training-platform/deploy/ldap3-gateway.env
+~~~
+
+写入下面内容：
+
+~~~env
+LDAP_GATEWAY_HOST=127.0.0.1
+LDAP_GATEWAY_PORT=8081
+
+LDAP_SERVER=china.huawei.com
+LDAP_PORT=389
+LDAP_USE_SSL=false
+LDAP_START_TLS=true
+LDAP_CA_CERT_FILE=/etc/ssl/certs/company-ldap-ca.pem
+LDAP_BASE_DN=dc=china,dc=huawei,dc=com
+# systemd 环境文件中写两个反斜杠，进程最终收到一个反斜杠。
+LDAP_BIND_PREFIX=China\\
+LDAP_ACCOUNT_ATTRIBUTE=sAMAccountName
+LDAP_TITLE_ATTRIBUTE=title
+LDAP_DEPARTMENT_ATTRIBUTE=department
+LDAP_NAME_ATTRIBUTE=displayName
+LDAP_TIMEOUT_SECONDS=5
+
+LDAP_GATEWAY_SESSION_SECRET=<第二条独立随机密钥>
+TRUSTED_GATEWAY_HMAC_SECRET=<必须与 platform-api.env 完全相同>
+LDAP_GATEWAY_SESSION_TTL_SECONDS=28800
+TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+LDAP_GATEWAY_COOKIE_SECURE=true
+~~~
+
+将企业 LDAP CA 证书复制到配置中的路径：
+
+~~~bash
+sudo install -o ai-platform -g ai-platform -m 644 <企业 LDAP CA 证书> /etc/ssl/certs/company-ldap-ca.pem
+~~~
+
+如果内网 LDAP 只提供 LDAPS，将配置改为：
+
+~~~env
+LDAP_PORT=636
+LDAP_USE_SSL=true
+LDAP_START_TLS=false
+~~~
+
+LDAP_USE_SSL 和 LDAP_START_TLS 不能同时为 true。
+
+## 6. 构建 Web 和 API
+
+构建前必须设置同域 API 地址，否则浏览器会错误访问用户电脑自己的 127.0.0.1：
+
+~~~bash
+cd /opt/ai-training-platform
+export VITE_API_BASE=/api/v1
+export VITE_AUTH_LOGIN_PATH=/auth/login
+sudo -u ai-platform env VITE_API_BASE="$VITE_API_BASE" VITE_AUTH_LOGIN_PATH="$VITE_AUTH_LOGIN_PATH" pnpm build
+~~~
+
+构建成功后必须存在：
+
+~~~text
+/opt/ai-training-platform/apps/web/dist/index.html
+/opt/ai-training-platform/apps/web/dist/brand-logo.png
+/opt/ai-training-platform/services/platform-api/dist/main.js
+~~~
+
+首次使用 PostgreSQL 时，在启动 API 前执行迁移：
+
+~~~bash
+cd /opt/ai-training-platform
+sudo -u ai-platform bash -lc 'set -a; source /opt/ai-training-platform/deploy/platform-api.env; set +a; cd /opt/ai-training-platform; pnpm --filter @ai-training/platform-api prisma:migrate:deploy'
+~~~
+
+如果这条命令报错，不要删除迁移目录；先检查 DATABASE_URL、数据库网络和数据库权限。
+
+## 7. 创建 systemd 服务
+
+### 7.1 Platform API
+
+~~~bash
+sudo tee /etc/systemd/system/ai-platform-api.service > /dev/null <<'EOF'
+[Unit]
+Description=AI Training Platform API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-platform
+Group=ai-platform
+WorkingDirectory=/opt/ai-training-platform
+EnvironmentFile=/opt/ai-training-platform/deploy/platform-api.env
+ExecStart=/usr/bin/node /opt/ai-training-platform/services/platform-api/dist/main.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+~~~
+
+### 7.2 LDAP3 网关
+
+~~~bash
+sudo tee /etc/systemd/system/ai-platform-ldap3.service > /dev/null <<'EOF'
+[Unit]
+Description=AI Training Platform LDAP3 Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-platform
+Group=ai-platform
+WorkingDirectory=/opt/ai-training-platform/services/ldap3-gateway
+EnvironmentFile=/opt/ai-training-platform/deploy/ldap3-gateway.env
+ExecStart=/opt/ai-training-platform/services/ldap3-gateway/.venv/bin/python /opt/ai-training-platform/services/ldap3-gateway/ldap3_gateway.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+~~~
+
+启动服务：
+
+~~~bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ai-platform-api.service
+sudo systemctl enable --now ai-platform-ldap3.service
+sudo systemctl status ai-platform-api.service --no-pager
+sudo systemctl status ai-platform-ldap3.service --no-pager
+~~~
+
+## 8. 配置 Nginx
+
+先把平台 HTTPS 证书放到：
+
+~~~text
+/etc/nginx/tls/ai-platform.crt
+/etc/nginx/tls/ai-platform.key
+~~~
+
+创建 Nginx 配置：
+
+~~~bash
+sudo nano /etc/nginx/sites-available/ai-platform
+~~~
+
+完整内容如下。只需要替换 server_name、证书路径和项目路径；不要删除 auth_request、X-Trusted-* 或清理浏览器身份头的配置。
+
+~~~nginx
+server {
+    listen 80;
+    server_name ai-platform.intra.example;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ai-platform.intra.example;
+
+    ssl_certificate     /etc/nginx/tls/ai-platform.crt;
+    ssl_certificate_key /etc/nginx/tls/ai-platform.key;
+
+    client_max_body_size 75m;
+
+    # 只允许 Nginx 内部子请求调用，浏览器不能直接访问。
+    location = /_ldap_verify {
+        internal;
+        proxy_pass http://127.0.0.1:8081/auth/verify;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Host $host;
+        proxy_set_header Cookie $http_cookie;
+    }
+
+    # 登录页和登录页图标不需要先登录。
+    location = /auth/login {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Cookie $http_cookie;
+    }
+
+    location = /auth/logout {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Cookie $http_cookie;
+    }
+
+    location = /login-logo.png {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+    }
+
+    # 主站 Logo 也是公共静态资源。
+    location = /brand-logo.png {
+        root /opt/ai-training-platform/apps/web/dist;
+    }
+
+    # API 必须先通过 LDAP3 会话校验。
+    location /api/ {
+        auth_request /_ldap_verify;
+        auth_request_set $trusted_employee_no $upstream_http_x_trusted_employee_no;
+        auth_request_set $trusted_name $upstream_http_x_trusted_name;
+        auth_request_set $trusted_department $upstream_http_x_trusted_department;
+        auth_request_set $trusted_issued_at $upstream_http_x_trusted_issued_at;
+        auth_request_set $trusted_signature $upstream_http_x_trusted_identity_signature;
+
+        # 删除浏览器可能伪造的身份头，再写入网关签名头。
+        proxy_set_header X-Employee-Id "";
+        proxy_set_header X-Trusted-Employee-No $trusted_employee_no;
+        proxy_set_header X-Trusted-Name $trusted_name;
+        proxy_set_header X-Trusted-Department $trusted_department;
+        proxy_set_header X-Trusted-Issued-At $trusted_issued_at;
+        proxy_set_header X-Trusted-Identity-Signature $trusted_signature;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_read_timeout 300s;
+    }
+
+    # 未登录打开主站时跳转 LDAP3 登录页。
+    location / {
+        auth_request /_ldap_verify;
+        error_page 401 =302 /auth/login?returnTo=$request_uri;
+        root /opt/ai-training-platform/apps/web/dist;
+        try_files $uri $uri/ /index.html;
+    }
+}
+~~~
+
+启用并检查配置：
+
+~~~bash
+sudo ln -s /etc/nginx/sites-available/ai-platform /etc/nginx/sites-enabled/ai-platform
+sudo nginx -t
+sudo systemctl reload nginx
+~~~
+
+如果 ln 报“文件已存在”，不要重复创建；先检查：
+
+~~~bash
+ls -l /etc/nginx/sites-enabled/ai-platform
+~~~
+
+## 9. 按顺序验收
+
+### 9.1 检查本机服务
+
+~~~bash
+curl -fsS http://127.0.0.1:3000/api/v1/health
+curl -fsS http://127.0.0.1:8081/healthz
+curl -I https://ai-platform.intra.example/login-logo.png
+~~~
+
+三个命令都应成功。LDAP3 网关健康检查只代表进程存活，不代表 LDAP 网络已连通。
+
+### 9.2 检查未登录跳转
+
+~~~bash
+curl -k -I https://ai-platform.intra.example/
+~~~
+
+响应应为 302，并且 Location 包含：
+
+~~~text
+/auth/login?returnTo=/
+~~~
+
+### 9.3 检查浏览器登录
+
+1. 使用浏览器打开 https://ai-platform.intra.example/。
+2. 应自动跳转到登录页。
+3. 页面显示云图标、登录、工号、密码。
+4. 输入真实 LDAP 工号和密码。
+5. 登录成功后回到原页面。
+6. 打开“个人中心”，确认工号、姓名、部门正确。
+
+### 9.4 检查安全边界
+
+~~~bash
+curl -i http://127.0.0.1:3000/api/v1/me
+~~~
+
+此请求只能在服务器本机看到；不要把 3000 端口配置为 0.0.0.0，不要把它加入防火墙入站白名单。
+
+## 10. 常见故障：只按表格排查
+
+| 现象 | 检查顺序 |
+| --- | --- |
+| 打开主站没有跳登录页 | nginx -t；location / 是否有 auth_request；/_ldap_verify 是否 internal |
+| 登录页能打开但 Logo 不显示 | systemctl status ai-platform-ldap3；curl -I http://127.0.0.1:8081/login-logo.png；Nginx 是否配置 /login-logo.png |
+| 登录后马上又回到登录页 | HTTPS 是否启用；LDAP_GATEWAY_COOKIE_SECURE 是否为 true；浏览器是否保存 Cookie |
+| LDAP 登录失败 | LDAP 主机、端口、CA 证书、LDAP_START_TLS/LDAP_USE_SSL、LDAP_BIND_PREFIX |
+| 页面能打开但 API 返回 401 | API 和网关的 HMAC 密钥是否完全相同；Nginx 是否复制五个 X-Trusted-* 头 |
+| API 返回 trusted gateway identity is expired | 两个服务的系统时间；NTP；TRUSTED_GATEWAY_MAX_AGE_SECONDS |
+| 员工姓名或部门为空 | 检查 AD title 格式是否为 工号,姓名,部门，以及 department、displayName 字段 |
+| Nginx 返回 413 | 增大 client_max_body_size，当前平台示例为 75m |
+| API 服务启动失败 | journalctl -u ai-platform-api -n 100 --no-pager；重点检查数据库和对象存储变量 |
+
+查看日志：
+
+~~~bash
+sudo journalctl -u ai-platform-api -f
+sudo journalctl -u ai-platform-ldap3 -f
+sudo tail -f /var/log/nginx/error.log
+~~~
+
+日志中不得出现 LDAP 密码、会话 Cookie、HMAC 密钥或完整 SSO 断言。发现后立即停止服务并清理日志。
+
+## 11. 更新版本
+
+更新前先备份数据库、对象存储和 deploy/*.env：
+
+~~~bash
+cd /opt/ai-training-platform
+sudo systemctl stop ai-platform-api.service ai-platform-ldap3.service
+sudo -u ai-platform git pull --ff-only
+sudo -u ai-platform pnpm install --frozen-lockfile
+sudo -u ai-platform services/ldap3-gateway/.venv/bin/pip install -r services/ldap3-gateway/requirements.txt
+export VITE_API_BASE=/api/v1
+export VITE_AUTH_LOGIN_PATH=/auth/login
+sudo -u ai-platform env VITE_API_BASE="$VITE_API_BASE" VITE_AUTH_LOGIN_PATH="$VITE_AUTH_LOGIN_PATH" pnpm build
+sudo systemctl start ai-platform-api.service ai-platform-ldap3.service
+sudo nginx -t && sudo systemctl reload nginx
+~~~
+
+如果数据库迁移失败，停止后续操作，恢复备份并联系平台开发人员。不要删除 prisma/migrations。
+
+## 12. 部署完成回报模板
+
+弱模型完成后只回报下面信息，不要回报密钥、密码、Cookie 或完整日志：
+
+~~~text
+部署结果：
+- 代码目录：
+- 平台域名：
+- API health：通过 / 失败
+- LDAP3 health：通过 / 失败
+- 未登录跳转：通过 / 失败
+- 浏览器 LDAP 登录：通过 / 失败
+- /api/v1/me 返回员工信息：通过 / 失败
+- 未解决问题：
+~~~
+
+相关详细协议：
+
+- ldap3-trusted-gateway.md：LDAP3 网关实现和 HMAC 细节；
+- trusted-gateway-sso.md：平台可信网关身份协议；
+- windows-production-smoke-test.md：Windows 个人电脑上的生产模式端到端验收步骤。
+
+--- END FILE: docs/deployment/ldap3-nginx-intranet-deployment.md ---
+
+
+--- BEGIN FILE: docs/deployment/ldap3-trusted-gateway.md ---
+
+# LDAP3 统一认证接入平台
+
+这份文档把内网提供的 LDAP3 示例接入现有平台登录链路。平台不直接接收 LDAP 密码，也不在平台数据库保存 LDAP 凭据；LDAP3 运行在内网认证网关或同一安全域的身份适配器中。
+
+## 1. 登录链路
+
+```text
+浏览器
+  |
+  | 访问平台，未登录
+  v
+LDAP3 网关 /auth/login
+  |-- ldap3.Connection(auto_bind=True, user="China\\" + 工号, password=密码)
+  |-- 查询 sAMAccountName
+  |-- 从 title 解析 工号,姓名,部门
+  |-- department 作为部门兜底
+  `-- 设置 HttpOnly 会话 Cookie
+          |
+          | /auth/verify 供反向代理校验
+          v
+反向代理
+  |-- 生成五个 X-Trusted-* 请求头
+  `-- /api/ 转发 Platform API
+          |
+          `-- TRUSTED_GATEWAY Guard 验签并按工号幂等建档
+```
+
+平台 Web 和 API 建议使用同一个内网域名，例如 `https://ai-platform.intra/` 和 `https://ai-platform.intra/api/v1`。API 端口只允许反向代理或网关访问。
+
+## 2. LDAP 配置映射
+
+示例代码对应的默认配置如下：
+
+| 配置 | 默认值 | 说明 |
+| --- | --- | --- |
+| `LDAP_SERVER` | `china.huawei.com` | LDAP/AD 主机名 |
+| `LDAP_PORT` | `389` | 生产建议改为 LDAPS 的 `636`，或由网关启用 StartTLS |
+| `LDAP_USE_SSL` | `false` | 使用 LDAPS 时设为 `true`，通常配合端口 `636` |
+| `LDAP_START_TLS` | `false` | 使用 LDAP StartTLS 时设为 `true`，与 `LDAP_USE_SSL` 不能同时开启 |
+| `LDAP_BASE_DN` | `dc=china,dc=huawei,dc=com` | 搜索根 DN |
+| `LDAP_BIND_PREFIX` | `China\` | 与示例的 `China\` + 工号一致 |
+| `LDAP_ACCOUNT_ATTRIBUTE` | `sAMAccountName` | 工号搜索字段 |
+| `LDAP_TITLE_ATTRIBUTE` | `title` | 按 `工号,姓名,部门` 解析 |
+| `LDAP_DEPARTMENT_ATTRIBUTE` | `department` | `title` 没有部门时的兜底字段 |
+| `LDAP_NAME_ATTRIBUTE` | `displayName` | `title` 没有姓名时的兜底字段 |
+| `LDAP_CA_CERT_FILE` | 空 | LDAPS/StartTLS 的企业 CA 证书文件；启用 TLS 时按网关证书策略配置 |
+
+代码对 LDAP 搜索值做 RFC 4515 转义，避免把工号直接拼入过滤器造成 LDAP 注入；只请求上述三个属性，不使用 `ALL_ATTRIBUTES`。
+
+## 3. 网关配置
+
+在网关环境中注入：
+
+```env
+LDAP_SERVER=china.huawei.com
+LDAP_PORT=389
+LDAP_USE_SSL=false
+LDAP_START_TLS=true
+LDAP_BASE_DN=dc=china,dc=huawei,dc=com
+LDAP_CA_CERT_FILE=/etc/ssl/certs/company-ldap-ca.pem
+LDAP_BIND_PREFIX=China\
+LDAP_ACCOUNT_ATTRIBUTE=sAMAccountName
+LDAP_TITLE_ATTRIBUTE=title
+LDAP_DEPARTMENT_ATTRIBUTE=department
+LDAP_NAME_ATTRIBUTE=displayName
+LDAP_TIMEOUT_SECONDS=5
+
+# 两个用途不同的密钥，均由密钥管理系统注入，不要复用或提交 Git
+LDAP_GATEWAY_SESSION_SECRET=<至少 32 字符随机值>
+TRUSTED_GATEWAY_HMAC_SECRET=<至少 32 字符随机值>
+LDAP_GATEWAY_SESSION_TTL_SECONDS=28800
+TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+LDAP_GATEWAY_COOKIE_SECURE=true
+```
+
+启动参考实现：
+
+```bash
+cd services/ldap3-gateway
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python ldap3_gateway.py
+```
+
+参考实现默认监听 `127.0.0.1:8081`，生产应由 HTTPS 反向代理承载，不要直接暴露给办公网。
+
+## 4. 反向代理契约
+
+反向代理对每一个发往 Platform API 的请求都要：
+
+1. 删除浏览器传入的 `X-Employee-Id`、`X-Trusted-*` 等身份头；
+2. 以当前会话调用网关 `GET /auth/verify`；
+3. 将验证响应中的五个 `X-Trusted-*` 头复制到 API 请求；
+4. API 请求只转发到内网 Platform API 地址。
+
+Nginx `auth_request` 适配示意：
+
+```nginx
+location = /_ldap_verify {
+    internal;
+    proxy_pass http://ldap-gateway:8081/auth/verify;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Cookie $http_cookie;
+}
+
+location /api/ {
+    auth_request /_ldap_verify;
+    auth_request_set $trusted_employee_no $upstream_http_x_trusted_employee_no;
+    auth_request_set $trusted_name $upstream_http_x_trusted_name;
+    auth_request_set $trusted_department $upstream_http_x_trusted_department;
+    auth_request_set $trusted_issued_at $upstream_http_x_trusted_issued_at;
+    auth_request_set $trusted_signature $upstream_http_x_trusted_identity_signature;
+
+    proxy_set_header X-Employee-Id "";
+    proxy_set_header X-Trusted-Employee-No $trusted_employee_no;
+    proxy_set_header X-Trusted-Name $trusted_name;
+    proxy_set_header X-Trusted-Department $trusted_department;
+    proxy_set_header X-Trusted-Issued-At $trusted_issued_at;
+    proxy_set_header X-Trusted-Identity-Signature $trusted_signature;
+    proxy_pass http://platform-api:3000;
+}
+
+location = /auth/login {
+    proxy_pass http://ldap-gateway:8081;
+    proxy_set_header Host $host;
+    proxy_set_header Cookie $http_cookie;
+}
+
+location = /auth/logout {
+    proxy_pass http://ldap-gateway:8081;
+    proxy_set_header Host $host;
+    proxy_set_header Cookie $http_cookie;
+}
+
+# 品牌资源要允许未登录访问，否则浏览器加载登录页时会被
+# auth_request 再次重定向。
+location = /brand-logo.png {
+    proxy_pass http://platform-web:5173/brand-logo.png;
+    proxy_set_header Host $host;
+}
+
+location = /login-logo.png {
+    proxy_pass http://ldap-gateway:8081/login-logo.png;
+    proxy_set_header Host $host;
+}
+
+location / {
+    auth_request /_ldap_verify;
+    error_page 401 =302 /auth/login?returnTo=$request_uri;
+    proxy_pass http://platform-web:5173;
+}
+```
+
+实际网关若不是 Nginx，必须实现同样的“会话校验—重新生成签名头—转发”语义。不要把 `/auth/verify` 响应头直接暴露给浏览器作为登录凭据。
+
+## 5. 平台配置和首次登录
+
+Platform API：
+
+```env
+NODE_ENV=production
+PLATFORM_IDENTITY_MODE=TRUSTED_GATEWAY
+TRUSTED_GATEWAY_HMAC_SECRET=<与网关一致>
+TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+VITE_API_BASE=/api/v1
+```
+
+用户登录成功后，平台第一次收到该工号的可信请求时会自动登记员工，并同步姓名和部门提示：
+
+- 工号、姓名来自 LDAP，平台员工和管理员不能修改；
+- 部门匹配组织树时自动归属，匹配不到时由全局管理员处理；
+- 昵称和头像仍由员工在平台个人资料中维护；
+- LDAP 部门字段不会自动赋予管理员权限。
+
+## 6. 安全验收
+
+- LDAP 只使用 LDAPS/StartTLS 或等价的内网加密通道；
+- 登录失败只返回统一错误，不区分用户不存在、密码错误和 LDAP 细节；
+- 工号搜索值经过 LDAP filter 转义；
+- 密码、会话 Cookie、LDAP 断言和身份头不写入日志；
+- 浏览器伪造 `X-Employee-Id` 或修改任意 `X-Trusted-*` 但不改签名时返回 401；
+- 签名超过 `TRUSTED_GATEWAY_MAX_AGE_SECONDS` 时返回 401；
+- Platform API 端口不能绕过网关直连；
+- 网关会话过期后 `/auth/verify` 返回 401，并由前端跳转 `/auth/login`。
+
+## 7. 相关文件
+
+- `services/ldap3-gateway/ldap3_gateway.py`：LDAP3 绑定、属性解析、会话和网关验签头；
+- `services/ldap3-gateway/requirements.txt`：网关运行依赖；
+- `services/ldap3-gateway/test_ldap3_gateway.py`：不连接真实 LDAP 的回归测试；
+- `docs/deployment/trusted-gateway-sso.md`：平台 HMAC 身份协议总说明。
+
+--- END FILE: docs/deployment/ldap3-trusted-gateway.md ---
+
+
 --- BEGIN FILE: docs/deployment/trusted-gateway-sso.md ---
 
 # TRUSTED_GATEWAY 统一认证接入手册
@@ -5326,10 +6048,485 @@ VITE_API_BASE=/api/v1
 - `services/platform-api/src/identity.ts`：模式配置、HMAC 验证和 OIDC 验证。
 - `services/platform-api/src/identity-guard.ts`：请求级身份校验和 SSO 首次建档。
 - `services/platform-api/src/user-directory.ts`：工号幂等同步、部门匹配和用户资料。
+- `docs/deployment/ldap3-trusted-gateway.md`：使用内网 LDAP3 校验账号并接入本手册定义的网关协议。
+- `docs/deployment/ldap3-nginx-intranet-deployment.md`：单服务器 Nginx + LDAP3 的逐步部署手册。
 - `.env.example`：本地和生产身份环境变量示例。
 - `docs/architecture/security-boundary.md`：平台整体安全边界。
 
 --- END FILE: docs/deployment/trusted-gateway-sso.md ---
+
+
+--- BEGIN FILE: docs/deployment/windows-production-smoke-test.md ---
+
+# Windows 个人电脑生产模式验收手册
+
+> 这是一套“生产模式本地验收”方案，不等于正式生产部署。它让 Windows 电脑上的 API 使用生产约束（PostgreSQL、S3 兼容对象存储、`TRUSTED_GATEWAY`），再通过 Nginx HTTPS 接入 LDAP3 网关。正式内网部署仍建议使用 Linux 服务器、独立 Worker、密钥管理和备份策略。
+
+## 0. 完成后的访问链路
+
+浏览器只打开一个地址：
+
+~~~text
+https://localhost/
+        |
+        +-- Nginx 443
+             +-- /             -> apps/web/dist 静态文件
+             +-- /auth/login   -> LDAP3 网关 127.0.0.1:8081
+             +-- /api/         -> auth_request -> LDAP3 /auth/verify -> API 127.0.0.1:3000
+             +-- /login-logo.png -> LDAP3 网关
+             +-- /brand-logo.png  -> Web 静态文件
+~~~
+
+API 只监听 `127.0.0.1:3000`，LDAP3 网关只监听 `127.0.0.1:8081`，用户不能直接访问这两个端口。Nginx 从 LDAP3 网关取得签名身份头，再转发给 API；API 不接收 LDAP 密码。
+
+## 1. 先确认是否具备真实 LDAP 条件
+
+在 Windows 电脑上连接公司内网或 VPN，然后在 PowerShell 执行：
+
+~~~powershell
+Test-NetConnection china.huawei.com -Port 389
+Test-NetConnection china.huawei.com -Port 636
+~~~
+
+如果 389/636 都失败，不能做真实 LDAP 登录，只能先做假 LDAP 单元测试或开发模式验收。不要为了绕过网络问题把 `PLATFORM_IDENTITY_MODE` 改回 `LOCAL` 后声称已经完成生产验收。
+
+LDAP 使用 StartTLS 时，需要企业 LDAP CA 的 PEM 文件；使用 LDAPS 时，也需要 CA 文件（除非企业明确提供了可信系统证书链）。向内网管理员取得例如：
+
+~~~text
+C:\certs\company-ldap-ca.pem
+~~~
+
+## 2. 安装依赖
+
+建议安装以下软件：
+
+- Git for Windows；
+- Node.js 20 或更高版本；
+- pnpm 11.8.0；
+- Python 3.11 或更高版本；
+- Nginx for Windows；
+- Docker Desktop（只用来运行 PostgreSQL 和 MinIO，最省事）；
+- OpenSSL（Git for Windows 通常已带有 `usr\bin\openssl.exe`）。
+
+检查版本：
+
+~~~powershell
+node --version
+corepack --version
+python --version
+git --version
+docker version
+~~~
+
+如果 Node.js 小于 20，或 Docker Desktop 没有运行，先停止，不要继续执行后面的启动命令。
+
+## 3. 获取代码和安装依赖
+
+下面假设代码目录为 `D:\ai-training-platform`，可以换成自己的目录，但后面的路径必须保持一致：
+
+~~~powershell
+git clone <内网 Git 地址> D:\ai-training-platform
+Set-Location D:\ai-training-platform
+
+corepack enable
+corepack prepare pnpm@11.8.0 --activate
+pnpm install --frozen-lockfile
+
+py -3.11 -m venv services\ldap3-gateway\.venv
+.\services\ldap3-gateway\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\services\ldap3-gateway\.venv\Scripts\pip.exe install -r services\ldap3-gateway\requirements.txt
+~~~
+
+## 4. 用 Docker Desktop 准备 PostgreSQL 和 MinIO
+
+生产模式禁止使用 `tmp/platform-data.json` 和本地对象目录。个人电脑上最简单的等价替身是本机 Docker 容器：
+
+~~~powershell
+docker run -d --name ai-platform-postgres `
+  -e POSTGRES_USER=platform `
+  -e POSTGRES_PASSWORD=change-this-local-password `
+  -e POSTGRES_DB=ai_training_platform `
+  -p 127.0.0.1:5432:5432 `
+  postgres:16
+
+docker run -d --name ai-platform-minio `
+  -e MINIO_ROOT_USER=platformminio `
+  -e MINIO_ROOT_PASSWORD=change-this-minio-password `
+  -p 127.0.0.1:9000:9000 `
+  -p 127.0.0.1:9001:9001 `
+  quay.io/minio/minio server /data --console-address ":9001"
+~~~
+
+打开 `http://127.0.0.1:9001`，使用上面的 MinIO 用户和密码登录，创建一个名为 `ai-training-platform` 的 bucket。不要勾选公开访问，平台使用 S3 API 访问。
+
+检查容器：
+
+~~~powershell
+docker ps --filter "name=ai-platform-postgres"
+docker ps --filter "name=ai-platform-minio"
+~~~
+
+这两个容器停止后，生产模式 API 会因为数据库或对象存储不可用而启动失败，这是预期行为。
+
+## 5. 生成两条独立密钥
+
+打开一个 PowerShell 窗口，执行：
+
+~~~powershell
+function New-RandomSecret {
+  $bytes = New-Object byte[] 32
+  [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+  [Convert]::ToHexString($bytes).ToLowerInvariant()
+}
+
+$trustedGatewaySecret = New-RandomSecret
+$ldapSessionSecret = New-RandomSecret
+$trustedGatewaySecret
+$ldapSessionSecret
+~~~
+
+把两条结果临时保存到密码管理器：
+
+- `trustedGatewaySecret`：API 和 LDAP3 网关必须使用同一条；
+- `ldapSessionSecret`：只给 LDAP3 网关使用，不能与第一条复用。
+
+不要把真实密钥写进 Git、截图、聊天记录、前端代码或 Nginx 配置。下面示例中的 `REPLACE_ME` 必须替换成真实值。
+
+## 6. 启动 API 的生产环境变量
+
+为 API 单独打开 PowerShell 窗口，在仓库根目录执行。变量只对这个窗口及其子进程生效，不会写入系统环境变量：
+
+~~~powershell
+Set-Location D:\ai-training-platform
+
+$env:NODE_ENV = 'production'
+$env:HOST = '127.0.0.1'
+$env:PORT = '3000'
+
+$env:PLATFORM_IDENTITY_MODE = 'TRUSTED_GATEWAY'
+$env:TRUSTED_GATEWAY_HMAC_SECRET = 'REPLACE_WITH_trustedGatewaySecret'
+$env:TRUSTED_GATEWAY_MAX_AGE_SECONDS = '90'
+
+$env:PLATFORM_REPOSITORY = 'postgres'
+$env:DATABASE_URL = 'postgresql://platform:change-this-local-password@127.0.0.1:5432/ai_training_platform'
+
+$env:OBJECT_STORAGE_MODE = 's3'
+$env:OBJECT_STORAGE_BUCKET = 'ai-training-platform'
+$env:OBJECT_STORAGE_REGION = 'us-east-1'
+$env:OBJECT_STORAGE_ENDPOINT = 'http://127.0.0.1:9000'
+$env:OBJECT_STORAGE_ACCESS_KEY_ID = 'platformminio'
+$env:OBJECT_STORAGE_SECRET_ACCESS_KEY = 'change-this-minio-password'
+$env:OBJECT_STORAGE_FORCE_PATH_STYLE = 'true'
+$env:OBJECT_STORAGE_PREFIX = 'platform'
+
+$env:PROJECT_ROOT = 'D:\ai-training-platform'
+$env:ARTIFACT_ROOT = 'D:\ai-training-platform\tmp\artifacts'
+$env:ENGINE_PACKAGE_ROOT = 'D:\ai-training-platform\tmp\engine-packages'
+$env:LOCAL_WORKSPACE_ROOT = 'D:\ai-training-platform'
+$env:EMBEDDED_EVALUATION_WORKER = 'false'
+$env:CORS_ORIGINS = 'https://localhost'
+~~~
+
+注意：不要设置 `PLATFORM_DATA_FILE`、`PLATFORM_REPOSITORY=file`、`OBJECT_STORAGE_MODE=local`、`PLATFORM_IDENTITY_MODE=LOCAL` 或 `ALLOW_ANONYMOUS_LOCAL=true`。
+
+## 7. 执行 PostgreSQL 迁移并构建生产前端
+
+仍在 API PowerShell 窗口执行：
+
+~~~powershell
+pnpm --filter @ai-training/platform-api prisma:migrate:deploy
+
+$env:VITE_API_BASE = '/api/v1'
+$env:VITE_AUTH_LOGIN_PATH = '/auth/login'
+pnpm build
+~~~
+
+构建完成后检查：
+
+~~~powershell
+Test-Path .\apps\web\dist\index.html
+Test-Path .\apps\web\dist\brand-logo.png
+Test-Path .\services\platform-api\dist\main.js
+~~~
+
+三个结果都必须是 `True`。生产构建默认不会显示右上角的本地多用户切换器。
+
+## 8. 启动 LDAP3 网关
+
+在第二个 PowerShell 窗口执行。把 `trustedGatewaySecret` 填成第 5 节的第一条密钥：
+
+~~~powershell
+Set-Location D:\ai-training-platform
+
+$env:LDAP_GATEWAY_HOST = '127.0.0.1'
+$env:LDAP_GATEWAY_PORT = '8081'
+$env:LDAP_SERVER = 'china.huawei.com'
+$env:LDAP_PORT = '389'
+$env:LDAP_USE_SSL = 'false'
+$env:LDAP_START_TLS = 'true'
+$env:LDAP_CA_CERT_FILE = 'C:\certs\company-ldap-ca.pem'
+$env:LDAP_BASE_DN = 'dc=china,dc=huawei,dc=com'
+$env:LDAP_BIND_PREFIX = 'China\'
+$env:LDAP_ACCOUNT_ATTRIBUTE = 'sAMAccountName'
+$env:LDAP_TITLE_ATTRIBUTE = 'title'
+$env:LDAP_DEPARTMENT_ATTRIBUTE = 'department'
+$env:LDAP_NAME_ATTRIBUTE = 'displayName'
+$env:LDAP_TIMEOUT_SECONDS = '5'
+
+$env:LDAP_GATEWAY_SESSION_SECRET = 'REPLACE_WITH_ldapSessionSecret'
+$env:TRUSTED_GATEWAY_HMAC_SECRET = 'REPLACE_WITH_trustedGatewaySecret'
+$env:LDAP_GATEWAY_SESSION_TTL_SECONDS = '28800'
+$env:TRUSTED_GATEWAY_MAX_AGE_SECONDS = '90'
+$env:LDAP_GATEWAY_COOKIE_SECURE = 'true'
+
+.\services\ldap3-gateway\.venv\Scripts\python.exe .\services\ldap3-gateway\ldap3_gateway.py
+~~~
+
+如果企业目录只开放 LDAPS，改为：
+
+~~~powershell
+$env:LDAP_PORT = '636'
+$env:LDAP_USE_SSL = 'true'
+$env:LDAP_START_TLS = 'false'
+~~~
+
+`LDAP_USE_SSL` 和 `LDAP_START_TLS` 不能同时为 `true`。登录网关启动后会监听 `127.0.0.1:8081`；`/healthz` 成功只表示进程存活，不表示 LDAP 登录已经验证成功。
+
+## 9. 启动生产 API
+
+回到第 6 节的 API PowerShell 窗口执行：
+
+~~~powershell
+pnpm --filter @ai-training/platform-api start
+~~~
+
+保持这个窗口打开。另开窗口检查：
+
+~~~powershell
+Invoke-WebRequest http://127.0.0.1:3000/api/v1/health | Select-Object -ExpandProperty Content
+Invoke-WebRequest http://127.0.0.1:8081/healthz | Select-Object -ExpandProperty Content
+~~~
+
+两个服务都应返回 JSON。不要把 3000 或 8081 端口直接发给同事访问；必须经过 Nginx。
+
+## 10. 安装并配置 Windows Nginx
+
+1. 从 Nginx 官方 Windows 压缩包解压到 `C:\nginx`；
+2. 创建 `C:\nginx\conf\tls`；
+3. 使用 OpenSSL 生成本机 HTTPS 证书：
+
+~~~powershell
+New-Item -ItemType Directory -Force C:\nginx\conf\tls | Out-Null
+& 'C:\Program Files\Git\usr\bin\openssl.exe' req -x509 -nodes -newkey rsa:2048 `
+  -keyout C:/nginx/conf/tls/localhost.key `
+  -out C:/nginx/conf/tls/localhost.crt `
+  -days 365 -subj '/CN=localhost'
+~~~
+
+如果 OpenSSL 不在该路径，使用 `Get-Command openssl` 找到实际路径。个人电脑测试可以接受浏览器的自签名证书提示；如果希望不再提示，可把 `localhost.crt` 导入当前用户的“受信任的根证书颁发机构”。
+
+把 `C:\nginx\conf\nginx.conf` 替换为下面的内容：
+
+~~~nginx
+worker_processes 1;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    client_max_body_size 75m;
+
+    server {
+        listen 80;
+        server_name localhost;
+        return 301 https://$host$request_uri;
+    }
+
+    server {
+        listen 443 ssl;
+        server_name localhost;
+
+        ssl_certificate     C:/nginx/conf/tls/localhost.crt;
+        ssl_certificate_key C:/nginx/conf/tls/localhost.key;
+
+        # 只允许 Nginx 内部 auth_request 调用。
+        location = /_ldap_verify {
+            internal;
+            proxy_pass http://127.0.0.1:8081/auth/verify;
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length '';
+            proxy_set_header Host $host;
+            proxy_set_header Cookie $http_cookie;
+        }
+
+        # 登录、退出和登录页图标不需要先登录。
+        location = /auth/login {
+            proxy_pass http://127.0.0.1:8081;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Cookie $http_cookie;
+        }
+
+        location = /auth/logout {
+            proxy_pass http://127.0.0.1:8081;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Cookie $http_cookie;
+        }
+
+        location = /login-logo.png {
+            proxy_pass http://127.0.0.1:8081;
+            proxy_set_header Host $host;
+        }
+
+        location = /brand-logo.png {
+            root D:/ai-training-platform/apps/web/dist;
+        }
+
+        # API 请求必须先校验 LDAP3 会话，再写入网关签名身份头。
+        location /api/ {
+            auth_request /_ldap_verify;
+            auth_request_set $trusted_employee_no $upstream_http_x_trusted_employee_no;
+            auth_request_set $trusted_name $upstream_http_x_trusted_name;
+            auth_request_set $trusted_department $upstream_http_x_trusted_department;
+            auth_request_set $trusted_issued_at $upstream_http_x_trusted_issued_at;
+            auth_request_set $trusted_signature $upstream_http_x_trusted_identity_signature;
+
+            proxy_set_header X-Employee-Id '';
+            proxy_set_header X-Trusted-Employee-No $trusted_employee_no;
+            proxy_set_header X-Trusted-Name $trusted_name;
+            proxy_set_header X-Trusted-Department $trusted_department;
+            proxy_set_header X-Trusted-Issued-At $trusted_issued_at;
+            proxy_set_header X-Trusted-Identity-Signature $trusted_signature;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_pass http://127.0.0.1:3000;
+            proxy_read_timeout 300s;
+        }
+
+        # 未登录访问主站时跳转到 LDAP3 登录页。
+        location / {
+            auth_request /_ldap_verify;
+            error_page 401 =302 /auth/login?returnTo=$request_uri;
+            root D:/ai-training-platform/apps/web/dist;
+            try_files $uri $uri/ /index.html;
+        }
+    }
+}
+~~~
+
+检查并启动 Nginx：
+
+~~~powershell
+Set-Location C:\nginx
+.\nginx.exe -t -p C:/nginx/ -c conf/nginx.conf
+Start-Process .\nginx.exe
+~~~
+
+后续修改配置使用：
+
+~~~powershell
+.\nginx.exe -t -p C:/nginx/ -c conf/nginx.conf
+.\nginx.exe -s reload
+~~~
+
+## 11. 按顺序做真实端到端验收
+
+### 11.1 未登录跳转
+
+~~~powershell
+curl.exe -k -I https://localhost/
+~~~
+
+应返回 `302`，并跳转到 `/auth/login?returnTo=/`。如果直接显示前端页面，说明 Nginx 的 `auth_request` 没有生效。
+
+### 11.2 LDAP3 登录
+
+1. 浏览器打开 `https://localhost/`；
+2. 接受本机自签名证书提示；
+3. 页面应显示“登录”、工号、密码和“LDAP3域账号统一认证”；
+4. 输入真实 LDAP3 域账号和密码；
+5. 登录成功后回到首页；
+6. 打开个人中心，检查工号、姓名、部门是否来自 LDAP；
+7. 打开管理后台，确认权限来自平台数据库中的角色，而不是浏览器自带身份头。
+
+### 11.3 API 和上传验收
+
+浏览器登录后，至少验证：
+
+- 查看训战、赛题和个人中心；
+- 创建或编辑一个仅用于测试的赛题；
+- 在开放时间窗口内提交一个小 ZIP；
+- 查看对象存储 bucket 中出现对象；
+- 查看 PostgreSQL 中出现提交、上传会话和审计记录；
+- 退出登录后重新打开 `/api/v1/me`，应回到登录页而不是继续返回用户数据。
+
+### 11.4 评测验收边界
+
+生产模式 API 不允许在 API 进程中启动 Code Agent，也不允许使用右上角本地多身份切换。真实评测还需要单独启动 Evaluation Worker，并配置受控的 Code Agent 可执行文件；个人 Windows 只建议先验证登录、训战、提交、对象存储和权限链路。
+
+## 12. 常见故障
+
+| 现象 | 检查 |
+| --- | --- |
+| API 启动报 `file repository is not allowed in production` | `PLATFORM_REPOSITORY=postgres`、`DATABASE_URL` 是否在同一 PowerShell 窗口设置 |
+| API 启动报 `local object storage is not allowed in production` | `OBJECT_STORAGE_MODE=s3`、bucket、MinIO 地址和密钥是否正确 |
+| 首页不跳登录 | `nginx -t`、`location /` 是否包含 `auth_request` 和 401 跳转 |
+| 登录页能打开但登录失败 | `Test-NetConnection`、LDAP CA、389/636、StartTLS/LDAPS 配置和 LDAP 属性映射 |
+| 登录成功但 API 返回 401 | API 与网关的 HMAC 必须完全相同；检查系统时间和 Nginx 的五个 `X-Trusted-*` 头 |
+| 登录后反复跳转登录页 | 必须使用 `https://localhost`，并保持 `LDAP_GATEWAY_COOKIE_SECURE=true`；不要用 `http://localhost` |
+| Nginx 502 | API/LDAP3 网关进程是否仍在运行，3000/8081 是否只监听本机 |
+| 页面有前端但 API 请求到了用户电脑的 127.0.0.1 | 构建时必须设置 `$env:VITE_API_BASE='/api/v1'`，不能使用默认开发地址 |
+
+查看进程日志：
+
+~~~powershell
+Get-Process node,python,nginx -ErrorAction SilentlyContinue
+Get-Content C:\nginx\logs\error.log -Wait
+~~~
+
+不要把 LDAP 密码、Cookie、HMAC、完整请求头或员工敏感信息贴到日志和聊天窗口。
+
+## 13. 停止和清理
+
+停止 Nginx：
+
+~~~powershell
+Set-Location C:\nginx
+.\nginx.exe -s quit
+~~~
+
+API 和 LDAP3 网关在各自 PowerShell 窗口按 `Ctrl+C` 停止。停止测试依赖容器：
+
+~~~powershell
+docker stop ai-platform-postgres ai-platform-minio
+~~~
+
+如果要彻底清空本次测试数据，确认不再需要后再删除容器和对应 volume；这会不可恢复地删除本地 PostgreSQL/MinIO 数据。
+
+## 14. 给弱模型 AI 的执行顺序
+
+弱模型只需要按以下顺序执行，不要自行替换组件：
+
+1. 确认 Windows 已连接内网/VPN，LDAP 端口可达；
+2. 安装 Node、pnpm、Python、Docker Desktop、Nginx、OpenSSL；
+3. clone 仓库并安装依赖；
+4. 启动 PostgreSQL 和 MinIO，创建私有 bucket；
+5. 生成两条独立密钥；
+6. 设置 API 生产环境变量并执行迁移；
+7. 设置 LDAP3 网关环境变量并启动网关；
+8. 构建 Web/API；
+9. 启动 API；
+10. 配置 HTTPS Nginx，执行 `nginx -t` 后启动；
+11. 按“未登录跳转 → LDAP 登录 → `/api/v1/me` → 提交 → 对象存储 → 退出登录”验收；
+12. 失败时只按第 12 节排查，不要改成 `LOCAL`、匿名身份或绕过 Nginx。
+
+--- END FILE: docs/deployment/windows-production-smoke-test.md ---
 
 
 --- BEGIN FILE: docs/evaluation-contract-authoring.md ---
@@ -6478,8 +7675,8 @@ W0/W1 及相关生产底座已随 v0.7.0 发布：
 
 > 面向开发者：Luna 及后续参与 v0.8.x 的工程人员
 > 基线版本：`v0.8.0`
-> 当前版本：`v0.8.4`
-> 文档状态：v0.8.4 已发布；目标环境沙箱、Worker 服务身份和回滚门禁仍需在内网复验
+> 当前版本：`v0.8.5`
+> 文档状态：v0.8.5 已发布；目标环境沙箱、Worker 服务身份和回滚门禁仍需在内网复验
 > 最后核对日期：2026-08-05
 
 ## 1. 使用方式
@@ -6597,7 +7794,7 @@ git diff --check
 - 多人调部门失败时不会绕过组织范围，成功后员工列表和审计均刷新；
 - 训战开始前/结束后无法进入和提交；
 - 生产构建没有本地身份切换入口；
-- 根目录、Web、API 三个 `package.json` 均为 `0.8.4`；资料包版本行由构建脚本从根 `package.json` 读取，不需要手工同步。
+- 根目录、Web、API 三个 `package.json` 均为 `0.8.5`；资料包版本行由构建脚本从根 `package.json` 读取，不需要手工同步。
 - `pnpm build` 之后工作区应保持干净。资料包 ZIP 已是可重复构建（文本统一为 LF，并固定时间戳、权限位、条目顺序和 DEFLATE 压缩级别），若它仍显示为已修改，说明输入确实变了，应当一并提交。
 
 `pnpm test` 依赖已生成的 Prisma Client。全新克隆由 `@ai-training/platform-api` 的 `postinstall` 自动生成；如果 `node_modules` 命中缓存导致 `pnpm install` 判定「Already up to date」，`postinstall` 不会触发，需要手工执行一次：
@@ -6931,7 +8128,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {
@@ -6944,6 +8141,7 @@ validates imported results and recomputes score consistency before persistence.
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "kit:test": "node --test scripts/evaluation-engine-kit.test.mjs",
+    "ldap3:test": "python services/ldap3-gateway/test_ldap3_gateway.py",
     "contract:test": "pnpm --filter @ai-training/platform-api contract:test",
     "grader:test": "node scripts/run-grader-tests.mjs",
     "acceptance:local": "pnpm --filter @ai-training/platform-api exec tsx --test test/concurrency.test.ts"
@@ -7816,6 +9014,1216 @@ do {
 } while (true);
 
 --- END FILE: scripts/evaluation-worker.mjs ---
+
+
+--- BEGIN FILE: services/ldap3-gateway/.env.example ---
+
+LDAP_SERVER=china.huawei.com
+LDAP_PORT=389
+LDAP_USE_SSL=false
+LDAP_START_TLS=true
+LDAP_CA_CERT_FILE=/etc/ssl/certs/company-ldap-ca.pem
+LDAP_BASE_DN=dc=china,dc=huawei,dc=com
+LDAP_BIND_PREFIX=China\
+LDAP_ACCOUNT_ATTRIBUTE=sAMAccountName
+LDAP_TITLE_ATTRIBUTE=title
+LDAP_DEPARTMENT_ATTRIBUTE=department
+LDAP_NAME_ATTRIBUTE=displayName
+LDAP_TIMEOUT_SECONDS=5
+
+# Generate independent random values; never commit real secrets.
+LDAP_GATEWAY_SESSION_SECRET=replace-with-a-random-32-plus-character-secret
+TRUSTED_GATEWAY_HMAC_SECRET=replace-with-the-platform-shared-secret
+LDAP_GATEWAY_SESSION_TTL_SECONDS=28800
+TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+LDAP_GATEWAY_COOKIE_SECURE=true
+LDAP_GATEWAY_HOST=0.0.0.0
+LDAP_GATEWAY_PORT=8081
+
+--- END FILE: services/ldap3-gateway/.env.example ---
+
+
+--- BEGIN FILE: services/ldap3-gateway/Dockerfile ---
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    LDAP_GATEWAY_HOST=0.0.0.0 \
+    LDAP_GATEWAY_PORT=8081
+
+WORKDIR /app
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt \
+    && useradd --system --uid 10001 --create-home gateway
+
+COPY ldap3_gateway.py ./ldap3_gateway.py
+COPY static ./static
+
+USER gateway
+EXPOSE 8081
+CMD ["python", "ldap3_gateway.py"]
+
+--- END FILE: services/ldap3-gateway/Dockerfile ---
+
+
+--- BEGIN FILE: services/ldap3-gateway/README.md ---
+
+# LDAP3 统一认证网关适配器
+
+这个目录把内网提供的 LDAP3 登录逻辑接到平台已经实现的 `TRUSTED_GATEWAY` 身份协议。LDAP 密码只在网关的 `/auth/login` 请求中短暂存在，不会进入 Platform API、浏览器 Cookie、日志或平台数据库。
+
+## 运行
+
+```powershell
+cd services/ldap3-gateway
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+$env:LDAP_SERVER = 'china.huawei.com'
+$env:LDAP_PORT = '389'
+$env:LDAP_USE_SSL = 'false'
+$env:LDAP_START_TLS = 'true'
+$env:LDAP_CA_CERT_FILE = 'C:\certs\company-ldap-ca.pem'
+$env:LDAP_BASE_DN = 'dc=china,dc=huawei,dc=com'
+$env:LDAP_BIND_PREFIX = 'China\'
+$env:LDAP_GATEWAY_SESSION_SECRET = '<随机生成的至少 32 字符会话密钥>'
+$env:TRUSTED_GATEWAY_HMAC_SECRET = '<与 Platform API 相同的密钥>'
+$env:LDAP_GATEWAY_COOKIE_SECURE = 'true'
+python ldap3_gateway.py
+```
+
+生产环境应使用 LDAPS 或 StartTLS，并通过进程环境注入密钥；不要把真实密钥、账号或员工信息写入仓库。`LDAP_GATEWAY_COOKIE_SECURE=false` 只适合本机 HTTP 验收。
+
+### 直接 clone 后用 Docker 部署
+
+仓库已经包含登录页、依赖和 Dockerfile，不需要再单独开发登录前端：
+
+```bash
+cd services/ldap3-gateway
+cp .env.example .env
+# 编辑 .env，至少替换两个密钥，并填写 LDAP CA 证书路径
+docker build -t platform-ldap-gateway:local .
+docker run --rm --name platform-ldap-gateway \
+  --env-file .env \
+  -p 127.0.0.1:8081:8081 \
+  platform-ldap-gateway:local
+```
+
+如果启用了 `LDAP_CA_CERT_FILE`，还要把宿主机证书以只读方式挂载到容器内同一路径，例如：
+
+```bash
+docker run --rm --name platform-ldap-gateway \
+  --env-file .env \
+  -v /etc/company/certs/ldap-ca.pem:/etc/ssl/certs/company-ldap-ca.pem:ro \
+  -p 127.0.0.1:8081:8081 \
+  platform-ldap-gateway:local
+```
+
+登录页面地址是 `/auth/login`，登录成功后由反向代理调用 `/auth/verify`，再把可信身份头转发给 Platform API。完整的 Nginx 配置和验收清单见仓库的 LDAP3 接入指南。
+
+## 网关接入方式
+
+- `GET /auth/login`：返回登录页；`POST /auth/login` 接收 `userId`、`password`，LDAP 绑定成功后设置 HttpOnly 会话 Cookie。
+- `GET /auth/verify`：供 Nginx、Ingress 或现有统一认证网关的 `auth_request` 调用。成功时返回五个 `X-Trusted-*` 响应头，反向代理必须把它们复制到发往 Platform API 的请求头。
+- `GET /auth/session`：返回不含签名的当前会话信息，仅用于登录页调试。
+- `POST /auth/logout`：清理会话 Cookie。
+- `GET /brand-logo.png`：提供与主站一致的品牌 Logo，不需要登录。
+- `GET /login-logo.png`：提供登录页使用的云图标，不需要登录。
+- `GET /healthz`：健康检查，不需要登录。
+
+平台 API 配置仍然是：
+
+```env
+NODE_ENV=production
+PLATFORM_IDENTITY_MODE=TRUSTED_GATEWAY
+TRUSTED_GATEWAY_HMAC_SECRET=<与网关相同的密钥>
+TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+```
+
+反向代理必须先删除浏览器传入的 `X-Employee-Id` 和 `X-Trusted-*`，再从 `/auth/verify` 的响应头重新写入。具体 HMAC 字段、Nginx `auth_request` 示例和上线验收请阅读 [`docs/deployment/ldap3-trusted-gateway.md`](../../docs/deployment/ldap3-trusted-gateway.md) 和 [`docs/deployment/trusted-gateway-sso.md`](../../docs/deployment/trusted-gateway-sso.md)。
+
+## 测试
+
+测试使用假的 LDAP 连接，不会连接真实内网目录：
+
+```powershell
+python services/ldap3-gateway/test_ldap3_gateway.py
+```
+
+--- END FILE: services/ldap3-gateway/README.md ---
+
+
+--- BEGIN FILE: services/ldap3-gateway/ldap3_gateway.py ---
+
+#!/usr/bin/env python3
+"""LDAP3-backed identity adapter for the platform's trusted gateway.
+
+The platform API does not receive LDAP credentials.  This small WSGI service
+authenticates a browser session against Active Directory, then exposes a
+session verification endpoint for the reverse proxy.  The reverse proxy
+copies the signed identity headers returned by that endpoint to the platform
+API, which remains in ``TRUSTED_GATEWAY`` mode.
+
+The module intentionally has no framework dependency.  Install ``ldap3`` from
+``requirements.txt`` and run it behind the internal HTTPS gateway.  It does
+not log passwords, LDAP assertions, cookies or identity headers.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import html
+import json
+import os
+import re
+import secrets
+import ssl
+import time
+from dataclasses import dataclass
+from http.cookies import CookieError, SimpleCookie
+from pathlib import Path
+from typing import Any, Callable, Mapping, MutableMapping, Sequence
+from urllib.parse import parse_qs
+
+
+class LdapGatewayError(Exception):
+    """Base class for errors that should not expose LDAP internals."""
+
+
+class LdapAuthenticationError(LdapGatewayError):
+    """The supplied credentials cannot be authenticated."""
+
+
+class LdapProfileError(LdapGatewayError):
+    """The account authenticated but its platform profile is incomplete."""
+
+
+class InvalidSessionError(LdapGatewayError):
+    """The gateway session cookie is missing, invalid or expired."""
+
+
+@dataclass(frozen=True)
+class LdapConfig:
+    server: str = "china.huawei.com"
+    port: int = 389
+    use_ssl: bool = False
+    start_tls: bool = False
+    base_dn: str = "dc=china,dc=huawei,dc=com"
+    bind_prefix: str = "China\\"
+    account_attribute: str = "sAMAccountName"
+    title_attribute: str = "title"
+    department_attribute: str = "department"
+    name_attribute: str = "displayName"
+    ca_cert_file: str | None = None
+    timeout_seconds: int = 5
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "LdapConfig":
+        values = os.environ if env is None else env
+        server = values.get("LDAP_SERVER", "china.huawei.com").strip()
+        base_dn = values.get("LDAP_BASE_DN", "dc=china,dc=huawei,dc=com").strip()
+        if not server:
+            raise ValueError("LDAP_SERVER is required")
+        if not base_dn:
+            raise ValueError("LDAP_BASE_DN is required")
+        port = _positive_int(values, "LDAP_PORT", 389, 1, 65535)
+        timeout = _positive_int(values, "LDAP_TIMEOUT_SECONDS", 5, 1, 60)
+        use_ssl = _boolean(values.get("LDAP_USE_SSL"), False)
+        start_tls = _boolean(values.get("LDAP_START_TLS"), False)
+        if use_ssl and start_tls:
+            raise ValueError("LDAP_USE_SSL and LDAP_START_TLS cannot both be enabled")
+        return cls(
+            server=server,
+            port=port,
+            use_ssl=use_ssl,
+            start_tls=start_tls,
+            base_dn=base_dn,
+            bind_prefix=values.get("LDAP_BIND_PREFIX", "China\\"),
+            account_attribute=_attribute_name(values.get("LDAP_ACCOUNT_ATTRIBUTE", "sAMAccountName")),
+            title_attribute=_attribute_name(values.get("LDAP_TITLE_ATTRIBUTE", "title")),
+            department_attribute=_attribute_name(values.get("LDAP_DEPARTMENT_ATTRIBUTE", "department")),
+            name_attribute=_attribute_name(values.get("LDAP_NAME_ATTRIBUTE", "displayName")),
+            ca_cert_file=values.get("LDAP_CA_CERT_FILE", "").strip() or None,
+            timeout_seconds=timeout,
+        )
+
+
+@dataclass(frozen=True)
+class GatewayConfig:
+    ldap: LdapConfig
+    trusted_gateway_secret: str
+    session_secret: str
+    session_ttl_seconds: int = 8 * 60 * 60
+    trusted_gateway_max_age_seconds: int = 90
+    cookie_name: str = "platform_ldap_session"
+    csrf_cookie_name: str = "platform_ldap_csrf"
+    cookie_secure: bool = True
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "GatewayConfig":
+        values = os.environ if env is None else env
+        trusted_secret = values.get("TRUSTED_GATEWAY_HMAC_SECRET", "").strip()
+        session_secret = values.get("LDAP_GATEWAY_SESSION_SECRET", "").strip()
+        if len(trusted_secret) < 32:
+            raise ValueError("TRUSTED_GATEWAY_HMAC_SECRET must contain at least 32 characters")
+        if len(session_secret) < 32:
+            raise ValueError("LDAP_GATEWAY_SESSION_SECRET must contain at least 32 characters")
+        return cls(
+            ldap=LdapConfig.from_env(values),
+            trusted_gateway_secret=trusted_secret,
+            session_secret=session_secret,
+            session_ttl_seconds=_positive_int(values, "LDAP_GATEWAY_SESSION_TTL_SECONDS", 8 * 60 * 60, 300, 7 * 24 * 60 * 60),
+            trusted_gateway_max_age_seconds=_positive_int(values, "TRUSTED_GATEWAY_MAX_AGE_SECONDS", 90, 1, 300),
+            cookie_name=values.get("LDAP_GATEWAY_COOKIE_NAME", "platform_ldap_session").strip() or "platform_ldap_session",
+            csrf_cookie_name=values.get("LDAP_GATEWAY_CSRF_COOKIE_NAME", "platform_ldap_csrf").strip() or "platform_ldap_csrf",
+            cookie_secure=_boolean(values.get("LDAP_GATEWAY_COOKIE_SECURE"), True),
+        )
+
+
+@dataclass(frozen=True)
+class LdapUser:
+    employee_no: str
+    name: str
+    department: str = ""
+
+
+def _positive_int(values: Mapping[str, str], name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = values.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < minimum or value > maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
+def _boolean(raw: str | None, default: bool) -> bool:
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("boolean environment values must be true or false")
+
+
+def _attribute_name(value: str) -> str:
+    candidate = value.strip()
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", candidate):
+        raise ValueError("LDAP attribute names must contain only ASCII letters, digits, underscores or hyphens")
+    return candidate
+
+
+def _load_ldap3() -> Any:
+    try:
+        import ldap3  # type: ignore[import-not-found]
+    except ImportError as exc:  # pragma: no cover - exercised by deployment, not unit tests
+        raise LdapGatewayError("ldap3 is not installed in the gateway environment") from exc
+    return ldap3
+
+
+def escape_filter_value(value: str) -> str:
+    """Escape an RFC 4515 filter value, including UTF-8 octets."""
+
+    escaped: list[str] = []
+    for byte in value.encode("utf-8"):
+        if byte in {0x00, 0x28, 0x29, 0x2A, 0x5C} or byte >= 0x80:
+            escaped.append(f"\\{byte:02x}")
+        else:
+            escaped.append(chr(byte))
+    return "".join(escaped)
+
+
+def _safe_user_id(user_id: str) -> str:
+    value = user_id.strip()
+    # The bind name is a Windows DOMAIN\\user value.  Keep it deliberately
+    # narrow and reject separators/control characters before LDAP is called.
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", value):
+        raise LdapAuthenticationError("工号格式不正确")
+    return value
+
+
+def _entry_value(entry: Any, attribute: str) -> str:
+    if isinstance(entry, Mapping):
+        value = entry.get(attribute)
+    else:
+        try:
+            value = getattr(entry, attribute)
+        except AttributeError:
+            return ""
+    if hasattr(value, "value"):
+        value = value.value
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return str(value).strip() if value is not None else ""
+
+
+def _safe_identity_value(value: str, label: str, required: bool = False) -> str:
+    candidate = value.strip()
+    if not candidate and required:
+        raise LdapProfileError(f"LDAP 用户资料缺少{label}")
+    if len(candidate) > 256 or any(ord(char) < 0x20 or ord(char) == 0x7F for char in candidate):
+        raise LdapProfileError(f"LDAP 用户资料中的{label}格式不正确")
+    return candidate
+
+
+def parse_user_entry(user_id: str, entry: Any, config: LdapConfig) -> LdapUser:
+    """Map the supplied AD entry to the platform's three identity fields."""
+
+    title = _entry_value(entry, config.title_attribute)
+    name = ""
+    department = ""
+    if title and "," in title:
+        parts = title.split(",", 2)
+        if len(parts) >= 3:
+            name = parts[1].strip()
+            department = parts[2].strip()
+    if not name:
+        name = _entry_value(entry, config.name_attribute)
+    if not department:
+        department = _entry_value(entry, config.department_attribute)
+    name = _safe_identity_value(name, "姓名", required=True)
+    department = _safe_identity_value(department, "部门")
+    return LdapUser(employee_no=_safe_user_id(user_id), name=name, department=department)
+
+
+def _is_bind_error(error: BaseException, ldap_module: Any) -> bool:
+    exception_root = getattr(getattr(ldap_module, "core", None), "exceptions", None)
+    bind_error = getattr(exception_root, "LDAPBindError", None)
+    return bool(bind_error and isinstance(error, bind_error)) or error.__class__.__name__ == "LDAPBindError"
+
+
+def authenticate_ldap_user(config: LdapConfig, user_id: str, password: str, ldap_module: Any | None = None) -> LdapUser:
+    """Bind to AD and return only the fields trusted by the platform."""
+
+    safe_user_id = _safe_user_id(user_id)
+    if not isinstance(password, str) or not password:
+        raise LdapAuthenticationError("工号或密码错误")
+    ldap3 = ldap_module or _load_ldap3()
+    connection: Any | None = None
+    try:
+        tls = None
+        if config.use_ssl or config.start_tls:
+            tls = ldap3.Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=config.ca_cert_file)
+        server = ldap3.Server(
+            config.server,
+            port=config.port,
+            use_ssl=config.use_ssl,
+            tls=tls,
+            get_info=getattr(ldap3, "NONE", None),
+            connect_timeout=config.timeout_seconds,
+        )
+        connection = ldap3.Connection(
+            server,
+            auto_bind=not config.start_tls,
+            user=f"{config.bind_prefix}{safe_user_id}",
+            password=password,
+            receive_timeout=config.timeout_seconds,
+            raise_exceptions=True,
+        )
+        if config.start_tls:
+            if connection.start_tls() is False:
+                raise LdapGatewayError("LDAP TLS negotiation failed")
+            if connection.bind() is False:
+                raise LdapAuthenticationError("工号或密码错误")
+        search_filter = f"({config.account_attribute}={escape_filter_value(safe_user_id)})"
+        attributes = [config.title_attribute, config.department_attribute, config.name_attribute]
+        connection.search(
+            search_base=config.base_dn,
+            search_filter=search_filter,
+            search_scope=getattr(ldap3, "SUBTREE", None),
+            attributes=attributes,
+        )
+        entries = list(getattr(connection, "entries", []) or [])
+        if len(entries) != 1:
+            raise LdapProfileError("LDAP 用户资料不存在或不唯一")
+        return parse_user_entry(safe_user_id, entries[0], config)
+    except LdapGatewayError:
+        raise
+    except Exception as error:
+        if _is_bind_error(error, ldap3):
+            raise LdapAuthenticationError("工号或密码错误") from error
+        raise LdapGatewayError("LDAP 服务暂时不可用") from error
+    finally:
+        if connection is not None:
+            try:
+                connection.unbind()
+            except Exception:
+                pass
+
+
+def utc_timestamp(now: float | None = None) -> str:
+    from datetime import datetime, timezone
+
+    moment = datetime.fromtimestamp(time.time() if now is None else now, tz=timezone.utc)
+    return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def trusted_gateway_signature(user: LdapUser, issued_at: str, secret: str) -> str:
+    employee_no = _safe_user_id(user.employee_no)
+    name = _safe_identity_value(user.name, "姓名", required=True)
+    department = _safe_identity_value(user.department, "部门")
+    if "\r" in issued_at or "\n" in issued_at or len(issued_at) > 64:
+        raise ValueError("issued_at is not a safe header value")
+    canonical = f"{employee_no}\n{issued_at}\n{name}\n{department}"
+    return hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def trusted_gateway_headers(user: LdapUser, secret: str, issued_at: str | None = None) -> dict[str, str]:
+    issued = issued_at or utc_timestamp()
+    return {
+        "X-Trusted-Employee-No": user.employee_no,
+        "X-Trusted-Name": user.name,
+        "X-Trusted-Department": user.department,
+        "X-Trusted-Issued-At": issued,
+        "X-Trusted-Identity-Signature": trusted_gateway_signature(user, issued, secret),
+    }
+
+
+def _b64(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def _unb64(value: str) -> bytes:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        raise InvalidSessionError("登录会话无效")
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def encode_session(user: LdapUser, expires_at: int, secret: str) -> str:
+    payload = json.dumps(
+        {"employeeNo": user.employee_no, "name": user.name, "department": user.department, "exp": expires_at},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    body = _b64(payload)
+    signature = hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{body}.{signature}"
+
+
+def decode_session(token: str, secret: str, now: int | None = None) -> LdapUser:
+    try:
+        body, signature = token.split(".", 1)
+        expected = hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            raise InvalidSessionError("登录会话无效")
+        payload = json.loads(_unb64(body).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise InvalidSessionError("登录会话无效")
+        expires_at = payload.get("exp")
+        if not isinstance(expires_at, int) or expires_at <= int(time.time() if now is None else now):
+            raise InvalidSessionError("登录会话已过期")
+        employee_no = payload.get("employeeNo")
+        name = payload.get("name")
+        department = payload.get("department", "")
+        if not all(isinstance(value, str) for value in (employee_no, name, department)):
+            raise InvalidSessionError("登录会话无效")
+        return LdapUser(employee_no=employee_no, name=name, department=department)
+    except InvalidSessionError:
+        raise
+    except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise InvalidSessionError("登录会话无效") from error
+
+
+def _parse_cookies(raw: str) -> dict[str, str]:
+    cookie = SimpleCookie()
+    try:
+        cookie.load(raw or "")
+    except CookieError:
+        return {}
+    return {key: morsel.value for key, morsel in cookie.items()}
+
+
+def _relative_return_to(value: str | None) -> str:
+    candidate = value or "/"
+    if not candidate.startswith("/") or candidate.startswith("//") or "\r" in candidate or "\n" in candidate:
+        return "/"
+    return candidate
+
+
+def _cookie(name: str, value: str, max_age: int, secure: bool, http_only: bool = True) -> str:
+    parts = [f"{name}={value}", "Path=/", "SameSite=Lax", f"Max-Age={max_age}"]
+    if secure:
+        parts.append("Secure")
+    if http_only:
+        parts.append("HttpOnly")
+    return "; ".join(parts)
+
+
+def _read_body(environ: Mapping[str, Any], limit: int = 32 * 1024) -> bytes:
+    try:
+        length = int(environ.get("CONTENT_LENGTH") or 0)
+    except ValueError as error:
+        raise ValueError("请求体长度无效") from error
+    if length < 0 or length > limit:
+        raise ValueError("请求体过大")
+    stream = environ.get("wsgi.input")
+    return stream.read(length) if stream is not None else b""
+
+
+def _json_response(start_response: Callable[..., Any], status: str, payload: Mapping[str, Any], headers: Sequence[tuple[str, str]] = ()) -> list[bytes]:
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    response_headers = [("Content-Type", "application/json; charset=utf-8"), ("Content-Length", str(len(body))), ("Cache-Control", "no-store"), *headers]
+    start_response(status, response_headers)
+    return [body]
+
+
+def _html_response(start_response: Callable[..., Any], status: str, body_text: str, headers: Sequence[tuple[str, str]] = ()) -> list[bytes]:
+    body = body_text.encode("utf-8")
+    response_headers = [("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(body))), ("Cache-Control", "no-store"), *headers]
+    start_response(status, response_headers)
+    return [body]
+
+
+class LdapGatewayApp:
+    """A small WSGI app for login and reverse-proxy auth subrequests."""
+
+    def __init__(self, config: GatewayConfig, authenticator: Callable[[LdapConfig, str, str], LdapUser] = authenticate_ldap_user, clock: Callable[[], float] = time.time, template_path: Path | None = None) -> None:
+        self.config = config
+        self.authenticator = authenticator
+        self.clock = clock
+        self.template_path = template_path or Path(__file__).with_name("static") / "login.html"
+        self.brand_logo_path = Path(__file__).with_name("static") / "brand-logo.png"
+        self.login_logo_path = Path(__file__).with_name("static") / "login-logo.png"
+
+    def _verify_cookie(self, environ: Mapping[str, Any]) -> LdapUser:
+        cookies = _parse_cookies(str(environ.get("HTTP_COOKIE", "")))
+        token = cookies.get(self.config.cookie_name, "")
+        if not token:
+            raise InvalidSessionError("未登录")
+        return decode_session(token, self.config.session_secret, int(self.clock()))
+
+    def _login_page(self, csrf: str, return_to: str, start_response: Callable[..., Any], error: str = "", status: str = "200 OK") -> list[bytes]:
+        escaped_return = html.escape(return_to, quote=True)
+        escaped_csrf = html.escape(csrf, quote=True)
+        escaped_error = html.escape(error, quote=True)
+        error_state = "visible" if error else "hidden"
+        try:
+            template = self.template_path.read_text(encoding="utf-8")
+        except OSError:
+            # Keep the service diagnosable even when a packaging mistake omits
+            # the template; the Docker image and source checkout both include
+            # the real static page.
+            template = """<!doctype html><meta charset=\"utf-8\"><title>平台登录</title><h1>平台登录</h1><form method=\"post\" action=\"/auth/login\"><input type=\"hidden\" name=\"csrf\" value=\"{{CSRF}}\"><input type=\"hidden\" name=\"returnTo\" value=\"{{RETURN_TO}}\"><div class=\"form-error\" data-state=\"{{ERROR_STATE}}\">{{ERROR_MESSAGE}}</div><label>工号<input name=\"userId\" required></label><label>密码<input name=\"password\" type=\"password\" required></label><button>登录</button></form>"""
+        page = (
+            template
+            .replace("{{CSRF}}", escaped_csrf)
+            .replace("{{RETURN_TO}}", escaped_return)
+            .replace("{{ERROR_STATE}}", error_state)
+            .replace("{{ERROR_MESSAGE}}", escaped_error)
+        )
+        csrf_cookie = _cookie(self.config.csrf_cookie_name, csrf, 600, self.config.cookie_secure, http_only=False)
+        return _html_response(start_response, status, page, [("Set-Cookie", csrf_cookie)])
+
+    def __call__(self, environ: MutableMapping[str, Any], start_response: Callable[..., Any]) -> list[bytes]:
+        method = str(environ.get("REQUEST_METHOD", "GET")).upper()
+        path = str(environ.get("PATH_INFO", "/"))
+        if method == "GET" and path == "/brand-logo.png":
+            return self._logo(start_response, self.brand_logo_path)
+        if method == "GET" and path == "/login-logo.png":
+            return self._logo(start_response, self.login_logo_path)
+        if method == "GET" and path in {"/healthz", "/auth/health"}:
+            return _json_response(start_response, "200 OK", {"status": "ok"})
+        if method == "GET" and path in {"/auth/login", "/login"}:
+            csrf = secrets.token_urlsafe(24)
+            query = parse_qs(str(environ.get("QUERY_STRING", "")), keep_blank_values=True)
+            return_to = _relative_return_to(query.get("returnTo", ["/"])[-1])
+            return self._login_page(csrf, return_to, start_response)
+        if method == "POST" and path in {"/auth/login", "/login"}:
+            return self._login(environ, start_response)
+        if method == "POST" and path == "/auth/logout":
+            expired = _cookie(self.config.cookie_name, "", 0, self.config.cookie_secure)
+            return _json_response(start_response, "200 OK", {"loggedOut": True}, [("Set-Cookie", expired)])
+        if method == "GET" and path in {"/auth/session", "/auth/verify"}:
+            return self._verify(environ, start_response, include_body=path == "/auth/session")
+        return _json_response(start_response, "404 Not Found", {"message": "not found"})
+
+    def _logo(self, start_response: Callable[..., Any], path: Path) -> list[bytes]:
+        try:
+            body = path.read_bytes()
+        except OSError:
+            return _json_response(start_response, "404 Not Found", {"message": "not found"})
+        start_response(
+            "200 OK",
+            [
+                ("Content-Type", "image/png"),
+                ("Content-Length", str(len(body))),
+                ("Cache-Control", "public, max-age=3600"),
+            ],
+        )
+        return [body]
+
+    def _login(self, environ: MutableMapping[str, Any], start_response: Callable[..., Any]) -> list[bytes]:
+        cookies = _parse_cookies(str(environ.get("HTTP_COOKIE", "")))
+        content_type = str(environ.get("CONTENT_TYPE", ""))
+        wants_json = content_type.startswith("application/json") or "application/json" in str(environ.get("HTTP_ACCEPT", ""))
+        return_to = "/"
+
+        def failure(status: str, message: str) -> list[bytes]:
+            if wants_json:
+                return _json_response(start_response, status, {"message": message})
+            csrf = secrets.token_urlsafe(24)
+            return self._login_page(csrf, return_to, start_response, message, status=status)
+
+        try:
+            body = _read_body(environ).decode("utf-8")
+            if content_type.startswith("application/json"):
+                fields = json.loads(body)
+            else:
+                parsed = parse_qs(body, keep_blank_values=True)
+                fields = {key: values[-1] if values else "" for key, values in parsed.items()}
+            if not isinstance(fields, dict):
+                raise ValueError("请求体格式无效")
+            csrf = str(fields.get("csrf", ""))
+            if not csrf or not hmac.compare_digest(csrf, cookies.get(self.config.csrf_cookie_name, "")):
+                return failure("403 Forbidden", "登录请求已失效，请刷新后重试")
+            user_id = str(fields.get("userId", fields.get("user_id", "")))
+            password = fields.get("password", "")
+            if not isinstance(password, str):
+                password = str(password)
+            return_to = _relative_return_to(str(fields.get("returnTo", "/")))
+            user = self.authenticator(self.config.ldap, user_id, password)
+        except LdapAuthenticationError:
+            return failure("401 Unauthorized", "工号或密码错误")
+        except LdapProfileError:
+            return failure("401 Unauthorized", "统一认证失败，请检查工号和密码或联系管理员")
+        except LdapGatewayError:
+            return failure("503 Service Unavailable", "统一认证服务暂时不可用")
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            return failure("400 Bad Request", "登录请求格式无效")
+        expires_at = int(self.clock()) + self.config.session_ttl_seconds
+        token = encode_session(user, expires_at, self.config.session_secret)
+        session_cookie = _cookie(self.config.cookie_name, token, self.config.session_ttl_seconds, self.config.cookie_secure)
+        csrf_expired = _cookie(self.config.csrf_cookie_name, "", 0, self.config.cookie_secure, http_only=False)
+        start_response("302 Found", [("Location", return_to), ("Set-Cookie", session_cookie), ("Set-Cookie", csrf_expired), ("Content-Length", "0"), ("Cache-Control", "no-store")])
+        return [b""]
+
+    def _verify(self, environ: Mapping[str, Any], start_response: Callable[..., Any], include_body: bool) -> list[bytes]:
+        try:
+            user = self._verify_cookie(environ)
+        except InvalidSessionError:
+            return _json_response(start_response, "401 Unauthorized", {"message": "未登录"})
+        issued_at = utc_timestamp(self.clock())
+        headers = trusted_gateway_headers(user, self.config.trusted_gateway_secret, issued_at)
+        if include_body:
+            return _json_response(start_response, "200 OK", {"authenticated": True, "employeeNo": user.employee_no, "name": user.name, "department": user.department})
+        start_response("200 OK", [("Content-Length", "0"), ("Cache-Control", "no-store"), *headers.items()])
+        return [b""]
+
+
+def main() -> None:
+    from wsgiref.simple_server import make_server
+
+    config = GatewayConfig.from_env()
+    host = os.environ.get("LDAP_GATEWAY_HOST", "127.0.0.1")
+    port = _positive_int(os.environ, "LDAP_GATEWAY_PORT", 8081, 1, 65535)
+    application = LdapGatewayApp(config)
+    with make_server(host, port, application) as server:
+        server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
+
+--- END FILE: services/ldap3-gateway/ldap3_gateway.py ---
+
+
+--- BEGIN FILE: services/ldap3-gateway/requirements.txt ---
+
+ldap3>=2.9,<3
+
+--- END FILE: services/ldap3-gateway/requirements.txt ---
+
+
+--- BEGIN FILE: services/ldap3-gateway/static/login.html ---
+
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" type="image/png" href="/login-logo.png">
+  <title>登录 · 分组核心网 AI能力提升平台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: #172640;
+      background: #f9f9f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #f9f9f7;
+    }
+    .login-card {
+      width: min(100%, 420px);
+      overflow: hidden;
+      border: 1px solid #e5eaf2;
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 12px 34px rgba(20, 48, 90, .055);
+    }
+    .login-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 27px 32px 24px;
+      border-bottom: 1px solid #edf1f6;
+    }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      flex: 0 0 auto;
+      overflow: hidden;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+    }
+    .brand-mark img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      border-radius: inherit;
+    }
+    .brand-mark-fallback {
+      color: #fff;
+      background: linear-gradient(145deg, #3288e6 0%, #1555a4 100%);
+    }
+    .brand-fallback {
+      display: none;
+      font-size: 15px;
+      font-weight: 900;
+      letter-spacing: -.08em;
+    }
+    .brand-mark-fallback .brand-fallback { display: block; }
+    .brand-mark-fallback img { display: none; }
+    }
+    .brand-copy { min-width: 0; }
+    .brand-kicker {
+      display: block;
+      margin-bottom: 4px;
+      color: #8290a3;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      line-height: 1.1;
+    }
+    .brand-title {
+      display: block;
+      color: #172640;
+      font-family: "JetBrains Mono", "PingFang SC", "Microsoft YaHei", ui-monospace, Consolas, monospace;
+      font-size: 17px;
+      font-weight: 850;
+      letter-spacing: -.045em;
+      line-height: 1.2;
+    }
+    .login-body { padding: 27px 32px 30px; }
+    h1 {
+      margin: 0 0 7px;
+      color: #12213a;
+      font-size: 24px;
+      letter-spacing: -.055em;
+    }
+    .login-subtitle {
+      margin: 0 0 22px;
+      color: #7b8899;
+      font-size: 13px;
+    }
+    .form-error {
+      display: none;
+      margin: 0 0 15px;
+      padding: 10px 12px;
+      border: 1px solid rgba(208, 59, 59, .28);
+      border-radius: 7px;
+      color: #b23b3b;
+      background: rgba(208, 59, 59, .05);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .form-error[data-state="visible"] { display: block; }
+    label {
+      display: grid;
+      gap: 7px;
+      margin: 14px 0;
+      color: #536276;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    input {
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 11px;
+      border: 1px solid #d8e1ec;
+      border-radius: 7px;
+      color: #1f2a3d;
+      background: #fff;
+      outline: none;
+      font: inherit;
+    }
+    input:focus {
+      border-color: #176bc2;
+      box-shadow: 0 0 0 3px #e7f2ff;
+    }
+    button {
+      width: 100%;
+      min-height: 44px;
+      margin-top: 9px;
+      border: 0;
+      border-radius: 7px;
+      color: #fff;
+      background: #176bc2;
+      box-shadow: 0 5px 13px rgba(23, 107, 194, .22);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 800;
+    }
+    button:hover { background: #13599e; }
+    button:focus-visible {
+      outline: 3px solid #e7f2ff;
+      outline-offset: 2px;
+    }
+    .login-foot {
+      margin: 18px 0 0;
+      color: #9aa8bb;
+      font-size: 11px;
+      text-align: center;
+    }
+    @media (max-width: 520px) {
+      body { padding: 12px; }
+      .login-header, .login-body { padding-left: 24px; padding-right: 24px; }
+      .login-card { border-radius: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="login-card">
+    <header class="login-header">
+      <div class="brand-mark" aria-hidden="true">
+        <img src="/login-logo.png" alt="" onerror="this.hidden=true; this.parentElement.classList.add('brand-mark-fallback')">
+        <span class="brand-fallback">AI</span>
+      </div>
+      <div class="brand-copy">
+        <span class="brand-kicker">分组核心网</span>
+        <strong class="brand-title">AI能力提升平台</strong>
+      </div>
+    </header>
+    <section class="login-body">
+      <h1>登录</h1>
+      <div class="form-error" role="alert" data-state="{{ERROR_STATE}}">{{ERROR_MESSAGE}}</div>
+      <form method="post" action="/auth/login" autocomplete="on">
+        <input type="hidden" name="csrf" value="{{CSRF}}">
+        <input type="hidden" name="returnTo" value="{{RETURN_TO}}">
+        <label for="userId">
+          工号
+          <input id="userId" name="userId" autocomplete="username" placeholder="请输入工号" maxlength="128" required autofocus>
+        </label>
+        <label for="password">
+          密码
+          <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+        </label>
+        <button type="submit">登录</button>
+      </form>
+      <p class="login-foot">LDAP3域账号统一认证</p>
+    </section>
+  </main>
+</body>
+</html>
+
+--- END FILE: services/ldap3-gateway/static/login.html ---
+
+
+--- BEGIN FILE: services/ldap3-gateway/test_ldap3_gateway.py ---
+
+import io
+import hashlib
+import hmac
+import unittest
+from types import SimpleNamespace
+from urllib.parse import urlencode
+
+from ldap3_gateway import (
+    GatewayConfig,
+    InvalidSessionError,
+    LdapAuthenticationError,
+    LdapConfig,
+    LdapGatewayApp,
+    LdapProfileError,
+    LdapUser,
+    authenticate_ldap_user,
+    decode_session,
+    encode_session,
+    escape_filter_value,
+    trusted_gateway_headers,
+)
+
+
+class FakeBindError(Exception):
+    pass
+
+
+class FakeEntry:
+    def __init__(self, **attributes):
+        for key, value in attributes.items():
+            setattr(self, key, SimpleNamespace(value=value))
+
+
+class FakeConnection:
+    last = None
+
+    def __init__(self, server, auto_bind, user, password, receive_timeout, **kwargs):
+        FakeConnection.last = self
+        self.user = user
+        self.password = password
+        self.entries = [FakeEntry(title="w00123,张三,云计算", department="备用部门", displayName="张三")]
+        if password == "bad":
+            raise FakeBindError("bad credentials")
+
+    def search(self, **kwargs):
+        self.search_kwargs = kwargs
+        return True
+
+    def start_tls(self):
+        self.start_tls_called = True
+        return True
+
+    def bind(self):
+        self.bind_called = True
+        return True
+
+    def unbind(self):
+        self.unbound = True
+
+
+class FakeLdap:
+    NONE = "NONE"
+    SUBTREE = "SUBTREE"
+    Tls = staticmethod(lambda **kwargs: kwargs)
+    Server = staticmethod(lambda *args, **kwargs: (args, kwargs))
+    Connection = FakeConnection
+    core = SimpleNamespace(exceptions=SimpleNamespace(LDAPBindError=FakeBindError))
+
+
+class LdapGatewayTests(unittest.TestCase):
+    def setUp(self):
+        self.ldap = LdapConfig()
+        self.user = LdapUser("w00123", "张三", "云计算")
+
+    def test_filter_value_escapes_ldap_metacharacters(self):
+        self.assertEqual(escape_filter_value("a*)(b\\"), r"a\2a\29\28b\5c")
+
+    def test_authentication_maps_title_and_uses_narrow_search(self):
+        user = authenticate_ldap_user(self.ldap, "w00123", "secret", FakeLdap)
+        self.assertEqual(user, self.user)
+        self.assertEqual(FakeConnection.last.user, r"China\w00123")
+        self.assertEqual(FakeConnection.last.search_kwargs["search_filter"], "(sAMAccountName=w00123)")
+        self.assertEqual(FakeConnection.last.search_kwargs["attributes"], ["title", "department", "displayName"])
+        self.assertTrue(FakeConnection.last.unbound)
+
+    def test_bad_credentials_are_generic(self):
+        with self.assertRaises(LdapAuthenticationError):
+            authenticate_ldap_user(self.ldap, "w00123", "bad", FakeLdap)
+
+    def test_start_tls_is_negotiated_before_bind(self):
+        user = authenticate_ldap_user(LdapConfig(start_tls=True), "w00123", "secret", FakeLdap)
+        self.assertEqual(user.name, "张三")
+        self.assertTrue(FakeConnection.last.start_tls_called)
+        self.assertTrue(FakeConnection.last.bind_called)
+
+    def test_incomplete_profile_is_rejected(self):
+        class MissingNameConnection(FakeConnection):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.entries = [FakeEntry(title="w00123,,云计算", department="云计算", displayName="")]
+
+        class MissingNameLdap(FakeLdap):
+            Connection = MissingNameConnection
+
+        with self.assertRaises(LdapProfileError):
+            authenticate_ldap_user(self.ldap, "w00123", "secret", MissingNameLdap)
+
+    def test_gateway_signature_matches_platform_canonical_text(self):
+        headers = trusted_gateway_headers(self.user, "s" * 32, "2026-08-05T03:00:00.000Z")
+        self.assertEqual(headers["X-Trusted-Employee-No"], "w00123")
+        expected = hmac.new(b"s" * 32, "w00123\n2026-08-05T03:00:00.000Z\n张三\n云计算".encode("utf-8"), hashlib.sha256).hexdigest()
+        self.assertEqual(headers["X-Trusted-Identity-Signature"], expected)
+
+    def test_identity_header_values_reject_line_breaks(self):
+        with self.assertRaises(LdapProfileError):
+            trusted_gateway_headers(LdapUser("w00123", "张三\n伪造", "云计算"), "s" * 32)
+
+    def test_session_round_trip_and_tamper_detection(self):
+        token = encode_session(self.user, 200, "s" * 32)
+        self.assertEqual(decode_session(token, "s" * 32, now=100), self.user)
+        with self.assertRaises(InvalidSessionError):
+            decode_session(token[:-1] + ("0" if token[-1] != "0" else "1"), "s" * 32, now=100)
+        with self.assertRaises(InvalidSessionError):
+            decode_session(token, "s" * 32, now=200)
+
+    def test_verify_endpoint_returns_signed_headers(self):
+        config = GatewayConfig(self.ldap, "t" * 32, "s" * 32, cookie_secure=False)
+        token = encode_session(self.user, 200, config.session_secret)
+        app = LdapGatewayApp(config, clock=lambda: 100)
+        environ = {
+            "REQUEST_METHOD": "GET",
+            "PATH_INFO": "/auth/verify",
+            "HTTP_COOKIE": f"{config.cookie_name}={token}",
+        }
+        captured = {}
+
+        def start_response(status, headers):
+            captured["status"] = status
+            captured["headers"] = dict(headers)
+
+        body = b"".join(app(environ, start_response))
+        self.assertEqual(captured["status"], "200 OK")
+        self.assertEqual(body, b"")
+        self.assertEqual(captured["headers"]["X-Trusted-Employee-No"], "w00123")
+
+    @staticmethod
+    def _call(app, environ):
+        captured = {}
+
+        def start_response(status, headers):
+            captured["status"] = status
+            captured["headers"] = headers
+
+        body = b"".join(app(environ, start_response)).decode("utf-8")
+        return captured, body
+
+    def test_login_page_renders_csrf_and_return_target(self):
+        config = GatewayConfig(self.ldap, "t" * 32, "s" * 32, cookie_secure=False)
+        app = LdapGatewayApp(config, clock=lambda: 100)
+        captured, body = self._call(app, {
+            "REQUEST_METHOD": "GET",
+            "PATH_INFO": "/auth/login",
+            "QUERY_STRING": "returnTo=%2Fdrills%2Fparking",
+        })
+        self.assertEqual(captured["status"], "200 OK")
+        self.assertIn("分组核心网", body)
+        self.assertIn("AI能力提升平台", body)
+        self.assertIn("登录", body)
+        self.assertIn("工号", body)
+        self.assertIn("密码", body)
+        self.assertIn("LDAP3域账号统一认证", body)
+        self.assertIn('src="/login-logo.png"', body)
+        self.assertIn('name="password"', body)
+        self.assertIn('name="csrf" value="', body)
+        self.assertIn('name="returnTo" value="/drills/parking"', body)
+        self.assertNotIn("{{CSRF}}", body)
+        self.assertNotIn("{{ERROR_", body)
+        self.assertTrue(any(name == "Set-Cookie" and config.csrf_cookie_name in value for name, value in captured["headers"]))
+
+    def test_brand_logo_route_serves_the_platform_asset(self):
+        config = GatewayConfig(self.ldap, "t" * 32, "s" * 32, cookie_secure=False)
+        app = LdapGatewayApp(config, clock=lambda: 100)
+        captured = {}
+
+        def start_response(status, headers):
+            captured["status"] = status
+            captured["headers"] = dict(headers)
+
+        body = b"".join(app({"REQUEST_METHOD": "GET", "PATH_INFO": "/brand-logo.png"}, start_response))
+        self.assertEqual(captured["status"], "200 OK")
+        self.assertEqual(captured["headers"]["Content-Type"], "image/png")
+        self.assertTrue(body.startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_login_logo_route_serves_the_login_asset(self):
+        config = GatewayConfig(self.ldap, "t" * 32, "s" * 32, cookie_secure=False)
+        app = LdapGatewayApp(config, clock=lambda: 100)
+        captured = {}
+
+        def start_response(status, headers):
+            captured["status"] = status
+            captured["headers"] = dict(headers)
+
+        body = b"".join(app({"REQUEST_METHOD": "GET", "PATH_INFO": "/login-logo.png"}, start_response))
+        self.assertEqual(captured["status"], "200 OK")
+        self.assertEqual(captured["headers"]["Content-Type"], "image/png")
+        self.assertTrue(body.startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_form_login_shows_generic_error_without_exposing_password(self):
+        config = GatewayConfig(self.ldap, "t" * 32, "s" * 32, cookie_secure=False)
+
+        def reject(_config, _user_id, _password):
+            raise LdapAuthenticationError("internal detail")
+
+        app = LdapGatewayApp(config, authenticator=reject, clock=lambda: 100)
+        initial, page = self._call(app, {"REQUEST_METHOD": "GET", "PATH_INFO": "/auth/login", "QUERY_STRING": ""})
+        csrf_cookie = next(value for name, value in initial["headers"] if name == "Set-Cookie" and value.startswith(config.csrf_cookie_name))
+        csrf = csrf_cookie.split("=", 1)[1].split(";", 1)[0]
+        password = "never-render-this-password"
+        form = urlencode({"csrf": csrf, "returnTo": "/", "userId": "w00123", "password": password}).encode("utf-8")
+        captured, body = self._call(app, {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/auth/login",
+            "CONTENT_TYPE": "application/x-www-form-urlencoded",
+            "CONTENT_LENGTH": str(len(form)),
+            "HTTP_COOKIE": f"{config.csrf_cookie_name}={csrf}",
+            "wsgi.input": io.BytesIO(form),
+        })
+        self.assertEqual(captured["status"], "401 Unauthorized")
+        self.assertIn("工号或密码错误", body)
+        self.assertNotIn(password, body)
+        self.assertNotIn("{{ERROR_", body)
+        self.assertNotIn('"message"', body)
+
+    def test_form_login_rejects_expired_csrf_with_login_page(self):
+        config = GatewayConfig(self.ldap, "t" * 32, "s" * 32, cookie_secure=False)
+        app = LdapGatewayApp(config, clock=lambda: 100)
+        form = urlencode({"csrf": "wrong", "returnTo": "/", "userId": "w00123", "password": "secret"}).encode("utf-8")
+        captured, body = self._call(app, {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/auth/login",
+            "CONTENT_TYPE": "application/x-www-form-urlencoded",
+            "CONTENT_LENGTH": str(len(form)),
+            "wsgi.input": io.BytesIO(form),
+        })
+        self.assertEqual(captured["status"], "403 Forbidden")
+        self.assertIn("登录请求已失效", body)
+        self.assertIn('name="csrf" value="', body)
+
+    def test_json_login_keeps_machine_readable_error_response(self):
+        config = GatewayConfig(self.ldap, "t" * 32, "s" * 32, cookie_secure=False)
+
+        def reject(_config, _user_id, _password):
+            raise LdapAuthenticationError("internal detail")
+
+        app = LdapGatewayApp(config, authenticator=reject, clock=lambda: 100)
+        form = b'{"csrf":"wrong","userId":"w00123","password":"secret"}'
+        captured, body = self._call(app, {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/auth/login",
+            "CONTENT_TYPE": "application/json",
+            "HTTP_ACCEPT": "application/json",
+            "CONTENT_LENGTH": str(len(form)),
+            "wsgi.input": io.BytesIO(form),
+        })
+        self.assertEqual(captured["status"], "403 Forbidden")
+        self.assertIn('"message":"登录请求已失效，请刷新后重试"', body)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+--- END FILE: services/ldap3-gateway/test_ldap3_gateway.py ---
 
 
 --- BEGIN FILE: tools/engine-dev-kit/README.md ---

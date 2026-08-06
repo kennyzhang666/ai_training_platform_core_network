@@ -4,6 +4,7 @@ import { Icon, type IconName } from './icons';
 import { EVALUATION_ENGINE_GUIDE_MARKDOWN } from './evaluation-engine-guide';
 
 const API = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:3000/api/v1';
+const AUTH_LOGIN_PATH = import.meta.env.VITE_AUTH_LOGIN_PATH ?? '/auth/login';
 const ADMIN_EMPLOYEE_ID = import.meta.env.VITE_EMPLOYEE_ID ?? 'w00123';
 
 type AdminSection = 'overview' | 'organization' | 'challenges' | 'events' | 'participants' | 'capabilities' | 'grading' | 'evaluation-runtime' | 'announcements' | 'audit';
@@ -294,6 +295,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error('暂时无法连接平台服务，请稍后重试');
   }
   if (!response.ok) {
+    if (response.status === 401 && import.meta.env.PROD && typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth/')) {
+      const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      window.location.assign(`${AUTH_LOGIN_PATH}?returnTo=${encodeURIComponent(returnTo)}`);
+    }
     const detail = await response.text();
     let message = '';
     try {

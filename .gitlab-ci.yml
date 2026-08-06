@@ -31,6 +31,12 @@ node-test:
   script:
     - pnpm test
 
+ldap3-gateway-test:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - python services/ldap3-gateway/test_ldap3_gateway.py
+
 postgres-integration:
   stage: test
   image: node:20-bookworm

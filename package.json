@@ -1,6 +1,6 @@
 {
   "name": "ai-training-platform",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {
@@ -13,6 +13,7 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "kit:test": "node --test scripts/evaluation-engine-kit.test.mjs",
+    "ldap3:test": "python services/ldap3-gateway/test_ldap3_gateway.py",
     "contract:test": "pnpm --filter @ai-training/platform-api contract:test",
     "grader:test": "node scripts/run-grader-tests.mjs",
     "acceptance:local": "pnpm --filter @ai-training/platform-api exec tsx --test test/concurrency.test.ts"
