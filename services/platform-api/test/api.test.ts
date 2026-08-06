@@ -926,6 +926,7 @@ test('administrator workspace endpoints manage challenge versions and announceme
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         id: 'admin-api-demo', ownerOrgPath: '/', origin: 'OFFICIAL', category: 'COMPETITION', status: 'DRAFT', versions: [{
+          description: '<p>题目说明<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" alt="示例图"></p>',
           id: 'admin-api-demo@1', challengeId: 'admin-api-demo', version: 1, title: 'API 管理题', zone: 'YELLOW',
           languagePolicy: { mode: 'fixed', languages: ['python'] }, deliveryPolicy: { allowedSources: ['UPLOAD'], upload: { formats: ['zip'] } },
           rubricVersion: '1.0', submissionContract: 'contracts/submission-contract.schema.json', status: 'DRAFT',
@@ -933,7 +934,9 @@ test('administrator workspace endpoints manage challenge versions and announceme
       }),
     });
     assert.equal(created.status, 201);
-    assert.equal((await created.clone().json() as { category: string }).category, 'COMPETITION');
+    const createdBody = await created.clone().json() as { category: string; versions?: Array<{ description?: string }> };
+    assert.equal(createdBody.category, 'COMPETITION');
+    assert.match(createdBody.versions?.[0]?.description ?? '', /data:image\/png;base64,/);
     const categorized = await fetch(`${baseUrl}/api/v1/challenges/admin-api-demo`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ category: 'HARD_PROBLEM' }),
     });
@@ -945,6 +948,10 @@ test('administrator workspace endpoints manage challenge versions and announceme
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ category: 'UNKNOWN' }),
     });
     assert.equal(invalidCategory.status, 400);
+    const unsafeDescription = await fetch(`${baseUrl}/api/v1/challenges/admin-api-demo/versions/admin-api-demo@1`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description: '<p><img src="https://example.com/remote.png"></p>' }),
+    });
+    assert.equal(unsafeDescription.status, 400);
     const reclassified = await fetch(`${baseUrl}/api/v1/challenges/admin-api-demo`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ category: 'COMPETITION' }),
     });

@@ -1513,11 +1513,18 @@ footer { padding: 14px; border-color: var(--lc-line); background: var(--lc-panel
 .rich-editor-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 6px; border-bottom: 1px solid var(--lc-line); background: var(--lc-subtle); }
 .rich-editor-toolbar button { min-height: 26px; padding: 4px 8px; border: 1px solid transparent; border-radius: 4px; color: var(--lc-text); background: transparent; font-size: 10px; font-weight: 700; }
 .rich-editor-toolbar button:hover { border-color: #BFD9F5; color: var(--lc-blue); background: #fff; }
+.rich-editor-toolbar button:disabled { cursor: not-allowed; opacity: .6; }
+.rich-editor-image-button { color: var(--lc-blue) !important; border-color: #BFD9F5 !important; background: var(--lc-blue-soft) !important; }
+.rich-editor-image-input { display: none; }
 .rich-editor-divider { width: 1px; height: 18px; margin: 0 3px; background: var(--lc-line); }
 .rich-editor-surface { min-height: 180px; padding: 12px; color: var(--lc-text); background: #fff; outline: none; font-size: 12px; line-height: 1.7; }
 .rich-editor-surface p, .rich-editor-surface h1, .rich-editor-surface h2, .rich-editor-surface h3 { margin: 0 0 8px; }
 .rich-editor-surface h3 { color: var(--lc-text); font-size: 14px; }
 .rich-editor-surface ul, .rich-editor-surface ol { margin: 0 0 8px; padding-left: 22px; }
+.rich-editor-surface img, .detail-hero-description img { display: block; max-width: 100%; height: auto; margin: 10px 0; border: 1px solid var(--lc-line); border-radius: 6px; }
+.rich-editor-help, .rich-editor-error { padding: 6px 10px; border-top: 1px solid var(--lc-line); font-size: 11px; line-height: 1.5; }
+.rich-editor-help { color: var(--lc-muted); background: var(--lc-subtle); }
+.rich-editor-error { color: var(--ui-red); background: var(--ui-red-soft); }
 .detail-hero-description { margin-top: 8px; color: var(--lc-text); font-size: 13px; line-height: 1.7; }
 .detail-hero-description p, .detail-hero-description h1, .detail-hero-description h2, .detail-hero-description h3 { margin: 0 0 8px; }
 .detail-hero-description h3 { color: var(--lc-text); font-size: 15px; }

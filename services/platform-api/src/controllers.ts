@@ -92,6 +92,8 @@ function parseUserListQuery(input: UserListRequestQuery): UserListQuery {
 const PROFILE_NICKNAME_MAX_LENGTH = 32;
 const PROFILE_AVATAR_MAX_BYTES = 256 * 1024;
 const PROFILE_AVATAR_MIME = /^(image\/png|image\/jpeg|image\/webp)$/;
+const RICH_TEXT_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+const RICH_TEXT_DESCRIPTION_MAX_BYTES = 8 * 1024 * 1024;
 
 type UserProfilePatch = { nickname?: string | null; avatarDataUrl?: string | null };
 
@@ -118,6 +120,38 @@ function parseAvatarDataUrl(value: unknown): string | null {
     throw new BadRequestException(`avatarDataUrl must be a valid image no larger than ${PROFILE_AVATAR_MAX_BYTES} bytes`);
   }
   return `data:${match[1]};base64,${bytes.toString('base64')}`;
+}
+
+/**
+ * Rich text is authored by administrators but rendered for every employee.
+ * Validate embedded images at the API boundary as well as in the browser so
+ * a hand-crafted request cannot persist remote URLs, SVG/script payloads, or
+ * oversized data URLs that bypass the editor.
+ */
+function validateRichTextDescription(value: unknown): void {
+  if (value === undefined) return;
+  if (typeof value !== 'string') throw new BadRequestException('description must be a string');
+  if (Buffer.byteLength(value, 'utf8') > RICH_TEXT_DESCRIPTION_MAX_BYTES) {
+    throw new BadRequestException(`description must be no larger than ${RICH_TEXT_DESCRIPTION_MAX_BYTES} bytes`);
+  }
+  if (/<\s*(script|style|iframe|object|embed|form|template)\b/i.test(value)) {
+    throw new BadRequestException('description contains a blocked HTML element');
+  }
+  const imageTags = value.match(/<img\b[^>]*>/gi) ?? [];
+  for (const tag of imageTags) {
+    if (/\son[a-z]+\s*=|\b(?:style|srcset|usemap)\s*=/i.test(tag)) {
+      throw new BadRequestException('description image attributes are not allowed');
+    }
+    const source = /\bsrc\s*=\s*(['"])(.*?)\1/i.exec(tag)?.[2] ?? '';
+    const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(source);
+    if (!match || match[0].length > Math.ceil(RICH_TEXT_IMAGE_MAX_BYTES / 3) * 4 + 64 || match[2].length % 4 === 1) {
+      throw new BadRequestException('description images must be PNG, JPEG, or WebP data URLs');
+    }
+    const bytes = Buffer.from(match[2], 'base64');
+    if (!bytes.length || bytes.length > RICH_TEXT_IMAGE_MAX_BYTES || Buffer.from(bytes).toString('base64') !== match[2] || !validAvatarBytes(match[1], bytes)) {
+      throw new BadRequestException(`description image must be a valid image no larger than ${RICH_TEXT_IMAGE_MAX_BYTES} bytes`);
+    }
+  }
 }
 
 function parseUserProfilePatch(input: unknown): UserProfilePatch {
@@ -631,6 +665,7 @@ export class PlatformController {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...challenge } = body;
     for (const version of challenge.versions ?? []) {
+      validateRichTextDescription(version.description);
       this.assertExecutorSelection(version);
       this.assertSubmissionContract(version);
       this.contractCatalog.assertSelection(version.evaluationEngine);
@@ -679,6 +714,7 @@ export class PlatformController {
   async createChallengeVersion(@Param('challengeId') challengeId: string, @Body() body: ChallengeVersion & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...version } = body;
+    validateRichTextDescription(version.description);
     this.assertExecutorSelection(version);
     this.assertSubmissionContract(version);
     this.contractCatalog.assertSelection(version.evaluationEngine);
@@ -689,6 +725,7 @@ export class PlatformController {
   async updateChallengeVersion(@Param('challengeId') challengeId: string, @Param('versionId') versionId: string, @Body() body: Partial<ChallengeVersion> & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...patch } = body;
+    validateRichTextDescription(patch.description);
     if (patch.evaluationEngine) this.assertExecutorSelection(patch as { evaluationEngine?: EvaluationEngineConfig });
     this.assertSubmissionContract(patch);
     if (patch.evaluationEngine) this.contractCatalog.assertSelection(patch.evaluationEngine);

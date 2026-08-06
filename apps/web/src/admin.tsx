@@ -1,5 +1,5 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { richTextPreview, sanitizeRichText } from './rich-text';
+import { readRichTextImage, richTextPreview, sanitizeRichText } from './rich-text';
 import { Icon, type IconName } from './icons';
 import { EVALUATION_ENGINE_GUIDE_MARKDOWN } from './evaluation-engine-guide';
 
@@ -1375,7 +1375,10 @@ function ChallengeEditorLegacy({ form, setForm, onCancel, onSave, busy, title }:
 
 function RichTextEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const editorRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const selectionRef = useRef<Range | null>(null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState('');
   useEffect(() => {
     const sanitized = sanitizeRichText(value);
     if (editorRef.current && editorRef.current.innerHTML !== sanitized) editorRef.current.innerHTML = sanitized;
@@ -1383,12 +1386,12 @@ function RichTextEditor({ value, onChange }: { value: string; onChange: (value: 
 
   const rememberSelection = () => {
     const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) selectionRef.current = selection.getRangeAt(0).cloneRange();
+    if (selection && selection.rangeCount > 0 && editorRef.current?.contains(selection.anchorNode)) selectionRef.current = selection.getRangeAt(0).cloneRange();
   };
 
   const restoreSelection = () => {
     const selection = window.getSelection();
-    if (!selection || !selectionRef.current) return;
+    if (!selection || !selectionRef.current || !editorRef.current?.contains(selectionRef.current.commonAncestorContainer)) return;
     selection.removeAllRanges();
     selection.addRange(selectionRef.current);
   };
@@ -1433,6 +1436,50 @@ function RichTextEditor({ value, onChange }: { value: string; onChange: (value: 
     runCommand(command, argument);
     rememberSelection();
   };
+
+  const insertImage = (dataUrl: string, alt: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    restoreSelection();
+    const selection = window.getSelection();
+    let range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    if (!range || !editor.contains(range.commonAncestorContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+    }
+    if (!range.collapsed) range.deleteContents();
+    const image = document.createElement('img');
+    image.src = dataUrl;
+    image.alt = alt;
+    range.insertNode(image);
+    range.setStartAfter(image);
+    range.collapse(true);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    selectionRef.current = range.cloneRange();
+    onChange(sanitizeRichText(editor.innerHTML));
+  };
+
+  const handleImageChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    setImageBusy(true);
+    setImageError('');
+    try {
+      const image = await readRichTextImage(file);
+      insertImage(image.dataUrl, image.alt);
+    } catch (error) {
+      setImageError(error instanceof Error ? error.message : '图片上传失败，请重试');
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
   const preventToolbarFocus = (event: { preventDefault: () => void }) => event.preventDefault();
   return <div className="rich-editor">
     <div className="rich-editor-toolbar" role="toolbar" aria-label="赛题详情格式工具栏">
@@ -1442,10 +1489,14 @@ function RichTextEditor({ value, onChange }: { value: string; onChange: (value: 
       <button type="button" onMouseDown={preventToolbarFocus} onClick={toolbarCommand('insertUnorderedList')} title="无序列表">• 列表</button>
       <button type="button" onMouseDown={preventToolbarFocus} onClick={toolbarCommand('insertOrderedList')} title="有序列表">1. 列表</button>
       <span className="rich-editor-divider" />
+      <button type="button" className="rich-editor-image-button" onMouseDown={preventToolbarFocus} onClick={() => imageInputRef.current?.click()} disabled={imageBusy} title="上传 PNG、JPEG 或 WebP 图片">{imageBusy ? '读取中…' : '上传图片'}</button>
+      <input ref={imageInputRef} className="rich-editor-image-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void handleImageChange(event)} />
       <button type="button" onMouseDown={preventToolbarFocus} onClick={toolbarCommand('undo')} title="撤销">撤销</button>
       <button type="button" onMouseDown={preventToolbarFocus} onClick={toolbarCommand('redo')} title="重做">重做</button>
     </div>
-    <div ref={editorRef} className="rich-editor-surface" contentEditable role="textbox" aria-multiline="true" suppressContentEditableWarning onInput={(event) => { onChange(sanitizeRichText(event.currentTarget.innerHTML)); rememberSelection(); }} onKeyUp={rememberSelection} onMouseUp={rememberSelection} />
+    <div ref={editorRef} className="rich-editor-surface" contentEditable role="textbox" aria-multiline="true" suppressContentEditableWarning onInput={(event) => { const sanitized = sanitizeRichText(event.currentTarget.innerHTML); if (event.currentTarget.innerHTML !== sanitized) event.currentTarget.innerHTML = sanitized; onChange(sanitized); rememberSelection(); }} onKeyUp={rememberSelection} onMouseUp={rememberSelection} />
+    <div className="rich-editor-help">支持 PNG、JPEG、WebP，单张不超过 2 MiB；图片会嵌入赛题说明。</div>
+    {imageError && <div className="rich-editor-error" role="alert">{imageError}</div>}
   </div>;
 }
 
