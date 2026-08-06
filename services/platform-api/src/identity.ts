@@ -33,6 +33,17 @@ function header(headers: HeaderMap, name: string): string | undefined {
   return Array.isArray(value) ? value[0]?.trim() : typeof value === 'string' ? value.trim() : undefined;
 }
 
+/** Decode UTF-8 claim bytes transported through WSGI's latin-1 header API. */
+function trustedClaimHeader(value: string | undefined): string | undefined {
+  if (!value) return value;
+  // Node/Nginx normally expose the WSGI latin-1 transport as a string whose
+  // code points are all <= 0xff. If a proxy has already decoded the header,
+  // preserve the real Unicode value instead of truncating it through latin-1.
+  if ([...value].some((character) => (character.codePointAt(0) ?? 0) > 0xff)) return value;
+  const decoded = Buffer.from(value, 'latin1').toString('utf8');
+  return decoded.includes('\uFFFD') ? value : decoded;
+}
+
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name]?.trim();
   if (!value) throw new Error(`${name} is required for the selected identity mode`);
@@ -224,8 +235,8 @@ async function verifyTrustedGateway(headers: HeaderMap, config: IdentityConfig):
   if (!employeeNo || !issuedAt || !signature) unauthorized('trusted gateway identity is missing');
   const issuedMillis = Date.parse(issuedAt);
   if (!Number.isFinite(issuedMillis) || Math.abs(Date.now() - issuedMillis) > config.gatewayMaxAgeSeconds * 1000) unauthorized('trusted gateway identity is expired');
-  const name = header(headers, 'x-trusted-name');
-  const department = header(headers, 'x-trusted-department');
+  const name = trustedClaimHeader(header(headers, 'x-trusted-name'));
+  const department = trustedClaimHeader(header(headers, 'x-trusted-department'));
   const expected = trustedGatewaySignature({ employeeNo, issuedAt, name, department }, config.gatewaySecret!);
   const received = Buffer.from(signature, 'hex');
   const expectedBytes = Buffer.from(expected, 'hex');

@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：0.8.8。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：0.9.0。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -13,7 +13,7 @@
 
 # 评测引擎开发指南
 
-> 版本：0.8.8
+> 版本：0.9.0
 > 用途：供评测引擎开发者和其他 AI 阅读。仓库内 contracts/ 是最终事实来源；本文档不包含员工信息、凭据或运行日志。
 
 ## 1. 平台边界
@@ -125,6 +125,8 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 ~~~
 
 Code Agent 应读取 instruction.md、Skills、batch-manifest.json 和只读提交快照，并将结果写到 manifest.resultIndexPath。命令优先级是 Worker --agent-command > 新批次冻结的平台配置 > CODE_AGENT_COMMAND/CODE_AGENT_ARGS_JSON。可执行文件必须存在于 Worker 主机并通过白名单。超时必须受批次、Worker、引擎三层上限约束。
+
+生产内网的独立 Worker 不应借用浏览器身份。启用 EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET 后，Worker 会使用工号、姓名和部门生成受 HMAC 保护的身份头；该密钥只注入 Worker 和 Platform API，不写入批次清单、日志或前端。完整 LDAP3/TRUSTED_GATEWAY 与 Nginx 配置见 docs/deployment/ldap3-trusted-gateway.md、docs/deployment/ldap3-nginx-intranet-deployment.md 和 docs/deployment/intranet-http-only.md。
 
 ## 6. 输出契约、幂等与失败
 
@@ -239,7 +241,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 ## 嵌入的仓库文件
 
-共 66 个文件，按仓库相对路径嵌入。
+共 67 个文件，按仓库相对路径嵌入。
 
 --- BEGIN FILE: AGENTS.md ---
 
@@ -283,10 +285,10 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台开发总览
 
-> 当前版本：`v0.8.8`
-> 更新日期：2026-08-06
-> 当前阶段：v0.8.8 赛题说明富文本图片能力已发布；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
-> 发布范围：在 v0.8.7 评测锁定和提交状态反馈基础上，补齐赛题说明编辑器的图片插入、预览和服务端安全校验，不修改评分 Schema 和数据库迁移。
+> 当前版本：`v0.9.0`
+> 更新日期：2026-08-07
+> 当前阶段：v0.9.0 本地生产模式部署与内网 LDAP3 接入能力已收口；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
+> 发布范围：补齐本地生产模式到内网部署的闭环，修复 LDAP3 中文身份传输、并发首次建档和 Worker 服务身份问题，增加纯 HTTP 内网开关、退出登录和空目录首屏行为；不修改评分 Schema 和数据库迁移。
 > 文档职责：项目架构、整体设计、版本沿革、当前边界、后续路线和 Codex 交接入口
 
 ## 1. 如何使用和维护本文档
@@ -671,7 +673,23 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 - 平台 API 对赛题创建、版本创建和版本更新统一执行富文本大小、危险标签、图片 data URL、文件魔数和大小校验，避免绕过浏览器直接写入不安全内容；
 - API 回归测试覆盖合法内嵌图片持久化和远程图片拒绝，资料包版本从根 `package.json` 自动同步。
 
-版本验证记录：`pnpm test`（126 项，125 通过、1 项显式跳过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm kit:test`（1/1）、`pnpm ldap3:test`（15/15）、`pnpm acceptance:local`（1/1）、`pnpm lint` 和 `pnpm build` 全部通过；`git diff --check` 通过。真实浏览器上传体验仍需在目标环境复验。
+版本验证记录：`pnpm test`（127 项，126 通过、1 项显式跳过）、`pnpm contract:test`（7/7）、`pnpm grader:test`（18/18）、`pnpm kit:test`（1/1）、`pnpm ldap3:test`（19/19）、`pnpm acceptance:local`（1/1）、`pnpm lint` 和 `pnpm build` 全部通过；`git diff --check` 通过。真实浏览器上传体验仍需在目标环境复验。
+
+### 5.13 v0.9.0 发布状态（2026-08-07）
+
+本次以本地生产模式真实部署为验收对象，补齐从内网 LDAP3 登录到平台 API、Worker 和前端反向代理的部署闭环；不新增数据库迁移、评分 Schema 或业务数据：
+
+- 新增 LDAP3 网关显式本地 Mock 模式，仅用于个人电脑生产验收：任意非空密码可通过，已知本地账号保留固定角色，未知工号生成确定性的测试身份；真实内网部署默认仍关闭 Mock；
+- 新增 `INTRANET_HTTP_ONLY` 纯 HTTP 内网开关，默认 HTTPS；启用后由网关统一关闭 Cookie `Secure` 标志，并提供对应 Nginx 配置和部署说明；LDAP 到目录服务器仍应使用 LDAPS 或 StartTLS；
+- 修复 LDAP3 网关经 WSGI/Nginx 传输中文姓名、部门时的编码边界，API 同时兼容 UTF-8 字节形式和代理已解码的 Unicode，并增加 Windows PowerShell 本地 Mock 配置乱码修复；
+- Worker 支持使用独立的 `EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET`、工号、姓名和部门签发受 HMAC 保护的服务身份头；内置评测器物化时同步复制平台契约目录，不再依赖 Worker 当前工作区；
+- PostgreSQL 首次登录并发建档增加进程内 single-flight 和带退避的数据库重试，确保同一工号只创建一个用户且只产生一次 first-login 事实；
+- 生产构建默认通过反向代理同源访问 `/api/v1`，补充退出登录按钮；空赛题/训战目录不再携带历史演示 ID，空数据库首屏可正常加载；
+- 本地生产验收目录补充 HTTP-only、LDAP3 Mock、服务身份和部署说明，并重新生成独立评测引擎资料包。
+
+本地 PostgreSQL 中的历史“停车场计费”演示训战、提交和评测批次已清理；这属于本地运行数据，不写入版本库，重新导入旧 `seed.json` 或恢复旧备份时仍会重新出现。
+
+版本验证记录：发布前执行 `pnpm lint`、`pnpm test`、`pnpm contract:test`、`pnpm grader:test`、`pnpm kit:test`、`pnpm ldap3:test`、`pnpm build`、`git diff --check`，并通过本地 PostgreSQL、LDAP3 Mock、Nginx 反向代理和空目录 API 验收；最终结果以本次发布命令输出为准。
 
 ## 6. 版本沿革
 
@@ -697,6 +715,7 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 | `v0.8.6` | 2026-08-06 | 统一管理端和员工端的卡片 hover、按钮反馈、导航指示、列表高亮、进度缓动和页面进入动效。 |
 | `v0.8.7` | 2026-08-06 | 增加评测进行中的同训战提交锁定、跨页面状态同步和可关闭锁定提示。 |
 | `v0.8.8` | 2026-08-06 | 赛题说明富文本支持 PNG/JPEG/WebP 图片插入，并在浏览器和 API 边界执行大小、类型、魔数与危险属性校验。 |
+| `v0.9.0` | 2026-08-07 | 收口本地生产模式与内网部署：LDAP3 Mock/中文身份传输、纯 HTTP 开关、Worker 服务身份、并发建档重试、反向代理同源 API、退出登录和空目录初始化。 |
 
 ## 7. 后续开发路线
 
@@ -728,7 +747,9 @@ v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录
 
 验收证据：沙箱安全测试、Worker 身份测试、故障恢复测试、批次观测面板、容量基线和生产回滚记录。v0.8.0 已提供本地/受控开发验证入口，但不将本地 bridge 或 API 内嵌执行器视为生产证据。
 
-### 7.3 v0.9.0：业务完整性与可运营性
+### 7.3 v0.9.0：业务完整性与可运营性（本次已发布部署收口，业务扩展继续排期）
+
+本次 v0.9.0 先完成真实本地生产模式、LDAP3 网关和 Worker 服务身份的部署收口；以下业务完整性工作仍是后续迭代目标，不能把本地 Mock 验收视为生产身份和沙箱验收证据。
 
 目标：满足真实部门试点的日常配置、复核和复盘需求。
 
@@ -757,7 +778,7 @@ v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录
 
 ## 8. 下一位 Codex 的推荐起点
 
-当前代码纵切面已经覆盖 PostgreSQL Repository/Unit of Work、服务端员工分页、赛题/训战与提交/评测的关键约束、对象存储物化和规范化备份恢复；本地临时 PostgreSQL 已完成迁移、集成、导入和恢复演练，容量与安全基线也已记录。下一步不再重复 W1 迁移，而是进入发布环境门禁与剩余领域收口：
+当前代码纵切面已经覆盖 PostgreSQL Repository/Unit of Work、服务端员工分页、赛题/训战与提交/评测的关键约束、对象存储物化和规范化备份恢复；本地生产模式已完成 PostgreSQL、MinIO、Nginx、LDAP3 Mock、Worker 和空目录验收，但这不替代目标环境门禁。下一步不再重复 W1 迁移，而是进入生产发布门禁与剩余业务领域收口：
 
 1. 在目标环境接入真实 S3 兼容对象存储，验证上传确认、哈希、下载物化、Worker 清理和故障重试（本地 MinIO 生产配置验收已完成）；
 2. 接入真实 OIDC/JWKS 与 Worker 服务身份，执行组织/角色/场次访问矩阵及审计留存验收；
@@ -766,9 +787,9 @@ v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录
 
 ### 8.1 v0.8.2 评审提出的优先事项
 
-以下条目来自 v0.8.2 的全局代码评审，按建议顺序排列。前两项是本轮发现但未修复的真实缺口，应优先于 §7.3 的功能开发。
+以下条目来自 v0.8.2 的全局代码评审，按建议顺序排列；已完成项保留为证据，未完成项继续作为后续门禁。
 
-1. **服务端富文本白名单清洗（安全，最高优先级）。** 赛题详情 `description` 以 `dangerouslySetInnerHTML` 渲染给全体参与者，但清洗只发生在浏览器端的 `apps/web/src/rich-text.ts`。任何能调用赛题写接口的账号都可以绕过前端直接 POST 原始 HTML，存储的内容会原样返回给所有人。应在 API 写入路径上做同一套标签/属性白名单清洗，并对已有数据做一次性回填；前端清洗保留为纵深防御，但不能当作保证。§7.3 已列出该项，建议提前到下一个版本。
+1. **服务端富文本白名单清洗（已在 v0.8.8 完成）。** 赛题详情 `description` 的 API 写入路径现在与浏览器端共用危险标签、属性、图片 data URL、文件魔数和大小边界校验；前端清洗仍保留为纵深防御，已有数据回填和目标环境复验仍需按数据治理要求执行。
 2. **Worker 解压的独立体积上限。** `scripts/evaluation-worker.mjs` 的 `safeExtract` 正确拒绝了绝对路径、`..` 和符号链接，但没有自己的解压后体积上限，完全依赖 API 入库前的 `validateArchive`。Worker 是独立进程且未来会从对象存储直接物化，应在解压侧也强制 `maxFiles` / `maxExpandedBytes`，让防护不依赖调用方。
 3. **拆分 `store.ts` 与 `admin.tsx`。** 两个文件分别为 240KB 和 228KB，`PlatformStore` 同时承担状态机、授权、审计和持久化四种职责。这是当前最大的可维护性风险，也是 §7.3 前端模块化的前置条件。建议按领域（赛题/训战、提交/评测、组织/人员、报告/画像）逐个切出窄接口，每次迁移保持测试绿色，不要一次性重写。
 4. **补齐身份层的算法矩阵测试。** 本轮的 `ES256` 缺陷之所以能发布，是因为 `identity.test.ts` 只覆盖了 `RS256`。允许列表中的每个算法（`RS256`/`RS384`/`RS512`/`ES256`）都应有一条使用真实密钥对的正向用例，新增算法时同步补充。
@@ -872,7 +893,7 @@ git diff --check
 
 # 分组核心网AI能力提升平台
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.8`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.9.0`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
 
 ## 当前能力
 
@@ -890,8 +911,10 @@ git diff --check
 - 员工昵称/头像、多人批量调部门、部门层级自动识别和本地多身份切换；
 - 服务端统一校验训战时间窗口，窗口外不可进入或提交。
 - 垃圾箱赛题支持带审计的永久删除；所有禁用控件统一显示禁止点击光标。
+- LDAP3 `TRUSTED_GATEWAY` 登录、中文身份传输、Worker HMAC 服务身份和本地 Mock 验收；
+- 默认 HTTPS 的 Nginx 部署与隔离内网纯 HTTP 开关，生产 Web 自动通过反向代理同源访问 API。
 
-当前数据、交付件、身份和 Git 均使用本地适配器，不能直接作为生产部署方案。完整架构、限制和版本沿革见开发总览。
+开发模式默认使用本地适配器；生产模式可按部署手册使用 PostgreSQL、S3-compatible 对象存储、Nginx、LDAP3 网关和独立 Worker，不能把本地 Mock 或单机文件适配器当作生产身份与沙箱证据。完整架构、限制和版本沿革见开发总览。
 
 ## 环境
 
@@ -967,6 +990,7 @@ pnpm acceptance:local
 - [`docs/v0.8-development-manual.md`](docs/v0.8-development-manual.md)：v0.8.x 评测运行环境、管理运营与身份层约束开发手册；
 - [`docs/deployment/ldap3-trusted-gateway.md`](docs/deployment/ldap3-trusted-gateway.md)：LDAP3 统一认证网关接入说明；
 - [`docs/deployment/ldap3-nginx-intranet-deployment.md`](docs/deployment/ldap3-nginx-intranet-deployment.md)：内网单服务器 Nginx + LDAP3 部署手册（可直接交给弱模型执行）；
+- [`docs/deployment/intranet-http-only.md`](docs/deployment/intranet-http-only.md)：隔离内网纯 HTTP 开关和 Nginx 配置；
 - [`docs/deployment/windows-production-smoke-test.md`](docs/deployment/windows-production-smoke-test.md)：Windows 个人电脑上的生产模式端到端验收手册；
 - [`docs/submission-contract.md`](docs/submission-contract.md)：交付目录契约；
 - [`docs/capability-model.md`](docs/capability-model.md)：能力模型；
@@ -5201,6 +5225,131 @@ components:
 --- END FILE: contracts/submission-contract.schema.json ---
 
 
+--- BEGIN FILE: docs/deployment/intranet-http-only.md ---
+
+# 内网纯 HTTP 部署开关
+
+平台默认按 HTTPS 部署。只有在浏览器到 Nginx 的链路完全处于隔离内网、并且已经有网络 ACL 或专用网络边界时，才启用本模式。
+
+## 1. 开关
+
+在 LDAP3 网关的环境文件中设置：
+
+```env
+INTRANET_HTTP_ONLY=true
+```
+
+这个开关会让网关自动关闭登录 Cookie 的 `Secure` 标志，因此 HTTP 浏览器可以继续携带会话 Cookie。它的默认值是 `false`；默认 HTTPS 部署不需要修改 `LDAP_GATEWAY_COOKIE_SECURE=true`。
+
+Platform API 仍然使用同样的配置，不需要切换认证模式：
+
+```env
+NODE_ENV=production
+PLATFORM_IDENTITY_MODE=TRUSTED_GATEWAY
+TRUSTED_GATEWAY_HMAC_SECRET=<与 LDAP3 网关相同的密钥>
+```
+
+## 2. HTTP Nginx 配置
+
+把 HTTPS 版本的 Nginx server 块替换为下面的 HTTP 版本。不要同时保留“80 端口跳转 HTTPS”的 server 块，否则浏览器仍会被重定向到 HTTPS。
+
+```nginx
+server {
+    listen 80;
+    server_name ai-platform.intra.example;
+
+    client_max_body_size 75m;
+
+    location = /_ldap_verify {
+        internal;
+        proxy_pass http://127.0.0.1:8081/auth/verify;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Host $host;
+        proxy_set_header Cookie $http_cookie;
+    }
+
+    location = /auth/login {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Cookie $http_cookie;
+    }
+
+    location = /auth/logout {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Cookie $http_cookie;
+    }
+
+    location = /login-logo.png {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+    }
+
+    location = /brand-logo.png {
+        root /opt/ai-training-platform/apps/web/dist;
+    }
+
+    location /api/ {
+        auth_request /_ldap_verify;
+        auth_request_set $trusted_employee_no $upstream_http_x_trusted_employee_no;
+        auth_request_set $trusted_name $upstream_http_x_trusted_name;
+        auth_request_set $trusted_department $upstream_http_x_trusted_department;
+        auth_request_set $trusted_issued_at $upstream_http_x_trusted_issued_at;
+        auth_request_set $trusted_signature $upstream_http_x_trusted_identity_signature;
+
+        proxy_set_header X-Employee-Id "";
+        proxy_set_header X-Trusted-Employee-No $trusted_employee_no;
+        proxy_set_header X-Trusted-Name $trusted_name;
+        proxy_set_header X-Trusted-Department $trusted_department;
+        proxy_set_header X-Trusted-Issued-At $trusted_issued_at;
+        proxy_set_header X-Trusted-Identity-Signature $trusted_signature;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_read_timeout 300s;
+    }
+
+    location / {
+        auth_request /_ldap_verify;
+        error_page 401 =302 /auth/login?returnTo=$request_uri;
+        root /opt/ai-training-platform/apps/web/dist;
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+检查并重载：
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+## 3. 验收
+
+```bash
+curl -I http://ai-platform.intra.example/
+curl -I http://ai-platform.intra.example/login-logo.png
+curl http://127.0.0.1:3000/api/v1/health
+curl http://127.0.0.1:8081/healthz
+```
+
+浏览器访问 `http://ai-platform.intra.example/`，登录后进入个人中心确认工号、姓名和部门来自 LDAP3。不要把 API 的 3000 端口或网关的 8081 端口暴露给用户网络。
+
+## 4. 仍然必须保持的边界
+
+- LDAP 到目录服务器的链路仍使用 LDAPS 或 StartTLS；HTTP-only 只描述浏览器到 Nginx 的链路。
+- API 继续使用 `TRUSTED_GATEWAY`，并继续校验 HMAC 签名身份头。
+- API 和 LDAP3 网关继续只监听 `127.0.0.1`，不直接暴露到办公网。
+- 一旦网络不再完全隔离，立即将 `INTRANET_HTTP_ONLY` 改回 `false`，恢复 HTTPS Nginx 配置，并保持 `LDAP_GATEWAY_COOKIE_SECURE=true`。
+
+--- END FILE: docs/deployment/intranet-http-only.md ---
+
+
 --- BEGIN FILE: docs/deployment/ldap3-nginx-intranet-deployment.md ---
 
 # 内网单服务器部署手册：Nginx + LDAP3 + AI 能力提升平台
@@ -5234,7 +5383,7 @@ LDAP3 网关使用内网 LDAP 域账号校验登录，成功后保存 HttpOnly �
 3. TRUSTED_GATEWAY_HMAC_SECRET 必须在 API 和 LDAP3 网关中完全相同。
 4. LDAP_GATEWAY_SESSION_SECRET 只能放在 LDAP3 网关，不能和 HMAC 密钥复用。
 5. LDAP 密码不能写入 Git、日志、数据库、Nginx 配置或前端代码。
-6. 生产环境使用 HTTPS，并设置 LDAP_GATEWAY_COOKIE_SECURE=true。
+6. 默认使用 HTTPS，并设置 LDAP_GATEWAY_COOKIE_SECURE=true；只有隔离内网才能启用 `INTRANET_HTTP_ONLY=true`，并改用 `docs/deployment/intranet-http-only.md` 中的 HTTP Nginx 配置。
 7. 不要设置 PLATFORM_IDENTITY_MODE=LOCAL，不要设置 ALLOW_ANONYMOUS_LOCAL=true。
 
 ## 2. 服务器准备
@@ -5373,6 +5522,9 @@ LDAP_GATEWAY_SESSION_SECRET=<第二条独立随机密钥>
 TRUSTED_GATEWAY_HMAC_SECRET=<必须与 platform-api.env 完全相同>
 LDAP_GATEWAY_SESSION_TTL_SECONDS=28800
 TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+# HTTPS is the default. Set true only for an isolated internal HTTP network;
+# use docs/deployment/intranet-http-only.md for the matching Nginx server block.
+INTRANET_HTTP_ONLY=false
 LDAP_GATEWAY_COOKIE_SECURE=true
 ~~~
 
@@ -5783,6 +5935,7 @@ LDAP_GATEWAY_SESSION_SECRET=<至少 32 字符随机值>
 TRUSTED_GATEWAY_HMAC_SECRET=<至少 32 字符随机值>
 LDAP_GATEWAY_SESSION_TTL_SECONDS=28800
 TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+INTRANET_HTTP_ONLY=false
 LDAP_GATEWAY_COOKIE_SECURE=true
 ```
 
@@ -6319,6 +6472,7 @@ $env:LDAP_GATEWAY_SESSION_SECRET = 'REPLACE_WITH_ldapSessionSecret'
 $env:TRUSTED_GATEWAY_HMAC_SECRET = 'REPLACE_WITH_trustedGatewaySecret'
 $env:LDAP_GATEWAY_SESSION_TTL_SECONDS = '28800'
 $env:TRUSTED_GATEWAY_MAX_AGE_SECONDS = '90'
+$env:INTRANET_HTTP_ONLY = 'false'
 $env:LDAP_GATEWAY_COOKIE_SECURE = 'true'
 
 .\services\ldap3-gateway\.venv\Scripts\python.exe .\services\ldap3-gateway\ldap3_gateway.py
@@ -8185,7 +8339,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "0.8.8",
+  "version": "0.9.0",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {
@@ -8389,7 +8543,7 @@ writeFileSync(manifest.resultIndexPath, JSON.stringify({ schemaVersion: '1.0', b
  * validation.
  */
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import {
   appendFileSync,
   cpSync,
@@ -8429,6 +8583,14 @@ const keepBatches = options.has('keep-batches') || process.env.EVALUATION_KEEP_B
 const python = process.env.PYTHON ?? (existsSync(join(root, '.venv', 'Scripts', 'python.exe')) ? join(root, '.venv', 'Scripts', 'python.exe') : 'python');
 const commandLineOverride = options.get('agent-command');
 const environmentCodeAgentCommand = process.env.CODE_AGENT_COMMAND;
+// External Workers call the API directly, without a browser session. When a
+// trusted-gateway deployment provides this optional service identity, sign
+// every request exactly like the reverse proxy does. Leaving the secret unset
+// preserves the existing local/test behaviour (x-employee-id only).
+const trustedGatewaySecret = process.env.EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET ?? process.env.TRUSTED_GATEWAY_HMAC_SECRET;
+const trustedEmployeeNo = process.env.EVALUATION_WORKER_EMPLOYEE_NO ?? employeeId;
+const trustedName = process.env.EVALUATION_WORKER_NAME ?? trustedEmployeeNo;
+const trustedDepartment = process.env.EVALUATION_WORKER_DEPARTMENT ?? '';
 const DEFAULT_AGENT_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
 const DEFAULT_WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024;
 const configuredAgentOutputMaxBytes = Number(process.env.EVALUATION_AGENT_OUTPUT_MAX_BYTES ?? DEFAULT_AGENT_OUTPUT_MAX_BYTES);
@@ -8549,9 +8711,20 @@ try {
 }
 
 async function call(path, init = {}) {
+  const headers = { 'content-type': 'application/json', 'x-employee-id': employeeId, ...(init.headers ?? {}) };
+  if (trustedGatewaySecret?.trim()) {
+    const issuedAt = new Date().toISOString();
+    const canonical = `${trustedEmployeeNo}\n${issuedAt}\n${trustedName}\n${trustedDepartment}`;
+    const headerValue = (value) => Buffer.from(value, 'utf8').toString('latin1');
+    headers['x-trusted-employee-no'] = trustedEmployeeNo;
+    headers['x-trusted-name'] = headerValue(trustedName);
+    headers['x-trusted-department'] = headerValue(trustedDepartment);
+    headers['x-trusted-issued-at'] = issuedAt;
+    headers['x-trusted-identity-signature'] = createHmac('sha256', trustedGatewaySecret.trim()).update(canonical, 'utf8').digest('hex');
+  }
   const response = await fetch(`${api}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', 'x-employee-id': employeeId, ...(init.headers ?? {}) },
+    headers,
   });
   if (!response.ok) throw new Error(`${init.method ?? 'GET'} ${path} -> ${response.status} ${await response.text()}`);
   return response;
@@ -8691,6 +8864,15 @@ async function materializeEngine(task, target) {
     source = cached;
   }
   cpSync(source, target, { recursive: true, dereference: false });
+  // The built-in grader source resolves its shared JSON Schemas from the
+  // materialized engine root (see grader/src/drill_grader/schemas.py).  Keep
+  // that dependency inside the immutable batch snapshot instead of relying
+  // on the worker checkout being present at runtime.
+  if (task.engine.source === 'BUILT_IN') {
+    const contractsSource = join(root, 'contracts');
+    if (!existsSync(contractsSource)) throw new Error('平台契约目录不存在');
+    cpSync(contractsSource, join(target, 'contracts'), { recursive: true, dereference: false });
+  }
   for (const dependency of task.engine.platformDependencies ?? []) {
     const destination = join(target, '_platform', dependency.name, basename(dependency.repositoryPath));
     cpSync(resolve(root, dependency.repositoryPath), destination, { recursive: true, dereference: false });
@@ -9088,11 +9270,20 @@ LDAP_DEPARTMENT_ATTRIBUTE=department
 LDAP_NAME_ATTRIBUTE=displayName
 LDAP_TIMEOUT_SECONDS=5
 
+# Local production-like smoke test only. Set LDAP_MOCK=true to accept any
+# non-empty password without contacting Huawei LDAP. Keep false in real use.
+LDAP_MOCK=false
+LDAP_MOCK_DEPARTMENT=AI 工程团队
+LDAP_MOCK_NAME_PREFIX=测试用户
+
 # Generate independent random values; never commit real secrets.
 LDAP_GATEWAY_SESSION_SECRET=replace-with-a-random-32-plus-character-secret
 TRUSTED_GATEWAY_HMAC_SECRET=replace-with-the-platform-shared-secret
 LDAP_GATEWAY_SESSION_TTL_SECONDS=28800
 TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+# HTTPS is the default. Set true only when the entire intranet path is
+# intentionally HTTP-only; this also disables the session cookie Secure flag.
+INTRANET_HTTP_ONLY=false
 LDAP_GATEWAY_COOKIE_SECURE=true
 LDAP_GATEWAY_HOST=0.0.0.0
 LDAP_GATEWAY_PORT=8081
@@ -9146,11 +9337,12 @@ $env:LDAP_BASE_DN = 'dc=china,dc=huawei,dc=com'
 $env:LDAP_BIND_PREFIX = 'China\'
 $env:LDAP_GATEWAY_SESSION_SECRET = '<随机生成的至少 32 字符会话密钥>'
 $env:TRUSTED_GATEWAY_HMAC_SECRET = '<与 Platform API 相同的密钥>'
+$env:INTRANET_HTTP_ONLY = 'false'
 $env:LDAP_GATEWAY_COOKIE_SECURE = 'true'
 python ldap3_gateway.py
 ```
 
-生产环境应使用 LDAPS 或 StartTLS，并通过进程环境注入密钥；不要把真实密钥、账号或员工信息写入仓库。`LDAP_GATEWAY_COOKIE_SECURE=false` 只适合本机 HTTP 验收。
+生产环境应使用 LDAPS 或 StartTLS，并通过进程环境注入密钥；不要把真实密钥、账号或员工信息写入仓库。浏览器到 Nginx 的链路默认使用 HTTPS；如果是隔离内网的纯 HTTP 部署，请使用上面的 `INTRANET_HTTP_ONLY=true` 开关和配套 Nginx 配置，不要只手工改 Cookie 参数。
 
 ### 直接 clone 后用 Docker 部署
 
@@ -9208,6 +9400,20 @@ TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
 python services/ldap3-gateway/test_ldap3_gateway.py
 ```
 
+## 内网纯 HTTP 模式
+
+默认仍使用 HTTPS。只有在网络边界已经由内网 ACL、专用网络或其他等价措施保护时，才在网关环境中设置：
+
+```env
+INTRANET_HTTP_ONLY=true
+```
+
+该开关会自动关闭会话 Cookie 的 `Secure` 标志；即使遗留配置中仍有
+`LDAP_GATEWAY_COOKIE_SECURE=true`，也以 HTTP-only 开关为准。然后按
+`docs/deployment/ldap3-nginx-intranet-deployment.md` 中的 HTTP Nginx 配置监听
+80 端口，并删除 HTTP 到 HTTPS 的重定向。LDAP 到目录服务器的链路仍应使用
+LDAPS 或 StartTLS；HTTP-only 只描述浏览器到内网 Nginx 的这一段。
+
 --- END FILE: services/ldap3-gateway/README.md ---
 
 
@@ -9223,8 +9429,10 @@ copies the signed identity headers returned by that endpoint to the platform
 API, which remains in ``TRUSTED_GATEWAY`` mode.
 
 The module intentionally has no framework dependency.  Install ``ldap3`` from
-``requirements.txt`` and run it behind the internal HTTPS gateway.  It does
-not log passwords, LDAP assertions, cookies or identity headers.
+``requirements.txt`` and run it behind the internal reverse proxy.  HTTPS is
+the default; ``INTRANET_HTTP_ONLY=true`` is an explicit opt-in for an isolated
+internal network and disables the browser cookie's Secure flag.  The gateway
+does not log passwords, LDAP assertions, cookies or identity headers.
 """
 
 from __future__ import annotations
@@ -9276,6 +9484,11 @@ class LdapConfig:
     name_attribute: str = "displayName"
     ca_cert_file: str | None = None
     timeout_seconds: int = 5
+    # Explicit local-only bypass for production-like smoke tests. Keep this
+    # disabled in real intranet deployments using Huawei LDAP.
+    mock: bool = False
+    mock_department: str = "AI 工程团队"
+    mock_name_prefix: str = "测试用户 "
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "LdapConfig":
@@ -9292,6 +9505,15 @@ class LdapConfig:
         start_tls = _boolean(values.get("LDAP_START_TLS"), False)
         if use_ssl and start_tls:
             raise ValueError("LDAP_USE_SSL and LDAP_START_TLS cannot both be enabled")
+        mock = _boolean(values.get("LDAP_MOCK"), False)
+        mock_department = values.get("LDAP_MOCK_DEPARTMENT", "AI 工程团队").strip() or "AI 工程团队"
+        mock_name_prefix = values.get("LDAP_MOCK_NAME_PREFIX", "测试用户 ").strip() or "测试用户 "
+        if mock:
+            # Windows PowerShell 5.1 can read a UTF-8-without-BOM launcher as
+            # the system code page. Repair that local-only configuration
+            # mistake without touching real LDAP attributes.
+            mock_department = _repair_mock_text(mock_department, "AI 工程团队")
+            mock_name_prefix = _repair_mock_text(mock_name_prefix, "测试用户 ")
         return cls(
             server=server,
             port=port,
@@ -9305,6 +9527,9 @@ class LdapConfig:
             name_attribute=_attribute_name(values.get("LDAP_NAME_ATTRIBUTE", "displayName")),
             ca_cert_file=values.get("LDAP_CA_CERT_FILE", "").strip() or None,
             timeout_seconds=timeout,
+            mock=mock,
+            mock_department=mock_department,
+            mock_name_prefix=mock_name_prefix,
         )
 
 
@@ -9318,6 +9543,10 @@ class GatewayConfig:
     cookie_name: str = "platform_ldap_session"
     csrf_cookie_name: str = "platform_ldap_csrf"
     cookie_secure: bool = True
+    # Transport mode is selected by the deployment.  HTTP-only mode is
+    # intentionally opt-in and forces Secure off so browsers can send the
+    # session cookie over an internal HTTP listener.
+    http_only: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "GatewayConfig":
@@ -9328,6 +9557,7 @@ class GatewayConfig:
             raise ValueError("TRUSTED_GATEWAY_HMAC_SECRET must contain at least 32 characters")
         if len(session_secret) < 32:
             raise ValueError("LDAP_GATEWAY_SESSION_SECRET must contain at least 32 characters")
+        http_only = _boolean(values.get("INTRANET_HTTP_ONLY"), False)
         return cls(
             ldap=LdapConfig.from_env(values),
             trusted_gateway_secret=trusted_secret,
@@ -9336,7 +9566,8 @@ class GatewayConfig:
             trusted_gateway_max_age_seconds=_positive_int(values, "TRUSTED_GATEWAY_MAX_AGE_SECONDS", 90, 1, 300),
             cookie_name=values.get("LDAP_GATEWAY_COOKIE_NAME", "platform_ldap_session").strip() or "platform_ldap_session",
             csrf_cookie_name=values.get("LDAP_GATEWAY_CSRF_COOKIE_NAME", "platform_ldap_csrf").strip() or "platform_ldap_csrf",
-            cookie_secure=_boolean(values.get("LDAP_GATEWAY_COOKIE_SECURE"), True),
+            http_only=http_only,
+            cookie_secure=False if http_only else _boolean(values.get("LDAP_GATEWAY_COOKIE_SECURE"), True),
         )
 
 
@@ -9369,6 +9600,19 @@ def _boolean(raw: str | None, default: bool) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     raise ValueError("boolean environment values must be true or false")
+
+
+def _repair_mock_text(value: str, fallback: str) -> str:
+    """Repair common GBK/UTF-8 mojibake in local mock-only settings."""
+
+    candidate = value.strip() or fallback
+    try:
+        repaired = candidate.encode("gbk").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return candidate
+    if "\ufffd" in repaired:
+        return candidate
+    return repaired.strip() or candidate
 
 
 def _attribute_name(value: str) -> str:
@@ -9459,12 +9703,40 @@ def _is_bind_error(error: BaseException, ldap_module: Any) -> bool:
     return bool(bind_error and isinstance(error, bind_error)) or error.__class__.__name__ == "LDAPBindError"
 
 
+_MOCK_PROFILES: dict[str, tuple[str, str]] = {
+    "w00123": ("本地开发用户", "AI 工程团队"),
+    "w00124": ("本地学员 A", "AI 工程团队"),
+    "w00126": ("本地学员 B", "AI 工程团队"),
+    "w00133": ("本地导师", "AI 工程团队"),
+}
+
+
+def authenticate_mock_user(config: LdapConfig, safe_user_id: str) -> LdapUser:
+    """Return a deterministic local profile without contacting LDAP.
+
+    This explicit switch is only for local production-like smoke tests. The
+    caller still validates that a password is non-empty.
+    """
+
+    name, department = _MOCK_PROFILES.get(
+        safe_user_id,
+        (f"{config.mock_name_prefix}{safe_user_id}", config.mock_department),
+    )
+    return LdapUser(
+        employee_no=safe_user_id,
+        name=_safe_identity_value(name, "姓名", required=True),
+        department=_safe_identity_value(department, "部门"),
+    )
+
+
 def authenticate_ldap_user(config: LdapConfig, user_id: str, password: str, ldap_module: Any | None = None) -> LdapUser:
     """Bind to AD and return only the fields trusted by the platform."""
 
     safe_user_id = _safe_user_id(user_id)
     if not isinstance(password, str) or not password:
         raise LdapAuthenticationError("工号或密码错误")
+    if config.mock:
+        return authenticate_mock_user(config, safe_user_id)
     ldap3 = ldap_module or _load_ldap3()
     connection: Any | None = None
     try:
@@ -9537,10 +9809,14 @@ def trusted_gateway_signature(user: LdapUser, issued_at: str, secret: str) -> st
 
 def trusted_gateway_headers(user: LdapUser, secret: str, issued_at: str | None = None) -> dict[str, str]:
     issued = issued_at or utc_timestamp()
+    # WSGI's ``start_response`` requires ISO-8859-1 header strings. Encode
+    # UTF-8 bytes as a latin-1 transport string; the API decodes these trusted
+    # claims before verifying the HMAC, preserving Chinese names/departments.
+    header_value = lambda value: value.encode("utf-8").decode("latin-1")
     return {
         "X-Trusted-Employee-No": user.employee_no,
-        "X-Trusted-Name": user.name,
-        "X-Trusted-Department": user.department,
+        "X-Trusted-Name": header_value(user.name),
+        "X-Trusted-Department": header_value(user.department),
         "X-Trusted-Issued-At": issued,
         "X-Trusted-Identity-Signature": trusted_gateway_signature(user, issued, secret),
     }
@@ -10083,6 +10359,24 @@ class LdapGatewayTests(unittest.TestCase):
         self.ldap = LdapConfig()
         self.user = LdapUser("w00123", "张三", "云计算")
 
+    def test_http_only_switch_disables_secure_cookie_without_changing_default(self):
+        base = {
+            "TRUSTED_GATEWAY_HMAC_SECRET": "t" * 32,
+            "LDAP_GATEWAY_SESSION_SECRET": "s" * 32,
+        }
+        https_config = GatewayConfig.from_env(base)
+        self.assertFalse(https_config.http_only)
+        self.assertTrue(https_config.cookie_secure)
+        http_config = GatewayConfig.from_env({
+            **base,
+            "INTRANET_HTTP_ONLY": "true",
+            # The deployment switch is authoritative so an old copied
+            # COOKIE_SECURE=true value cannot break HTTP-only login.
+            "LDAP_GATEWAY_COOKIE_SECURE": "true",
+        })
+        self.assertTrue(http_config.http_only)
+        self.assertFalse(http_config.cookie_secure)
+
     def test_filter_value_escapes_ldap_metacharacters(self):
         self.assertEqual(escape_filter_value("a*)(b\\"), r"a\2a\29\28b\5c")
 
@@ -10097,6 +10391,25 @@ class LdapGatewayTests(unittest.TestCase):
     def test_bad_credentials_are_generic(self):
         with self.assertRaises(LdapAuthenticationError):
             authenticate_ldap_user(self.ldap, "w00123", "bad", FakeLdap)
+
+    def test_mock_mode_accepts_any_non_empty_password_without_ldap(self):
+        user = authenticate_ldap_user(LdapConfig(mock=True), "w09999", "anything", None)
+        self.assertEqual(user.employee_no, "w09999")
+        self.assertEqual(user.name, "测试用户 w09999")
+        self.assertEqual(user.department, "AI 工程团队")
+
+    def test_mock_environment_repairs_windows_codepage_mojibake(self):
+        # "测试用户" decoded as GBK after a UTF-8 PowerShell script is read
+        # with the system code page becomes "娴嬭瘯鐢ㄦ埛".
+        mojibake = "\u5a34\u5b2d\u762f\u9422\u3126\u57db "
+        config = LdapConfig.from_env({"LDAP_MOCK": "true", "LDAP_MOCK_NAME_PREFIX": mojibake})
+        self.assertEqual(config.mock_name_prefix, "测试用户")
+        user = authenticate_ldap_user(config, "z00123", "anything", None)
+        self.assertEqual(user.name, "测试用户z00123")
+
+    def test_mock_mode_still_rejects_empty_password(self):
+        with self.assertRaises(LdapAuthenticationError):
+            authenticate_ldap_user(LdapConfig(mock=True), "w09999", "", None)
 
     def test_start_tls_is_negotiated_before_bind(self):
         user = authenticate_ldap_user(LdapConfig(start_tls=True), "w00123", "secret", FakeLdap)

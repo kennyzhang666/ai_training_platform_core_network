@@ -3,7 +3,9 @@ import { readRichTextImage, richTextPreview, sanitizeRichText } from './rich-tex
 import { Icon, type IconName } from './icons';
 import { EVALUATION_ENGINE_GUIDE_MARKDOWN } from './evaluation-engine-guide';
 
-const API = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:3000/api/v1';
+// Keep production admin calls on the HTTPS reverse-proxy origin; direct API
+// access remains the convenient default for local Vite development.
+const API = import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api/v1' : 'http://127.0.0.1:3000/api/v1');
 const AUTH_LOGIN_PATH = import.meta.env.VITE_AUTH_LOGIN_PATH ?? '/auth/login';
 const ADMIN_EMPLOYEE_ID = import.meta.env.VITE_EMPLOYEE_ID ?? 'w00123';
 

@@ -8,8 +8,10 @@ copies the signed identity headers returned by that endpoint to the platform
 API, which remains in ``TRUSTED_GATEWAY`` mode.
 
 The module intentionally has no framework dependency.  Install ``ldap3`` from
-``requirements.txt`` and run it behind the internal HTTPS gateway.  It does
-not log passwords, LDAP assertions, cookies or identity headers.
+``requirements.txt`` and run it behind the internal reverse proxy.  HTTPS is
+the default; ``INTRANET_HTTP_ONLY=true`` is an explicit opt-in for an isolated
+internal network and disables the browser cookie's Secure flag.  The gateway
+does not log passwords, LDAP assertions, cookies or identity headers.
 """
 
 from __future__ import annotations
@@ -61,6 +63,11 @@ class LdapConfig:
     name_attribute: str = "displayName"
     ca_cert_file: str | None = None
     timeout_seconds: int = 5
+    # Explicit local-only bypass for production-like smoke tests. Keep this
+    # disabled in real intranet deployments using Huawei LDAP.
+    mock: bool = False
+    mock_department: str = "AI 工程团队"
+    mock_name_prefix: str = "测试用户 "
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "LdapConfig":
@@ -77,6 +84,15 @@ class LdapConfig:
         start_tls = _boolean(values.get("LDAP_START_TLS"), False)
         if use_ssl and start_tls:
             raise ValueError("LDAP_USE_SSL and LDAP_START_TLS cannot both be enabled")
+        mock = _boolean(values.get("LDAP_MOCK"), False)
+        mock_department = values.get("LDAP_MOCK_DEPARTMENT", "AI 工程团队").strip() or "AI 工程团队"
+        mock_name_prefix = values.get("LDAP_MOCK_NAME_PREFIX", "测试用户 ").strip() or "测试用户 "
+        if mock:
+            # Windows PowerShell 5.1 can read a UTF-8-without-BOM launcher as
+            # the system code page. Repair that local-only configuration
+            # mistake without touching real LDAP attributes.
+            mock_department = _repair_mock_text(mock_department, "AI 工程团队")
+            mock_name_prefix = _repair_mock_text(mock_name_prefix, "测试用户 ")
         return cls(
             server=server,
             port=port,
@@ -90,6 +106,9 @@ class LdapConfig:
             name_attribute=_attribute_name(values.get("LDAP_NAME_ATTRIBUTE", "displayName")),
             ca_cert_file=values.get("LDAP_CA_CERT_FILE", "").strip() or None,
             timeout_seconds=timeout,
+            mock=mock,
+            mock_department=mock_department,
+            mock_name_prefix=mock_name_prefix,
         )
 
 
@@ -103,6 +122,10 @@ class GatewayConfig:
     cookie_name: str = "platform_ldap_session"
     csrf_cookie_name: str = "platform_ldap_csrf"
     cookie_secure: bool = True
+    # Transport mode is selected by the deployment.  HTTP-only mode is
+    # intentionally opt-in and forces Secure off so browsers can send the
+    # session cookie over an internal HTTP listener.
+    http_only: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "GatewayConfig":
@@ -113,6 +136,7 @@ class GatewayConfig:
             raise ValueError("TRUSTED_GATEWAY_HMAC_SECRET must contain at least 32 characters")
         if len(session_secret) < 32:
             raise ValueError("LDAP_GATEWAY_SESSION_SECRET must contain at least 32 characters")
+        http_only = _boolean(values.get("INTRANET_HTTP_ONLY"), False)
         return cls(
             ldap=LdapConfig.from_env(values),
             trusted_gateway_secret=trusted_secret,
@@ -121,7 +145,8 @@ class GatewayConfig:
             trusted_gateway_max_age_seconds=_positive_int(values, "TRUSTED_GATEWAY_MAX_AGE_SECONDS", 90, 1, 300),
             cookie_name=values.get("LDAP_GATEWAY_COOKIE_NAME", "platform_ldap_session").strip() or "platform_ldap_session",
             csrf_cookie_name=values.get("LDAP_GATEWAY_CSRF_COOKIE_NAME", "platform_ldap_csrf").strip() or "platform_ldap_csrf",
-            cookie_secure=_boolean(values.get("LDAP_GATEWAY_COOKIE_SECURE"), True),
+            http_only=http_only,
+            cookie_secure=False if http_only else _boolean(values.get("LDAP_GATEWAY_COOKIE_SECURE"), True),
         )
 
 
@@ -154,6 +179,19 @@ def _boolean(raw: str | None, default: bool) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     raise ValueError("boolean environment values must be true or false")
+
+
+def _repair_mock_text(value: str, fallback: str) -> str:
+    """Repair common GBK/UTF-8 mojibake in local mock-only settings."""
+
+    candidate = value.strip() or fallback
+    try:
+        repaired = candidate.encode("gbk").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return candidate
+    if "\ufffd" in repaired:
+        return candidate
+    return repaired.strip() or candidate
 
 
 def _attribute_name(value: str) -> str:
@@ -244,12 +282,40 @@ def _is_bind_error(error: BaseException, ldap_module: Any) -> bool:
     return bool(bind_error and isinstance(error, bind_error)) or error.__class__.__name__ == "LDAPBindError"
 
 
+_MOCK_PROFILES: dict[str, tuple[str, str]] = {
+    "w00123": ("本地开发用户", "AI 工程团队"),
+    "w00124": ("本地学员 A", "AI 工程团队"),
+    "w00126": ("本地学员 B", "AI 工程团队"),
+    "w00133": ("本地导师", "AI 工程团队"),
+}
+
+
+def authenticate_mock_user(config: LdapConfig, safe_user_id: str) -> LdapUser:
+    """Return a deterministic local profile without contacting LDAP.
+
+    This explicit switch is only for local production-like smoke tests. The
+    caller still validates that a password is non-empty.
+    """
+
+    name, department = _MOCK_PROFILES.get(
+        safe_user_id,
+        (f"{config.mock_name_prefix}{safe_user_id}", config.mock_department),
+    )
+    return LdapUser(
+        employee_no=safe_user_id,
+        name=_safe_identity_value(name, "姓名", required=True),
+        department=_safe_identity_value(department, "部门"),
+    )
+
+
 def authenticate_ldap_user(config: LdapConfig, user_id: str, password: str, ldap_module: Any | None = None) -> LdapUser:
     """Bind to AD and return only the fields trusted by the platform."""
 
     safe_user_id = _safe_user_id(user_id)
     if not isinstance(password, str) or not password:
         raise LdapAuthenticationError("工号或密码错误")
+    if config.mock:
+        return authenticate_mock_user(config, safe_user_id)
     ldap3 = ldap_module or _load_ldap3()
     connection: Any | None = None
     try:
@@ -322,10 +388,14 @@ def trusted_gateway_signature(user: LdapUser, issued_at: str, secret: str) -> st
 
 def trusted_gateway_headers(user: LdapUser, secret: str, issued_at: str | None = None) -> dict[str, str]:
     issued = issued_at or utc_timestamp()
+    # WSGI's ``start_response`` requires ISO-8859-1 header strings. Encode
+    # UTF-8 bytes as a latin-1 transport string; the API decodes these trusted
+    # claims before verifying the HMAC, preserving Chinese names/departments.
+    header_value = lambda value: value.encode("utf-8").decode("latin-1")
     return {
         "X-Trusted-Employee-No": user.employee_no,
-        "X-Trusted-Name": user.name,
-        "X-Trusted-Department": user.department,
+        "X-Trusted-Name": header_value(user.name),
+        "X-Trusted-Department": header_value(user.department),
         "X-Trusted-Issued-At": issued,
         "X-Trusted-Identity-Signature": trusted_gateway_signature(user, issued, secret),
     }

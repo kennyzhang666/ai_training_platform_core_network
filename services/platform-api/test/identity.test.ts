@@ -38,6 +38,22 @@ test('trusted gateway identity requires a fresh HMAC-signed claim set', async ()
   await assert.rejects(authenticateHeaders({ ...headers, 'x-trusted-issued-at': '2020-01-01T00:00:00.000Z' }, config), /expired/);
 });
 
+test('trusted gateway preserves already-decoded Unicode claim headers', async () => {
+  const secret = 'test-only-gateway-secret';
+  const issuedAt = new Date().toISOString();
+  const name = '张三';
+  const department = 'AI 工程团队';
+  const config = loadIdentityConfig({ NODE_ENV: 'production', PLATFORM_IDENTITY_MODE: 'TRUSTED_GATEWAY', TRUSTED_GATEWAY_HMAC_SECRET: secret });
+  const headers = {
+    'x-trusted-employee-no': 'worker-cn',
+    'x-trusted-issued-at': issuedAt,
+    'x-trusted-name': name,
+    'x-trusted-department': department,
+    'x-trusted-identity-signature': trustedGatewaySignature({ employeeNo: 'worker-cn', issuedAt, name, department }, secret),
+  };
+  assert.deepEqual(await authenticateHeaders(headers, config), { employeeNo: 'worker-cn', authenticationType: 'TRUSTED_GATEWAY', issuedAt, name, department });
+});
+
 function base64Url(value: string | Buffer): string {
   return Buffer.from(value).toString('base64url');
 }

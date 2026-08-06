@@ -1,7 +1,7 @@
 export const EVALUATION_ENGINE_GUIDE_MARKDOWN = String.raw`
 # 评测引擎开发指南
 
-> 版本：0.8.8
+> 版本：0.9.0
 > 用途：供评测引擎开发者和其他 AI 阅读。仓库内 contracts/ 是最终事实来源；本文档不包含员工信息、凭据或运行日志。
 
 ## 1. 平台边界
@@ -113,6 +113,8 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 ~~~
 
 Code Agent 应读取 instruction.md、Skills、batch-manifest.json 和只读提交快照，并将结果写到 manifest.resultIndexPath。命令优先级是 Worker --agent-command > 新批次冻结的平台配置 > CODE_AGENT_COMMAND/CODE_AGENT_ARGS_JSON。可执行文件必须存在于 Worker 主机并通过白名单。超时必须受批次、Worker、引擎三层上限约束。
+
+生产内网的独立 Worker 不应借用浏览器身份。启用 EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET 后，Worker 会使用工号、姓名和部门生成受 HMAC 保护的身份头；该密钥只注入 Worker 和 Platform API，不写入批次清单、日志或前端。完整 LDAP3/TRUSTED_GATEWAY 与 Nginx 配置见 docs/deployment/ldap3-trusted-gateway.md、docs/deployment/ldap3-nginx-intranet-deployment.md 和 docs/deployment/intranet-http-only.md。
 
 ## 6. 输出契约、幂等与失败
 

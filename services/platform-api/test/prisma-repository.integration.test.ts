@@ -160,13 +160,14 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
     assert.equal(scopedAuditPage.pageInfo.total, 1);
     assert.equal(scopedAuditPage.items[0]?.id, auditId);
 
-    const concurrentIdentities = await Promise.all([
-      repository.users.syncSsoIdentity({ employeeNo: raceEmployeeNo, name: 'Concurrent A', department: result.org.path }),
-      repository.users.syncSsoIdentity({ employeeNo: raceEmployeeNo, name: 'Concurrent B', department: result.org.path }),
-    ]);
+    const concurrentIdentities = await Promise.all(Array.from({ length: 10 }, (_, index) => repository.users.syncSsoIdentity({
+      employeeNo: raceEmployeeNo,
+      name: `Concurrent ${index}`,
+      department: result.org.path,
+    })));
     assert.equal(new Set(concurrentIdentities.map((identity) => identity.user.id)).size, 1);
     assert.equal(concurrentIdentities.filter((identity) => identity.firstLogin).length, 1);
-    assert.equal(concurrentIdentities.filter((identity) => !identity.firstLogin).length, 1);
+    assert.equal(concurrentIdentities.filter((identity) => !identity.firstLogin).length, 9);
 
     const concurrentRoots = await Promise.allSettled([
       repository.organizations.create({ id: raceRootA, path: `/race-root-a-${suffix}/`, level: 0, label: 'IT', name: `Concurrent root ${suffix}` }),

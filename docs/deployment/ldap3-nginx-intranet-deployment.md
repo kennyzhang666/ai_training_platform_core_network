@@ -29,7 +29,7 @@ LDAP3 网关使用内网 LDAP 域账号校验登录，成功后保存 HttpOnly �
 3. TRUSTED_GATEWAY_HMAC_SECRET 必须在 API 和 LDAP3 网关中完全相同。
 4. LDAP_GATEWAY_SESSION_SECRET 只能放在 LDAP3 网关，不能和 HMAC 密钥复用。
 5. LDAP 密码不能写入 Git、日志、数据库、Nginx 配置或前端代码。
-6. 生产环境使用 HTTPS，并设置 LDAP_GATEWAY_COOKIE_SECURE=true。
+6. 默认使用 HTTPS，并设置 LDAP_GATEWAY_COOKIE_SECURE=true；只有隔离内网才能启用 `INTRANET_HTTP_ONLY=true`，并改用 `docs/deployment/intranet-http-only.md` 中的 HTTP Nginx 配置。
 7. 不要设置 PLATFORM_IDENTITY_MODE=LOCAL，不要设置 ALLOW_ANONYMOUS_LOCAL=true。
 
 ## 2. 服务器准备
@@ -168,6 +168,9 @@ LDAP_GATEWAY_SESSION_SECRET=<第二条独立随机密钥>
 TRUSTED_GATEWAY_HMAC_SECRET=<必须与 platform-api.env 完全相同>
 LDAP_GATEWAY_SESSION_TTL_SECONDS=28800
 TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+# HTTPS is the default. Set true only for an isolated internal HTTP network;
+# use docs/deployment/intranet-http-only.md for the matching Nginx server block.
+INTRANET_HTTP_ONLY=false
 LDAP_GATEWAY_COOKIE_SECURE=true
 ~~~
 

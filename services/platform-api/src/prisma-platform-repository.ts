@@ -532,11 +532,24 @@ class PrismaAuditRepository implements AuditRepository {
 
 class AtomicRootUserRepository implements UserRepository {
   constructor(private readonly base: PrismaUserRepository, private readonly owner: PrismaPlatformRepository) {}
+  private readonly syncFlights = new Map<string, Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }>>();
   list(query: NormalizedUserListQuery): Promise<UserPage> { return this.base.list(query); }
   getById(id: string): Promise<AppUser | undefined> { return this.base.getById(id); }
   getByEmployeeNo(employeeNo: string): Promise<AppUser | undefined> { return this.base.getByEmployeeNo(employeeNo); }
   update(id: string, patch: UserPatch): Promise<AppUser> { return this.base.update(id, patch); }
   syncSsoIdentity(identity: SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }> {
+    const employeeNo = identity.employeeNo?.trim();
+    if (!employeeNo) return this.syncSsoIdentityOnce(identity);
+    const pending = this.syncFlights.get(employeeNo);
+    if (pending) return pending.then((result) => ({ ...result, firstLogin: false }));
+    const operation = this.syncSsoIdentityOnce({ ...identity, employeeNo }).finally(() => {
+      if (this.syncFlights.get(employeeNo) === operation) this.syncFlights.delete(employeeNo);
+    });
+    this.syncFlights.set(employeeNo, operation);
+    return operation;
+  }
+
+  private syncSsoIdentityOnce(identity: SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }> {
     const run = () => this.owner.transaction(async (transaction) => {
       const result = await transaction.users.syncSsoIdentity(identity);
       await transaction.audits.append({
@@ -549,14 +562,23 @@ class AtomicRootUserRepository implements UserRepository {
       });
       return result;
     });
-    // Two first-login requests can both observe the employee number as
-    // absent. Let PostgreSQL's unique constraint (or repeatable-read write
-    // conflict) elect one writer, then retry the complete transaction so the
-    // loser returns the same user and still gets its own auditable sync fact.
-    return run().catch(async (error) => {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || !['P2002', 'P2034'].includes(error.code)) throw error;
-      return run();
-    });
+    // The in-process single-flight above handles the normal browser burst.
+    // Keep database retries as a safety net for another API instance or a
+    // worker that provisions the same identity at the same time.
+    const retryable = (error: unknown): boolean => error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code);
+    const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+    return (async () => {
+      const maxAttempts = 6;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          return await run();
+        } catch (error) {
+          if (!retryable(error) || attempt === maxAttempts) throw error;
+          await wait(Math.min(250, 10 * (2 ** (attempt - 1))) + Math.floor(Math.random() * 15));
+        }
+      }
+      throw new Error('unreachable');
+    })();
   }
 }
 

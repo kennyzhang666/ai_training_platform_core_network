@@ -18,11 +18,12 @@ $env:LDAP_BASE_DN = 'dc=china,dc=huawei,dc=com'
 $env:LDAP_BIND_PREFIX = 'China\'
 $env:LDAP_GATEWAY_SESSION_SECRET = '<随机生成的至少 32 字符会话密钥>'
 $env:TRUSTED_GATEWAY_HMAC_SECRET = '<与 Platform API 相同的密钥>'
+$env:INTRANET_HTTP_ONLY = 'false'
 $env:LDAP_GATEWAY_COOKIE_SECURE = 'true'
 python ldap3_gateway.py
 ```
 
-生产环境应使用 LDAPS 或 StartTLS，并通过进程环境注入密钥；不要把真实密钥、账号或员工信息写入仓库。`LDAP_GATEWAY_COOKIE_SECURE=false` 只适合本机 HTTP 验收。
+生产环境应使用 LDAPS 或 StartTLS，并通过进程环境注入密钥；不要把真实密钥、账号或员工信息写入仓库。浏览器到 Nginx 的链路默认使用 HTTPS；如果是隔离内网的纯 HTTP 部署，请使用上面的 `INTRANET_HTTP_ONLY=true` 开关和配套 Nginx 配置，不要只手工改 Cookie 参数。
 
 ### 直接 clone 后用 Docker 部署
 
@@ -79,3 +80,17 @@ TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
 ```powershell
 python services/ldap3-gateway/test_ldap3_gateway.py
 ```
+
+## 内网纯 HTTP 模式
+
+默认仍使用 HTTPS。只有在网络边界已经由内网 ACL、专用网络或其他等价措施保护时，才在网关环境中设置：
+
+```env
+INTRANET_HTTP_ONLY=true
+```
+
+该开关会自动关闭会话 Cookie 的 `Secure` 标志；即使遗留配置中仍有
+`LDAP_GATEWAY_COOKIE_SECURE=true`，也以 HTTP-only 开关为准。然后按
+`docs/deployment/ldap3-nginx-intranet-deployment.md` 中的 HTTP Nginx 配置监听
+80 端口，并删除 HTTP 到 HTTPS 的重定向。LDAP 到目录服务器的链路仍应使用
+LDAPS 或 StartTLS；HTTP-only 只描述浏览器到内网 Nginx 的这一段。

@@ -1,6 +1,6 @@
 # 分组核心网AI能力提升平台
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.8.8`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本为 `v0.9.0`，核心业务闭环可在本地验收，生产化边界和后续路线见 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)。
 
 ## 当前能力
 
@@ -18,8 +18,10 @@
 - 员工昵称/头像、多人批量调部门、部门层级自动识别和本地多身份切换；
 - 服务端统一校验训战时间窗口，窗口外不可进入或提交。
 - 垃圾箱赛题支持带审计的永久删除；所有禁用控件统一显示禁止点击光标。
+- LDAP3 `TRUSTED_GATEWAY` 登录、中文身份传输、Worker HMAC 服务身份和本地 Mock 验收；
+- 默认 HTTPS 的 Nginx 部署与隔离内网纯 HTTP 开关，生产 Web 自动通过反向代理同源访问 API。
 
-当前数据、交付件、身份和 Git 均使用本地适配器，不能直接作为生产部署方案。完整架构、限制和版本沿革见开发总览。
+开发模式默认使用本地适配器；生产模式可按部署手册使用 PostgreSQL、S3-compatible 对象存储、Nginx、LDAP3 网关和独立 Worker，不能把本地 Mock 或单机文件适配器当作生产身份与沙箱证据。完整架构、限制和版本沿革见开发总览。
 
 ## 环境
 
@@ -95,6 +97,7 @@ pnpm acceptance:local
 - [`docs/v0.8-development-manual.md`](docs/v0.8-development-manual.md)：v0.8.x 评测运行环境、管理运营与身份层约束开发手册；
 - [`docs/deployment/ldap3-trusted-gateway.md`](docs/deployment/ldap3-trusted-gateway.md)：LDAP3 统一认证网关接入说明；
 - [`docs/deployment/ldap3-nginx-intranet-deployment.md`](docs/deployment/ldap3-nginx-intranet-deployment.md)：内网单服务器 Nginx + LDAP3 部署手册（可直接交给弱模型执行）；
+- [`docs/deployment/intranet-http-only.md`](docs/deployment/intranet-http-only.md)：隔离内网纯 HTTP 开关和 Nginx 配置；
 - [`docs/deployment/windows-production-smoke-test.md`](docs/deployment/windows-production-smoke-test.md)：Windows 个人电脑上的生产模式端到端验收手册；
 - [`docs/submission-contract.md`](docs/submission-contract.md)：交付目录契约；
 - [`docs/capability-model.md`](docs/capability-model.md)：能力模型；

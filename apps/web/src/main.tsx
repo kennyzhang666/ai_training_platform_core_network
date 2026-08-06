@@ -192,7 +192,9 @@ function DeliveryContractNotice({ version }: { version: ChallengeVersion }) {
   </section>;
 }
 
-const API = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:3000/api/v1';
+// Production is served behind the reverse proxy, so keep API requests on the
+// same HTTPS origin. Development still talks directly to the local API.
+const API = import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api/v1' : 'http://127.0.0.1:3000/api/v1');
 const AUTH_LOGIN_PATH = import.meta.env.VITE_AUTH_LOGIN_PATH ?? '/auth/login';
 const DEFAULT_EMPLOYEE_ID = import.meta.env.VITE_EMPLOYEE_ID ?? 'w00123';
 const ENABLE_LOCAL_IDENTITY_SWITCHER = import.meta.env.DEV || import.meta.env.VITE_LOCAL_IDENTITY_SWITCHER === 'true';
@@ -448,12 +450,14 @@ function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [capabilities, setCapabilities] = useState<CapabilityProfile | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderRow[]>([]);
-  const [eventId, setEventId] = useState('event-local');
-  const [challengeVersionId, setChallengeVersionId] = useState('parking-fee-01@1');
+  // An empty catalog is a valid first-run state. Do not point the UI at a
+  // historical demo event/challenge before the API has returned real data.
+  const [eventId, setEventId] = useState('');
+  const [challengeVersionId, setChallengeVersionId] = useState('');
   const [challengeDetailBackView, setChallengeDetailBackView] = useState<'challenges' | 'hard-problems'>('challenges');
   const [selectedHardProblemId, setSelectedHardProblemId] = useState<string | null>(null);
   const [deliveryBackView, setDeliveryBackView] = useState<'challenges' | 'hard-problem-detail'>('challenges');
-  const [subjectId] = useState(localEmployeeId);
+  const [subjectId, setSubjectId] = useState(localEmployeeId);
   const [source, setSource] = useState<SubmissionSource>('UPLOAD');
   const [file, setFile] = useState<File | null>(null);
   const [git, setGit] = useState({ repository: '', branch: '', commitSha: '' });
@@ -467,6 +471,7 @@ function App() {
   const [profileEditorBusy, setProfileEditorBusy] = useState(false);
   const [profileDraft, setProfileDraft] = useState<{ nickname: string; avatarDataUrl: string }>({ nickname: '', avatarDataUrl: '' });
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
   const [evaluationLockNoticeVisible, setEvaluationLockNoticeVisible] = useState(false);
   const profileHistoryRequestRef = useRef(0);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -499,15 +504,22 @@ function App() {
   }, [selectedEventLockKey]);
 
   async function refresh() {
+    // The gateway is the source of truth in production. Resolve /me before
+    // loading any subject-scoped resources so a stale local-development
+    // employee ID cannot make the profile/history/capabilities requests point
+    // at another account (or produce a misleading `—` fallback).
+    const me = await request<Profile['subject']>('/me');
+    const activeSubjectId = me.id;
+    setSubjectId(activeSubjectId);
     const [loadedEvents, loadedChallenges, loadedAnnouncements, loadedHardProblems, loadedSubmissionPage, loadedProfile, loadedProfileHistory, loadedCapabilities, loadedLeaderboard] = await Promise.all([
       request<EventConfig[]>('/events'),
       request<Challenge[]>('/challenges'),
       request<Announcement[]>('/announcements'),
       request<HardProblem[]>('/hard-problems'),
       request<SubmissionPage>('/submissions?page=1&pageSize=100'),
-      request<Profile>(`/profiles/${subjectId}?includeHistory=false`),
-      request<ProfileHistoryPage>(`/profiles/${subjectId}/history?page=1&pageSize=20`),
-      request<CapabilityProfile>(`/profiles/${subjectId}/capabilities`),
+      request<Profile>(`/profiles/${activeSubjectId}?includeHistory=false`),
+      request<ProfileHistoryPage>(`/profiles/${activeSubjectId}/history?page=1&pageSize=20`),
+      request<CapabilityProfile>(`/profiles/${activeSubjectId}/capabilities`),
       request<LeaderRow[]>('/seasons/season-local-2026/leaderboard'),
     ]);
     // The normal event listing intentionally excludes HARD_PROBLEM upload
@@ -527,7 +539,14 @@ function App() {
       try { return [item.id, await request<Report>(`/reports/${item.id}`)] as const; } catch { return null; }
     }));
     setReports(Object.fromEntries(reportEntries.filter((item): item is readonly [string, Report] => item !== null)));
-    if (!nextEvents.some((item) => item.id === eventId) && nextEvents[0]) setEventId(nextEvents[0].id);
+    const nextEvent = nextEvents.find((item) => item.id === eventId) ?? nextEvents[0];
+    setEventId(nextEvent?.id ?? '');
+    const loadedVersions = loadedChallenges.flatMap((challenge) => challenge.versions);
+    const nextVersion = nextEvent
+      ? loadedVersions.find((version) => version.id === challengeVersionId)
+        ?? loadedVersions.find((version) => version.id === nextEvent.challengeVersion)
+      : undefined;
+    setChallengeVersionId(nextVersion?.id ?? '');
   }
 
   async function loadProfileHistory(page: number): Promise<void> {
@@ -588,6 +607,35 @@ function App() {
       setMessage(error instanceof Error ? error.message : '个人资料更新失败，请稍后重试。');
     } finally {
       setProfileEditorBusy(false);
+    }
+  }
+
+  async function logout(): Promise<void> {
+    if (logoutBusy) return;
+    setLogoutBusy(true);
+    try {
+      if (import.meta.env.PROD) {
+        const response = await fetch('/auth/logout', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+        });
+        // A missing/expired gateway session is already logged out from the
+        // browser's perspective, so still continue to the login page.
+        if (!response.ok && response.status !== 401) {
+          throw new Error('退出登录失败，请稍后重试。');
+        }
+        window.location.assign(AUTH_LOGIN_PATH);
+        return;
+      }
+
+      // Local development has no LDAP session; clear the selected mock
+      // identity so the next page load starts from the configured default.
+      window.localStorage.removeItem('ai-training.employeeId');
+      window.location.reload();
+    } catch (error) {
+      setLogoutBusy(false);
+      setMessage(error instanceof Error ? error.message : '退出登录失败，请稍后重试。');
     }
   }
 
@@ -810,6 +858,7 @@ function App() {
               <div><dt>部门</dt><dd title={profile?.subject.orgPath || undefined}>{profile?.subject.orgPath || '未分配部门'}</dd></div>
             </dl>
             <button type="button" className="user-menu-action" role="menuitem" onClick={() => { setUserMenuOpen(false); setView('profile'); }}>进入个人中心</button>
+            <button type="button" className="user-menu-action user-menu-action-danger" role="menuitem" disabled={logoutBusy} aria-busy={logoutBusy} onClick={() => void logout()}>{logoutBusy ? '正在退出…' : '退出登录'}</button>
           </div>}
         </div>
       </header>

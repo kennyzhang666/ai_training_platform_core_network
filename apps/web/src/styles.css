@@ -4541,6 +4541,24 @@ label { font-size: 13px; }
   background: var(--ui-blue);
 }
 
+.user-menu-action-danger {
+  margin-top: 8px;
+  border-color: color-mix(in srgb, var(--ui-red) 32%, var(--ui-line));
+  color: var(--ui-red);
+  background: var(--ui-red-soft);
+}
+
+.user-menu-action-danger:hover:not(:disabled) {
+  border-color: var(--ui-red);
+  color: #fff;
+  background: var(--ui-red);
+}
+
+.user-menu-action:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
 @media (max-width: 980px) {
   .user-menu-anchor {
     display: none;

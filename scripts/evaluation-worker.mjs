@@ -10,7 +10,7 @@
  * validation.
  */
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import {
   appendFileSync,
   cpSync,
@@ -50,6 +50,14 @@ const keepBatches = options.has('keep-batches') || process.env.EVALUATION_KEEP_B
 const python = process.env.PYTHON ?? (existsSync(join(root, '.venv', 'Scripts', 'python.exe')) ? join(root, '.venv', 'Scripts', 'python.exe') : 'python');
 const commandLineOverride = options.get('agent-command');
 const environmentCodeAgentCommand = process.env.CODE_AGENT_COMMAND;
+// External Workers call the API directly, without a browser session. When a
+// trusted-gateway deployment provides this optional service identity, sign
+// every request exactly like the reverse proxy does. Leaving the secret unset
+// preserves the existing local/test behaviour (x-employee-id only).
+const trustedGatewaySecret = process.env.EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET ?? process.env.TRUSTED_GATEWAY_HMAC_SECRET;
+const trustedEmployeeNo = process.env.EVALUATION_WORKER_EMPLOYEE_NO ?? employeeId;
+const trustedName = process.env.EVALUATION_WORKER_NAME ?? trustedEmployeeNo;
+const trustedDepartment = process.env.EVALUATION_WORKER_DEPARTMENT ?? '';
 const DEFAULT_AGENT_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
 const DEFAULT_WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024;
 const configuredAgentOutputMaxBytes = Number(process.env.EVALUATION_AGENT_OUTPUT_MAX_BYTES ?? DEFAULT_AGENT_OUTPUT_MAX_BYTES);
@@ -170,9 +178,20 @@ try {
 }
 
 async function call(path, init = {}) {
+  const headers = { 'content-type': 'application/json', 'x-employee-id': employeeId, ...(init.headers ?? {}) };
+  if (trustedGatewaySecret?.trim()) {
+    const issuedAt = new Date().toISOString();
+    const canonical = `${trustedEmployeeNo}\n${issuedAt}\n${trustedName}\n${trustedDepartment}`;
+    const headerValue = (value) => Buffer.from(value, 'utf8').toString('latin1');
+    headers['x-trusted-employee-no'] = trustedEmployeeNo;
+    headers['x-trusted-name'] = headerValue(trustedName);
+    headers['x-trusted-department'] = headerValue(trustedDepartment);
+    headers['x-trusted-issued-at'] = issuedAt;
+    headers['x-trusted-identity-signature'] = createHmac('sha256', trustedGatewaySecret.trim()).update(canonical, 'utf8').digest('hex');
+  }
   const response = await fetch(`${api}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', 'x-employee-id': employeeId, ...(init.headers ?? {}) },
+    headers,
   });
   if (!response.ok) throw new Error(`${init.method ?? 'GET'} ${path} -> ${response.status} ${await response.text()}`);
   return response;
@@ -312,6 +331,15 @@ async function materializeEngine(task, target) {
     source = cached;
   }
   cpSync(source, target, { recursive: true, dereference: false });
+  // The built-in grader source resolves its shared JSON Schemas from the
+  // materialized engine root (see grader/src/drill_grader/schemas.py).  Keep
+  // that dependency inside the immutable batch snapshot instead of relying
+  // on the worker checkout being present at runtime.
+  if (task.engine.source === 'BUILT_IN') {
+    const contractsSource = join(root, 'contracts');
+    if (!existsSync(contractsSource)) throw new Error('平台契约目录不存在');
+    cpSync(contractsSource, join(target, 'contracts'), { recursive: true, dereference: false });
+  }
   for (const dependency of task.engine.platformDependencies ?? []) {
     const destination = join(target, '_platform', dependency.name, basename(dependency.repositoryPath));
     cpSync(resolve(root, dependency.repositoryPath), destination, { recursive: true, dereference: false });

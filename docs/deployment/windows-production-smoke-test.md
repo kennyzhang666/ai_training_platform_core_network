@@ -217,6 +217,7 @@ $env:LDAP_GATEWAY_SESSION_SECRET = 'REPLACE_WITH_ldapSessionSecret'
 $env:TRUSTED_GATEWAY_HMAC_SECRET = 'REPLACE_WITH_trustedGatewaySecret'
 $env:LDAP_GATEWAY_SESSION_TTL_SECONDS = '28800'
 $env:TRUSTED_GATEWAY_MAX_AGE_SECONDS = '90'
+$env:INTRANET_HTTP_ONLY = 'false'
 $env:LDAP_GATEWAY_COOKIE_SECURE = 'true'
 
 .\services\ldap3-gateway\.venv\Scripts\python.exe .\services\ldap3-gateway\ldap3_gateway.py

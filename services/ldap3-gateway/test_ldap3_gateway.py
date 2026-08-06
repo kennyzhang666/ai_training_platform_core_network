@@ -72,6 +72,24 @@ class LdapGatewayTests(unittest.TestCase):
         self.ldap = LdapConfig()
         self.user = LdapUser("w00123", "张三", "云计算")
 
+    def test_http_only_switch_disables_secure_cookie_without_changing_default(self):
+        base = {
+            "TRUSTED_GATEWAY_HMAC_SECRET": "t" * 32,
+            "LDAP_GATEWAY_SESSION_SECRET": "s" * 32,
+        }
+        https_config = GatewayConfig.from_env(base)
+        self.assertFalse(https_config.http_only)
+        self.assertTrue(https_config.cookie_secure)
+        http_config = GatewayConfig.from_env({
+            **base,
+            "INTRANET_HTTP_ONLY": "true",
+            # The deployment switch is authoritative so an old copied
+            # COOKIE_SECURE=true value cannot break HTTP-only login.
+            "LDAP_GATEWAY_COOKIE_SECURE": "true",
+        })
+        self.assertTrue(http_config.http_only)
+        self.assertFalse(http_config.cookie_secure)
+
     def test_filter_value_escapes_ldap_metacharacters(self):
         self.assertEqual(escape_filter_value("a*)(b\\"), r"a\2a\29\28b\5c")
 
@@ -86,6 +104,25 @@ class LdapGatewayTests(unittest.TestCase):
     def test_bad_credentials_are_generic(self):
         with self.assertRaises(LdapAuthenticationError):
             authenticate_ldap_user(self.ldap, "w00123", "bad", FakeLdap)
+
+    def test_mock_mode_accepts_any_non_empty_password_without_ldap(self):
+        user = authenticate_ldap_user(LdapConfig(mock=True), "w09999", "anything", None)
+        self.assertEqual(user.employee_no, "w09999")
+        self.assertEqual(user.name, "测试用户 w09999")
+        self.assertEqual(user.department, "AI 工程团队")
+
+    def test_mock_environment_repairs_windows_codepage_mojibake(self):
+        # "测试用户" decoded as GBK after a UTF-8 PowerShell script is read
+        # with the system code page becomes "娴嬭瘯鐢ㄦ埛".
+        mojibake = "\u5a34\u5b2d\u762f\u9422\u3126\u57db "
+        config = LdapConfig.from_env({"LDAP_MOCK": "true", "LDAP_MOCK_NAME_PREFIX": mojibake})
+        self.assertEqual(config.mock_name_prefix, "测试用户")
+        user = authenticate_ldap_user(config, "z00123", "anything", None)
+        self.assertEqual(user.name, "测试用户z00123")
+
+    def test_mock_mode_still_rejects_empty_password(self):
+        with self.assertRaises(LdapAuthenticationError):
+            authenticate_ldap_user(LdapConfig(mock=True), "w09999", "", None)
 
     def test_start_tls_is_negotiated_before_bind(self):
         user = authenticate_ldap_user(LdapConfig(start_tls=True), "w00123", "secret", FakeLdap)
