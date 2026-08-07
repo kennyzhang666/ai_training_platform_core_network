@@ -1,0 +1,110 @@
+[
+  {
+    "name": "strict-ipv4-all-octets",
+    "check": "equals",
+    "args": [
+      "ip=10.20.30.40"
+    ],
+    "kwargs": {
+      "level": "strict"
+    },
+    "expected": "ip=*.*.*.*#fec9cd"
+  },
+  {
+    "name": "strict-email-domain-masked",
+    "check": "equals",
+    "args": [
+      "mail=zhangsan@corp.example.com"
+    ],
+    "kwargs": {
+      "level": "strict"
+    },
+    "expected": "mail=z***@***#f3911a"
+  },
+  {
+    "name": "strict-phone-unchanged",
+    "check": "equals",
+    "args": [
+      "phone=13800138000"
+    ],
+    "kwargs": {
+      "level": "strict"
+    },
+    "expected": "phone=138****8000#a6942f"
+  },
+  {
+    "name": "strict-idcard-unchanged",
+    "check": "equals",
+    "args": [
+      "idcard=110101199003071234"
+    ],
+    "kwargs": {
+      "level": "strict"
+    },
+    "expected": "idcard=110101********1234#586a2c"
+  },
+  {
+    "name": "strict-secret-unchanged",
+    "check": "equals",
+    "args": [
+      "token=abcd1234efgh"
+    ],
+    "kwargs": {
+      "level": "strict"
+    },
+    "expected": "token=***#905b0b"
+  },
+  {
+    "name": "strict-combined-line",
+    "check": "equals",
+    "args": [
+      "u=13800138000 ip=10.20.30.40 m=a.b@x.example.com"
+    ],
+    "kwargs": {
+      "level": "strict"
+    },
+    "expected": "u=138****8000#a6942f ip=*.*.*.*#fec9cd m=a***@***#31ec7a"
+  },
+  {
+    "name": "standard-regression-explicit",
+    "check": "equals",
+    "args": [
+      "ip=10.20.30.40 mail=a@x.com"
+    ],
+    "kwargs": {
+      "level": "standard"
+    },
+    "expected": "ip=10.20.*.*#fec9cd mail=a***@x.com#478abe"
+  },
+  {
+    "name": "standard-regression-default",
+    "check": "equals",
+    "args": [
+      "ip=10.20.30.40 mail=a@x.com"
+    ],
+    "kwargs": {},
+    "expected": "ip=10.20.*.*#fec9cd mail=a***@x.com#478abe"
+  },
+  {
+    "name": "strict-idempotent",
+    "check": "idempotent",
+    "args": [
+      "ip=10.20.30.40 mail=a@x.com"
+    ],
+    "kwargs": {
+      "level": "strict"
+    },
+    "expected": "ip=*.*.*.*#fec9cd mail=a***@***#478abe"
+  },
+  {
+    "name": "invalid-level",
+    "check": "raises",
+    "args": [
+      "ip=10.20.30.40"
+    ],
+    "kwargs": {
+      "level": "paranoid"
+    },
+    "expected": "ValueError"
+  }
+]

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.1",
+  "id": "log-desensitize-sdd",
+  "version": "1.0.0",
+  "title": "运维日志脱敏 · SDD 全维度评测引擎",
+  "description": "对全部 16 个评分点打分：四档隐藏测试给出 Verify，SPEC.md 结构与澄清覆盖给出 Spec，transcript.md 轮次与阶段顺序给出 Collab，AST 度量给出 Code。判据自带，不依赖平台内置 grader。",
+  "runtime": {
+    "type": "python",
+    "entrypoint": "judge.py",
+    "pythonVersion": ">=3.11"
+  },
+  "limits": {
+    "wallClockSeconds": 180,
+    "memoryMB": 512,
+    "outputBytes": 4194304
+  },
+  "assets": {
+    "submissionContract": "assets/submission-contract.json",
+    "testsDir": "assets/hidden-tests",
+    "referenceDir": "assets/reference"
+  },
+  "agent": {
+    "instruction": "instruction.md",
+    "skills": ["skills/evaluation/SKILL.md"]
+  },
+  "selfCheck": {
+    "expectMinTotal": 95,
+    "expectStatus": "COMPLETE"
+  }
+}

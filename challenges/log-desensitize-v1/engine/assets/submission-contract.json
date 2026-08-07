@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.1",
+  "root": { "mode": "ARCHIVE_ROOT" },
+  "required": [
+    { "path": "SPEC.md", "type": "markdown", "minSections": 7, "minChars": 800, "notTemplate": true },
+    { "path": "transcript.md", "type": "markdown", "minChars": 600 },
+    { "path": "src/desensitize.py", "type": "source", "mustExport": "desensitize", "signature": "(text, *, level='standard')" }
+  ],
+  "optional": [
+    { "path": "tests/", "type": "directory" },
+    { "path": "NOTES.md", "type": "markdown" }
+  ],
+  "forbidden": [
+    "**/.env",
+    "**/*credential*",
+    "**/*secret*",
+    "hidden-tests/**",
+    "**/.git/**",
+    "**/__pycache__/**"
+  ],
+  "languageEntry": { "python": "src/desensitize.py" },
+  "maxDepth": 6,
+  "maxFiles": 200
+}

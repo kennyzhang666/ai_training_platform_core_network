@@ -1,0 +1,110 @@
+[
+  {
+    "name": "phone-only",
+    "check": "equals",
+    "args": [
+      "phone=13800138000"
+    ],
+    "kwargs": {},
+    "expected": "phone=138****8000#a6942f"
+  },
+  {
+    "name": "idcard-only",
+    "check": "equals",
+    "args": [
+      "idcard=110101199003071234"
+    ],
+    "kwargs": {},
+    "expected": "idcard=110101********1234#586a2c"
+  },
+  {
+    "name": "bankcard-only",
+    "check": "equals",
+    "args": [
+      "card=6222021234567890"
+    ],
+    "kwargs": {},
+    "expected": "card=************7890#937e16"
+  },
+  {
+    "name": "email-only",
+    "check": "equals",
+    "args": [
+      "mail=zhangsan@corp.example.com"
+    ],
+    "kwargs": {},
+    "expected": "mail=z***@corp.example.com#f3911a"
+  },
+  {
+    "name": "ipv4-only",
+    "check": "equals",
+    "args": [
+      "ip=10.20.30.40"
+    ],
+    "kwargs": {},
+    "expected": "ip=10.20.*.*#fec9cd"
+  },
+  {
+    "name": "secret-token",
+    "check": "equals",
+    "args": [
+      "token=abcd1234efgh"
+    ],
+    "kwargs": {},
+    "expected": "token=***#905b0b"
+  },
+  {
+    "name": "chinese-name",
+    "check": "equals",
+    "args": [
+      "name=张三"
+    ],
+    "kwargs": {},
+    "expected": "name=张*#1d841b"
+  },
+  {
+    "name": "chinese-name-colon",
+    "check": "equals",
+    "args": [
+      "姓名：李四"
+    ],
+    "kwargs": {},
+    "expected": "姓名：李*#808b4f"
+  },
+  {
+    "name": "combined-line",
+    "check": "equals",
+    "args": [
+      "INFO user=13800138000 ip=10.20.30.40 mail=a.b@x.example.com"
+    ],
+    "kwargs": {},
+    "expected": "INFO user=138****8000#a6942f ip=10.20.*.*#fec9cd mail=a***@x.example.com#31ec7a"
+  },
+  {
+    "name": "multi-line-log",
+    "check": "equals",
+    "args": [
+      "2026-08-07 10:00:01 INFO  login ok user=13800138000\n2026-08-07 10:00:02 WARN  retry from 10.20.30.40\n2026-08-07 10:00:03 ERROR auth failed token=abcd1234efgh\n"
+    ],
+    "kwargs": {},
+    "expected": "2026-08-07 10:00:01 INFO  login ok user=138****8000#a6942f\n2026-08-07 10:00:02 WARN  retry from 10.20.*.*#fec9cd\n2026-08-07 10:00:03 ERROR auth failed token=***#905b0b\n"
+  },
+  {
+    "name": "no-sensitive-data",
+    "check": "equals",
+    "args": [
+      "2026-08-07 10:00:01 INFO service started on port 8080"
+    ],
+    "kwargs": {},
+    "expected": "2026-08-07 10:00:01 INFO service started on port 8080"
+  },
+  {
+    "name": "empty-string",
+    "check": "equals",
+    "args": [
+      ""
+    ],
+    "kwargs": {},
+    "expected": ""
+  }
+]

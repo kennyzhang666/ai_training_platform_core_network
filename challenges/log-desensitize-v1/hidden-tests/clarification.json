@@ -1,0 +1,146 @@
+[
+  {
+    "name": "eighteen-digits-is-idcard",
+    "check": "equals",
+    "args": [
+      "v=110101199003071234"
+    ],
+    "kwargs": {},
+    "expected": "v=110101********1234#586a2c"
+  },
+  {
+    "name": "eighteen-digits-not-idcard-is-card",
+    "check": "equals",
+    "args": [
+      "v=622202123456789012"
+    ],
+    "kwargs": {},
+    "expected": "v=**************9012#d7c29e"
+  },
+  {
+    "name": "idcard-invalid-month-is-card",
+    "check": "equals",
+    "args": [
+      "v=110101199913071234"
+    ],
+    "kwargs": {},
+    "expected": "v=**************1234#aeb79a"
+  },
+  {
+    "name": "idcard-invalid-day-is-card",
+    "check": "equals",
+    "args": [
+      "v=110101199003321234"
+    ],
+    "kwargs": {},
+    "expected": "v=**************1234#ab07db"
+  },
+  {
+    "name": "secret-value-is-email",
+    "check": "equals",
+    "args": [
+      "token=user@mail.com"
+    ],
+    "kwargs": {},
+    "expected": "token=***#db8fc3"
+  },
+  {
+    "name": "secret-value-is-ip",
+    "check": "equals",
+    "args": [
+      "secret=10.20.30.40"
+    ],
+    "kwargs": {},
+    "expected": "secret=***#fec9cd"
+  },
+  {
+    "name": "secret-double-quoted",
+    "check": "equals",
+    "args": [
+      "password=\"p@ss\""
+    ],
+    "kwargs": {},
+    "expected": "password=\"***#a4048c\""
+  },
+  {
+    "name": "secret-single-quoted",
+    "check": "equals",
+    "args": [
+      "apikey='k-123'"
+    ],
+    "kwargs": {},
+    "expected": "apikey='***#3605a9'"
+  },
+  {
+    "name": "secret-key-uppercase",
+    "check": "equals",
+    "args": [
+      "Password=Ab1"
+    ],
+    "kwargs": {},
+    "expected": "Password=***#41a022"
+  },
+  {
+    "name": "secret-value-comma-terminated",
+    "check": "equals",
+    "args": [
+      "secret: xyz,next=1"
+    ],
+    "kwargs": {},
+    "expected": "secret: ***#3608bc,next=1"
+  },
+  {
+    "name": "secret-precedence-over-inner-rules",
+    "check": "equals",
+    "args": [
+      "api_key=13800138000"
+    ],
+    "kwargs": {},
+    "expected": "api_key=***#a6942f"
+  },
+  {
+    "name": "idempotent-mixed-line",
+    "check": "idempotent",
+    "args": [
+      "user=13800138000 ip=10.20.30.40 mail=a@x.com token=t1"
+    ],
+    "kwargs": {},
+    "expected": "user=138****8000#a6942f ip=10.20.*.*#fec9cd mail=a***@x.com#478abe token=***#628b49"
+  },
+  {
+    "name": "idempotent-secret",
+    "check": "idempotent",
+    "args": [
+      "password=\"p@ss\" token=abc"
+    ],
+    "kwargs": {},
+    "expected": "password=\"***#a4048c\" token=***#ba7816"
+  },
+  {
+    "name": "idempotent-idcard-and-card",
+    "check": "idempotent",
+    "args": [
+      "a=110101199003071234 b=6222021234567890"
+    ],
+    "kwargs": {},
+    "expected": "a=110101********1234#586a2c b=************7890#937e16"
+  },
+  {
+    "name": "non-string-input",
+    "check": "raises",
+    "args": [
+      null
+    ],
+    "kwargs": {},
+    "expected": "ValueError"
+  },
+  {
+    "name": "integer-input",
+    "check": "raises",
+    "args": [
+      12345
+    ],
+    "kwargs": {},
+    "expected": "ValueError"
+  }
+]

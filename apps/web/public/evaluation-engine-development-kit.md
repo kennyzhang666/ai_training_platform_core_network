@@ -8355,6 +8355,7 @@ validates imported results and recomputes score consistency before persistence.
     "ldap3:test": "python services/ldap3-gateway/test_ldap3_gateway.py",
     "contract:test": "pnpm --filter @ai-training/platform-api contract:test",
     "grader:test": "node scripts/run-grader-tests.mjs",
+    "challenge:package": "node scripts/build-challenge-packages.mjs",
     "acceptance:local": "pnpm --filter @ai-training/platform-api exec tsx --test test/concurrency.test.ts"
   }
 }

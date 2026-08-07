@@ -1,0 +1,164 @@
+[
+  {
+    "name": "twelve-digits-not-phone",
+    "check": "equals",
+    "args": [
+      "seq 138001380001 done"
+    ],
+    "kwargs": {},
+    "expected": "seq 138001380001 done"
+  },
+  {
+    "name": "ten-digits-not-phone",
+    "check": "equals",
+    "args": [
+      "seq 1380013800 done"
+    ],
+    "kwargs": {},
+    "expected": "seq 1380013800 done"
+  },
+  {
+    "name": "phone-adjacent-digit-left",
+    "check": "equals",
+    "args": [
+      "id913800138000 tail"
+    ],
+    "kwargs": {},
+    "expected": "id913800138000 tail"
+  },
+  {
+    "name": "fifteen-digits-not-card",
+    "check": "equals",
+    "args": [
+      "n 123456789012345 done"
+    ],
+    "kwargs": {},
+    "expected": "n 123456789012345 done"
+  },
+  {
+    "name": "card-min-16",
+    "check": "equals",
+    "args": [
+      "card=1234567890123456"
+    ],
+    "kwargs": {},
+    "expected": "card=************3456#7a51d0"
+  },
+  {
+    "name": "card-max-19",
+    "check": "equals",
+    "args": [
+      "card=1234567890123456789"
+    ],
+    "kwargs": {},
+    "expected": "card=***************6789#22085a"
+  },
+  {
+    "name": "ipv4-octet-over-255",
+    "check": "equals",
+    "args": [
+      "ip=999.888.777.666"
+    ],
+    "kwargs": {},
+    "expected": "ip=999.888.777.666"
+  },
+  {
+    "name": "ipv4-single-octet-over-255",
+    "check": "equals",
+    "args": [
+      "ip=10.20.300.40"
+    ],
+    "kwargs": {},
+    "expected": "ip=10.20.300.40"
+  },
+  {
+    "name": "ipv4-five-segments",
+    "check": "equals",
+    "args": [
+      "ip=1.2.3.4.5"
+    ],
+    "kwargs": {},
+    "expected": "ip=1.2.3.4.5"
+  },
+  {
+    "name": "email-single-char-local",
+    "check": "equals",
+    "args": [
+      "mail=a@x.com"
+    ],
+    "kwargs": {},
+    "expected": "mail=a***@x.com#478abe"
+  },
+  {
+    "name": "idcard-tail-upper-x",
+    "check": "equals",
+    "args": [
+      "idcard=11010119900307123X"
+    ],
+    "kwargs": {},
+    "expected": "idcard=110101********123X#7b001b"
+  },
+  {
+    "name": "idcard-tail-lower-x",
+    "check": "equals",
+    "args": [
+      "idcard=11010119900307123x"
+    ],
+    "kwargs": {},
+    "expected": "idcard=110101********123x#e776d8"
+  },
+  {
+    "name": "repeated-value-same-tag",
+    "check": "equals",
+    "args": [
+      "a=13800138000 b=13800138000"
+    ],
+    "kwargs": {},
+    "expected": "a=138****8000#a6942f b=138****8000#a6942f"
+  },
+  {
+    "name": "different-values-different-tag",
+    "check": "equals",
+    "args": [
+      "a=13800138000 b=13911139000"
+    ],
+    "kwargs": {},
+    "expected": "a=138****8000#a6942f b=139****9000#6778b8"
+  },
+  {
+    "name": "name-two-chars",
+    "check": "equals",
+    "args": [
+      "name=张三"
+    ],
+    "kwargs": {},
+    "expected": "name=张*#1d841b"
+  },
+  {
+    "name": "name-four-chars",
+    "check": "equals",
+    "args": [
+      "name=欧阳修文"
+    ],
+    "kwargs": {},
+    "expected": "name=欧***#4e155c"
+  },
+  {
+    "name": "line-count-preserved",
+    "check": "equals",
+    "args": [
+      "a\n\nb\n"
+    ],
+    "kwargs": {},
+    "expected": "a\n\nb\n"
+  },
+  {
+    "name": "no-trailing-newline-change",
+    "check": "equals",
+    "args": [
+      "ip=10.20.30.40"
+    ],
+    "kwargs": {},
+    "expected": "ip=10.20.*.*#fec9cd"
+  }
+]

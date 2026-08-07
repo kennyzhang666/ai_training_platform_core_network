@@ -1,0 +1,40 @@
+schemaVersion: "1.0"
+id: log-desensitize-01
+version: 1
+title: 运维日志脱敏（SDD）
+origin: official
+zone: blue
+languagePolicy:
+  mode: fixed
+  languages: [python]
+deliveryPolicy:
+  allowedSources: [UPLOAD, GIT_REF]
+  upload:
+    formats: [zip]
+    maxBytes: 10485760
+    maxFiles: 200
+    allowResubmit: true
+  git:
+    provider: GITLAB
+    repository: training/log-desensitize
+    branchTemplate: drill/{subjectId}
+    pinAt: SUBMIT
+    credentialRef: gitlab-grader-readonly
+rubricVersion: "1.0"
+submissionContract: submission-contract.json
+evaluationEngine:
+  mode: PACKAGED
+  package:
+    id: log-desensitize-sdd
+    version: 1.0.0
+  agent:
+    instructionPath: instruction.md
+    skillPaths: [skills/evaluation/SKILL.md]
+  input:
+    format: JSON
+    schemaVersion: "1.1"
+    contractPath: contracts/evaluation-agent-batch-v1.1.schema.json
+  output:
+    format: JSON
+    schemaVersion: "1.0"
+    contractPath: contracts/evaluation-result.schema.json
