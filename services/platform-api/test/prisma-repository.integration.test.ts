@@ -8,6 +8,7 @@ import { PrismaPlatformRepository } from '../src/prisma-platform-repository';
 import { createPlatformStore } from '../src/postgres-platform-store';
 import { PrismaUploadSessionPersistence } from '../src/prisma-upload-session-persistence';
 import { PlatformReadService } from '../src/platform-read-service';
+import { PostgresDomainUnitOfWork } from '../src/postgres-domain-unit-of-work';
 import { Challenge, EventConfig, EvaluationBatch, GradingRun, SubmissionRecord } from '../src/domain';
 
 const enabled = process.env.POSTGRES_INTEGRATION === 'true';
@@ -46,10 +47,13 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
   const resultId = `it-result-${suffix}`;
   const uploadSessionId = `it-upload-${suffix}`;
   const adminId = `it-admin-${suffix}`;
+  const bootstrapEmployeeNo = `it-bootstrap-admin-${suffix}`;
   const casOrgA = `it-cas-a-${suffix}`;
   const casOrgB = `it-cas-b-${suffix}`;
   const duplicateRootId = `it-root-duplicate-${suffix}`;
   const raceEmployeeNo = `it-race-user-${suffix}`;
+  const genericLabelEmployeeNo = `it-generic-label-${suffix}`;
+  const capacityEmployeeNos = Array.from({ length: 100 }, (_, index) => `it-capacity-${suffix}-${String(index + 1).padStart(3, '0')}`);
   const raceRootA = `it-race-root-a-${suffix}`;
   const raceRootB = `it-race-root-b-${suffix}`;
   const raceSubmissionId = `it-race-submission-${suffix}`;
@@ -60,8 +64,24 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
   let uploadPersistence: PrismaUploadSessionPersistence | undefined;
   let restartedUploadPersistence: PrismaUploadSessionPersistence | undefined;
   let readService: PlatformReadService | undefined;
+  let capacityUnitOfWork: PostgresDomainUnitOfWork | undefined;
+  let capacitySubmissionIds: string[] = [];
   const previousMode = process.env.PLATFORM_REPOSITORY;
+  const previousBootstrapAdmin = process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO;
+  const previousDeploymentProfile = process.env.PLATFORM_DEPLOYMENT_PROFILE;
   try {
+    process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO = bootstrapEmployeeNo;
+    const bootstrapped = await repository.users.syncSsoIdentity({
+      employeeNo: bootstrapEmployeeNo,
+      name: 'Integration Bootstrap Admin',
+    });
+    assert.equal(bootstrapped.firstLogin, true);
+    assert.deepEqual(bootstrapped.user.roles, ['global_admin']);
+    assert.deepEqual(bootstrapped.user.roleBindings, [{ role: 'global_admin', scopeOrgPath: '/' }]);
+    assert.equal((await repository.audits.list({ target: `user:${bootstrapEmployeeNo}`, page: 1, pageSize: 10 })).pageInfo.total, 1);
+    if (previousBootstrapAdmin === undefined) delete process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO;
+    else process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO = previousBootstrapAdmin;
+
     const result = await repository.transaction(async (transaction) => {
       const org = await transaction.organizations.create({ id: orgId, parentId: undefined, path: `/it-${suffix}/`, level: 1, label: 'IT', name: 'Integration' });
       const identity = await transaction.users.syncSsoIdentity({ employeeNo, name: 'Integration User', department: org.path });
@@ -76,6 +96,14 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
     assert.deepEqual(result.updated.roles, ['learner', 'mentor']);
     assert.equal(result.audit.id, auditId);
     assert.equal(result.page.items.some((item) => item.employeeNo === employeeNo), true);
+    const genericLabelIdentity = await repository.users.syncSsoIdentity({
+      employeeNo: genericLabelEmployeeNo,
+      name: 'Generic Label User',
+      department: 'IT',
+    });
+    assert.equal(genericLabelIdentity.departmentMatched, false);
+    assert.equal(genericLabelIdentity.user.orgUnitId, '');
+    assert.equal(genericLabelIdentity.user.departmentHint, 'IT');
     await assert.rejects(
       repository.organizations.create({ id: duplicateRootId, path: `/duplicate-${suffix}/`, level: 0, label: 'IT', name: 'Integration' }),
       /duplicate sibling name/,
@@ -179,8 +207,28 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
     assert.match(String(rejectedRoot.reason?.message ?? rejectedRoot.reason), /duplicate sibling name|already exists/i);
 
     await client.appUser.create({ data: { id: adminId, employeeNo: adminId, name: 'Integration Admin', roles: ['admin'], roleBindings: { create: [{ role: 'admin', scopeOrgPath: '/' }] } } });
+    const capacityIdentities = await Promise.all(capacityEmployeeNos.map((capacityEmployeeNo, index) => repository.users.syncSsoIdentity({
+      employeeNo: capacityEmployeeNo,
+      name: `Capacity Learner ${index + 1}`,
+      department: result.org.path,
+    })));
     process.env.PLATFORM_REPOSITORY = 'postgres';
+    process.env.PLATFORM_DEPLOYMENT_PROFILE = 'single-node';
     const normalizedStore = await createPlatformStore();
+    capacityUnitOfWork = new PostgresDomainUnitOfWork(normalizedStore);
+    const capacityStartedAt = Date.now();
+    const capacitySubmissions = await Promise.all(capacityIdentities.map((identity, index) => capacityUnitOfWork!.run((store) => store.createSubmission(eventId, identity.user.id, {
+      sourceType: 'UPLOAD',
+      snapshotHash: (index + 1).toString(16).padStart(64, '0'),
+      artifactHash: (index + 101).toString(16).padStart(64, '0'),
+      artifactUri: `local://capacity-${suffix}-${index + 1}`,
+      submittedAt: new Date().toISOString(),
+    }))));
+    capacitySubmissionIds = capacitySubmissions.map((submission) => submission.id);
+    assert.equal(new Set(capacitySubmissionIds).size, 100);
+    assert.ok(Date.now() - capacityStartedAt < 120_000, 'one hundred PostgreSQL submissions must commit within two minutes');
+    const capacityPage = await repository.submissions.list({ eventId, state: 'WAITING_TRIGGER', page: 1, pageSize: 100 });
+    assert.equal(capacityPage.pageInfo.total, 100);
     const staleStore = await createPlatformStore();
     readService = new PlatformReadService(normalizedStore);
     const normalizedSubmissionPage = await readService.listSubmissions({ eventId, page: 1, pageSize: 1 }, adminId);
@@ -271,6 +319,7 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
       objectKey: `platform/uploads/${uploadSessionId}/delivery.zip.part`,
       actorId: result.identity.user.id,
       eventId,
+      subjectId: result.identity.user.id,
       fileName: 'delivery.zip',
       declaredSize: 12,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -285,21 +334,27 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
     if (previousMode === undefined) delete process.env.PLATFORM_REPOSITORY; else process.env.PLATFORM_REPOSITORY = previousMode;
   } finally {
     if (previousMode === undefined) delete process.env.PLATFORM_REPOSITORY; else process.env.PLATFORM_REPOSITORY = previousMode;
+    if (previousDeploymentProfile === undefined) delete process.env.PLATFORM_DEPLOYMENT_PROFILE;
+    else process.env.PLATFORM_DEPLOYMENT_PROFILE = previousDeploymentProfile;
+    if (previousBootstrapAdmin === undefined) delete process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO;
+    else process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO = previousBootstrapAdmin;
+    await capacityUnitOfWork?.onModuleDestroy();
     await restartedUploadPersistence?.onModuleDestroy();
     await uploadPersistence?.onModuleDestroy();
     await client.uploadSession.deleteMany({ where: { id: uploadSessionId } });
-    await client.auditLog.deleteMany({ where: { OR: [{ id: { in: [auditId, `rollback-${suffix}`] } }, { target: { in: [`user:${raceEmployeeNo}`, `gradingRun:${runId}`, `gradingRun:${raceRunA}`, `gradingRun:${raceRunB}`] } }] } });
+    await client.auditLog.deleteMany({ where: { OR: [{ id: { in: [auditId, `rollback-${suffix}`] } }, { target: { in: [`user:${bootstrapEmployeeNo}`, `user:${raceEmployeeNo}`, `gradingRun:${runId}`, `gradingRun:${raceRunA}`, `gradingRun:${raceRunB}`] } }] } });
     await client.auditLog.deleteMany({ where: { target: { in: [`org-unit:${casOrgA}`, `org-unit:${casOrgB}`] } } });
     await client.evaluationResult.deleteMany({ where: { id: { in: [resultId, raceResultId] } } });
     await client.evaluationBatch.deleteMany({ where: { id: { in: [batchId, raceBatchId] } } });
     await client.gradingRun.deleteMany({ where: { id: { in: [runId, raceRunA, raceRunB] } } });
-    await client.submission.deleteMany({ where: { id: { in: [submissionId, raceSubmissionId] } } });
+    await client.submission.deleteMany({ where: { id: { in: [submissionId, raceSubmissionId, ...capacitySubmissionIds] } } });
     await client.participation.deleteMany({ where: { eventId } });
     await client.event.deleteMany({ where: { id: eventId } });
     await client.challengeVersion.deleteMany({ where: { id: versionId } });
     await client.challenge.deleteMany({ where: { id: challengeId } });
-    await client.roleBinding.deleteMany({ where: { userId: { in: [userId, employeeNo, raceEmployeeNo] } } });
-    await client.appUser.deleteMany({ where: { OR: [{ id: userId }, { employeeNo }, { employeeNo: raceEmployeeNo }] } });
+    await client.auditLog.deleteMany({ where: { target: { in: capacityEmployeeNos.map((employee) => `user:${employee}`) } } });
+    await client.roleBinding.deleteMany({ where: { userId: { in: [userId, bootstrapEmployeeNo, employeeNo, raceEmployeeNo, genericLabelEmployeeNo, ...capacityEmployeeNos] } } });
+    await client.appUser.deleteMany({ where: { OR: [{ id: userId }, { employeeNo: bootstrapEmployeeNo }, { employeeNo }, { employeeNo: raceEmployeeNo }, { employeeNo: genericLabelEmployeeNo }, { employeeNo: { in: capacityEmployeeNos } }] } });
     await client.roleBinding.deleteMany({ where: { userId: adminId } });
     await client.appUser.deleteMany({ where: { id: adminId } });
     await client.orgUnit.deleteMany({ where: { id: { in: [casOrgA, casOrgB] } } });

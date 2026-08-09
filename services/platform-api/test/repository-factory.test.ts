@@ -2,11 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PlatformStore } from '../src/store';
 import { FileUserDirectoryRepository, PrismaUserDirectoryRepository, createUserDirectoryRepository } from '../src/user-directory';
+import { createPlatformStore } from '../src/postgres-platform-store';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const original = {
   mode: process.env.PLATFORM_REPOSITORY,
   databaseUrl: process.env.DATABASE_URL,
   nodeEnv: process.env.NODE_ENV,
+  deploymentProfile: process.env.PLATFORM_DEPLOYMENT_PROFILE,
+  dataFile: process.env.PLATFORM_DATA_FILE,
+  bootstrapAdmin: process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO,
 };
 
 function restoreEnvironment(): void {
@@ -16,6 +23,12 @@ function restoreEnvironment(): void {
   else process.env.DATABASE_URL = original.databaseUrl;
   if (original.nodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = original.nodeEnv;
+  if (original.deploymentProfile === undefined) delete process.env.PLATFORM_DEPLOYMENT_PROFILE;
+  else process.env.PLATFORM_DEPLOYMENT_PROFILE = original.deploymentProfile;
+  if (original.dataFile === undefined) delete process.env.PLATFORM_DATA_FILE;
+  else process.env.PLATFORM_DATA_FILE = original.dataFile;
+  if (original.bootstrapAdmin === undefined) delete process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO;
+  else process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO = original.bootstrapAdmin;
 }
 
 test.afterEach(restoreEnvironment);
@@ -42,6 +55,25 @@ test('production cannot use the file adapter', () => {
   process.env.PLATFORM_REPOSITORY = 'file';
   process.env.NODE_ENV = 'production';
   assert.throws(() => createUserDirectoryRepository(new PlatformStore(':memory:')), /file repository is not allowed in production/);
+});
+
+test('single-node production requires PostgreSQL instead of a durable file repository', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'single-node-store-'));
+  process.env.PLATFORM_REPOSITORY = 'file';
+  process.env.PLATFORM_DATA_FILE = join(directory, 'platform-data.json');
+  process.env.PLATFORM_DEPLOYMENT_PROFILE = 'single-node';
+  process.env.NODE_ENV = 'production';
+  process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO = 'first-admin';
+
+  try {
+    await assert.rejects(createPlatformStore(), /single-node production requires PLATFORM_REPOSITORY=postgres/);
+    assert.throws(
+      () => createUserDirectoryRepository(new PlatformStore(':memory:')),
+      /single-node production requires PLATFORM_REPOSITORY=postgres/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('postgres adapter is constructed only after explicit configuration', () => {

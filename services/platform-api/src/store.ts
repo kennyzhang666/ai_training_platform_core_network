@@ -330,13 +330,27 @@ export class PlatformStore {
     if (seedProfile !== 'FULL' && seedProfile !== 'MINIMAL') throw new Error(`unsupported PLATFORM_SEED_PROFILE: ${seedProfile}`);
     const minimalSeed = seedProfile === 'MINIMAL';
     let seeded = minimalSeed ? this.pruneLegacyLocalFixture() : false;
-    const localTrainingStartsAt = '2026-08-01T09:00:00+08:00';
-    const localTrainingEndsAt = '2026-08-08T18:00:00+08:00';
+    // Demo fixtures must not expire with the calendar. Real training events
+    // still use administrator-configured windows and the same strict runtime
+    // checks. Environment overrides keep local screenshots/UAT deterministic
+    // when a narrower demo window is desired.
+    const localTrainingStartsAt = process.env.PLATFORM_SEED_EVENT_STARTS_AT?.trim() || '2000-01-01T00:00:00+08:00';
+    const localTrainingEndsAt = process.env.PLATFORM_SEED_EVENT_ENDS_AT?.trim() || '2100-01-01T00:00:00+08:00';
+    if (!Number.isFinite(Date.parse(localTrainingStartsAt)) || !Number.isFinite(Date.parse(localTrainingEndsAt)) || Date.parse(localTrainingStartsAt) >= Date.parse(localTrainingEndsAt)) {
+      throw new Error('PLATFORM_SEED_EVENT_STARTS_AT must be before PLATFORM_SEED_EVENT_ENDS_AT');
+    }
+    const legacyLocalTrainingStartsAt = '2026-08-01T09:00:00+08:00';
+    const legacyLocalTrainingEndsAt = '2026-08-08T18:00:00+08:00';
+    const canRepairLegacyWindow = (eventId: string): boolean => ![...this.submissions.values()].some((submission) => submission.eventId === eventId);
+    const usesLegacyWindow = (event: EventConfig): boolean => event.startsAt === legacyLocalTrainingStartsAt && event.endsAt === legacyLocalTrainingEndsAt;
     const localEvent = this.events.get('event-local');
-    if (localEvent && (!localEvent.deliveryConfig || !localEvent.startsAt || !localEvent.endsAt)) {
+    const repairLocalWindow = Boolean(localEvent && usesLegacyWindow(localEvent) && canRepairLegacyWindow(localEvent.id));
+    if (localEvent && (!localEvent.deliveryConfig || !localEvent.startsAt || !localEvent.endsAt || repairLocalWindow)) {
       localEvent.deliveryConfig ??= { allowedFormats: ['zip'], maxBytes: 50 * 1024 * 1024 };
-      localEvent.startsAt ??= localTrainingStartsAt;
-      localEvent.endsAt ??= localTrainingEndsAt;
+      if (!localEvent.startsAt || !localEvent.endsAt || repairLocalWindow) {
+        localEvent.startsAt = localTrainingStartsAt;
+        localEvent.endsAt = localTrainingEndsAt;
+      }
       seeded = true;
     }
     if (!this.events.size) {
@@ -370,9 +384,12 @@ export class PlatformStore {
       seeded = true;
     }
     const localGitEvent = this.events.get('event-local-git');
-    if (localGitEvent && (!localGitEvent.startsAt || !localGitEvent.endsAt)) {
-      localGitEvent.startsAt ??= localTrainingStartsAt;
-      localGitEvent.endsAt ??= localTrainingEndsAt;
+    const repairLocalGitWindow = Boolean(localGitEvent && usesLegacyWindow(localGitEvent) && canRepairLegacyWindow(localGitEvent.id));
+    if (localGitEvent && (!localGitEvent.startsAt || !localGitEvent.endsAt || repairLocalGitWindow)) {
+      if (!localGitEvent.startsAt || !localGitEvent.endsAt || repairLocalGitWindow) {
+        localGitEvent.startsAt = localTrainingStartsAt;
+        localGitEvent.endsAt = localTrainingEndsAt;
+      }
       seeded = true;
     }
     if (!this.orgUnits.size) {
@@ -1725,7 +1742,7 @@ export class PlatformStore {
   private matchSsoDepartment(department?: string): OrgUnit | undefined {
     const value = department?.trim().toLocaleLowerCase();
     if (!value) return undefined;
-    return [...this.orgUnits.values()].find((unit) => unit.id !== 'org-root' && [unit.id, unit.path, unit.name, unit.label]
+    return [...this.orgUnits.values()].find((unit) => unit.level > 0 && [unit.id, unit.path, unit.name]
       .some((candidate) => candidate.trim().toLocaleLowerCase() === value));
   }
 
@@ -1739,6 +1756,8 @@ export class PlatformStore {
     const matchedUnit = this.matchSsoDepartment(department);
     const existing = [...this.users.values()].find((item) => item.id === employeeNo || item.employeeNo === employeeNo);
     if (existing?.status === 'DISABLED') throw new ForbiddenException('账号已停用');
+    const configuredBootstrapAdmin = process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO?.trim();
+    const bootstrapGlobalAdmin = configuredBootstrapAdmin === employeeNo && ![...this.users.values()].some(hasGlobalAdminAccess);
     if (!existing) {
       const user: AppUser = {
         id: employeeNo,
@@ -1748,7 +1767,8 @@ export class PlatformStore {
         orgPath: matchedUnit?.path ?? '',
         ...(department && !matchedUnit ? { departmentHint: department } : {}),
         ...(matchedUnit ? { departmentSource: 'SSO' as const } : {}),
-        roles: ['learner'],
+        roles: bootstrapGlobalAdmin ? ['global_admin'] : ['learner'],
+        ...(bootstrapGlobalAdmin ? { roleBindings: [{ role: 'global_admin', scopeOrgPath: '/' }] } : {}),
         status: 'ACTIVE',
       };
       this.users.set(user.id, user);
@@ -1773,6 +1793,10 @@ export class PlatformStore {
       existing.departmentHint = matchedUnit ? undefined : department;
     } else if (department) {
       existing.departmentHint = department;
+    }
+    if (bootstrapGlobalAdmin) {
+      existing.roles = ['global_admin'];
+      existing.roleBindings = [{ role: 'global_admin', scopeOrgPath: '/' }];
     }
     if (JSON.stringify(before) !== JSON.stringify(existing)) {
       this.audit(employeeNo, 'sso.user-sync', `user:${existing.id}`, before, existing);

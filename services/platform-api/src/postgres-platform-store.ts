@@ -5,6 +5,7 @@ import { defaultCodeAgentRuntimeConfig, buildCodeAgentRuntimeConfig } from './co
 import { AppUser, Challenge, EventConfig, EvaluationBatch, GradingRun, Season, StoredResult, SubmissionRecord } from './domain';
 import { mapOrgUnit, mapUser } from './prisma-platform-repository';
 import { mapBatch, mapChallenge, mapEvent, mapResult, mapRun, mapSubmission } from './prisma-domain-repository';
+import { isSingleNodeProduction } from './deployment-profile';
 
 const SNAPSHOT_ID = 'singleton';
 const SNAPSHOT_VERSION = 1;
@@ -410,7 +411,10 @@ class PrismaNormalizedPersistence implements PlatformStatePersistence {
 export async function createPlatformStore(): Promise<PlatformStore> {
   const mode = repositoryMode();
   if (mode === 'file') {
-    if (process.env.NODE_ENV === 'production') throw new Error('file repository is not allowed in production');
+    if (process.env.NODE_ENV === 'production') {
+      if (isSingleNodeProduction()) throw new Error('single-node production requires PLATFORM_REPOSITORY=postgres');
+      throw new Error('file repository is not allowed in production');
+    }
     return process.env.PLATFORM_DATA_FILE ? new PlatformStore(process.env.PLATFORM_DATA_FILE) : new PlatformStore();
   }
   if (mode !== 'postgres') throw new Error(`unsupported PLATFORM_REPOSITORY: ${mode}`);

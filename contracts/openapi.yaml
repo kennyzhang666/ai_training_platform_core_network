@@ -1032,6 +1032,11 @@ paths:
       operationId: uploadSubmissionMetadata
       parameters:
         - $ref: '#/components/parameters/EventId'
+        - name: X-Upload-Token
+          in: header
+          required: false
+          description: 使用 uploadId 登记两阶段上传交付件时必填
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -1759,7 +1764,8 @@ components:
       required: [subjectId, snapshot]
       properties:
         subjectId: { type: string }
-        artifactBase64: { type: string, format: byte, description: 开发期 JSON 上传适配；生产替换为对象存储直传 }
+        uploadId: { type: string, format: uuid, description: 两阶段上传句柄；使用时通过 X-Upload-Token 证明归属 }
+        artifactBase64: { type: string, format: byte, description: 单服务器与本地环境可用的 JSON 上传适配 }
         fileName: { type: string }
         snapshot:
           type: object

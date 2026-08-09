@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { existsSync, statSync } from 'node:fs';
+import { basename, dirname, resolve, sep } from 'node:path';
 import { BadRequestException, ConflictException, Inject, Injectable, Optional } from '@nestjs/common';
 import { EvaluationBatch, EvaluationBatchTask, GradingRun, StoredResult } from './domain';
 import { ExecutorRegistry } from './executor-registry';
@@ -61,14 +61,32 @@ export class EvaluationBatchService {
     return reclaimed;
   }
 
-  private resolveAgentPaths(engineRoot: string, instruction: string, skills: string[]): void {
-    for (const [label, value] of [['instruction', instruction], ...skills.map((path) => ['skill', path])] as Array<[string, string]>) {
-      const target = resolve(engineRoot, value);
-      const within = target === engineRoot || target.startsWith(`${engineRoot}${sep}`);
-      if (!within || !existsSync(target)) {
-        throw new BadRequestException({ code: 'CODE_AGENT_ASSET_MISSING', message: `Code Agent ${label} 不存在：${value}` });
-      }
+  private resolveAgentPaths(engineRoot: string, instruction: string, skills: string[]): { instruction: string; skills: string[] } {
+    const instructionTarget = resolve(engineRoot, instruction);
+    if (!instructionTarget.startsWith(`${engineRoot}${sep}`) || !existsSync(instructionTarget)) {
+      throw new BadRequestException({ code: 'CODE_AGENT_ASSET_MISSING', message: `Code Agent instruction 不存在：${instruction}` });
     }
+    if (!statSync(instructionTarget).isFile()) {
+      throw new BadRequestException({ code: 'CODE_AGENT_ASSET_INVALID', message: `Code Agent instruction 必须是文件：${instruction}` });
+    }
+    const normalizedSkills = skills.map((value) => {
+      const target = resolve(engineRoot, value);
+      if (!target.startsWith(`${engineRoot}${sep}`) || !existsSync(target)) {
+        throw new BadRequestException({ code: 'CODE_AGENT_ASSET_MISSING', message: `Code Agent skill 不存在：${value}` });
+      }
+      if (statSync(target).isDirectory()) {
+        const skillFile = resolve(target, 'SKILL.md');
+        if (!existsSync(skillFile) || !statSync(skillFile).isFile()) {
+          throw new BadRequestException({ code: 'CODE_AGENT_ASSET_INVALID', message: `Code Agent skill 缺少 SKILL.md：${value}` });
+        }
+        return value;
+      }
+      if (basename(target) !== 'SKILL.md') {
+        throw new BadRequestException({ code: 'CODE_AGENT_ASSET_INVALID', message: `Code Agent skill 必须指向 Skills 目录或 SKILL.md：${value}` });
+      }
+      return dirname(value).replace(/\\/g, '/');
+    });
+    return { instruction, skills: normalizedSkills };
   }
 
   private taskFor(store: PlatformStore, batch: EvaluationBatch, workerId: string): EvaluationBatchTask {
@@ -81,7 +99,7 @@ export class EvaluationBatchService {
     const instruction = configuredAgent?.instructionPath ?? manifestAgent?.instruction ?? 'instruction.md';
     const skills = configuredAgent?.skillPaths ?? manifestAgent?.skills ?? ['skills/evaluation'];
     if (!skills.length) throw new BadRequestException({ code: 'CODE_AGENT_SKILLS_REQUIRED', message: '该赛题未配置 Code Agent skills' });
-    this.resolveAgentPaths(resolved.root, instruction, skills);
+    const agent = this.resolveAgentPaths(resolved.root, instruction, skills);
     const assets: Record<string, string> = {};
     for (const [key, value] of Object.entries(resolved.manifest.assets ?? {})) if (value) assets[key] = value;
     const lease = store.acquireEvaluationBatchLease(batch.id, workerId, LEASE_SECONDS);
@@ -105,7 +123,7 @@ export class EvaluationBatchService {
         },
         assets,
         ...(resolved.platformDependencies.length ? { platformDependencies: resolved.platformDependencies } : {}),
-        agent: { instruction, skills },
+        agent,
       },
       ...(batch.codeAgentRuntime ? { codeAgentRuntime: { ...batch.codeAgentRuntime, args: [...batch.codeAgentRuntime.args] } } : {}),
       contracts: {

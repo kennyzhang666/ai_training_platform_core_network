@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -34,4 +34,16 @@ test('evaluation kit ZIP is invariant to CRLF source checkouts', () => {
     writeFileSync(markdownPath, originalMarkdown);
     writeFileSync(zipPath, originalZip);
   }
+});
+
+test('the reference engine uses canonical Skill directories and validates offline', () => {
+  const exampleRoot = resolve(root, 'tools/engine-dev-kit/examples/minimal-engine');
+  const manifest = JSON.parse(readFileSync(join(exampleRoot, 'engine.json'), 'utf8'));
+  assert.deepEqual(manifest.agent.skills, ['skills/evaluation']);
+  const python = process.env.PYTHON ?? 'python';
+  const result = spawnSync(python, [resolve(root, 'tools/engine-dev-kit/tools/engine_dev.py'), 'validate', exampleRoot], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
 });

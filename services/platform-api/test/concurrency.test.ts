@@ -21,7 +21,7 @@ async function withApp(run: (baseUrl: string) => Promise<void>): Promise<void> {
   }
 }
 
-test('ten people can submit to an AUTO event and all runs drain through the bounded queue', async () => {
+test('one hundred people can submit to an AUTO event and all runs drain through the bounded queue', async () => {
   await withApp(async (baseUrl) => {
     const eventResponse = await fetch(`${baseUrl}/api/v1/events`, {
       method: 'POST',
@@ -44,7 +44,15 @@ test('ten people can submit to an AUTO event and all runs drain through the boun
     });
     assert.equal(eventResponse.status, 201);
 
-    const subjects = ['w00123', 'w00124', 'w00125', 'w00126', 'w00127', 'w00128', 'w00129', 'w00130', 'w00131', 'w00132'];
+    const subjects = Array.from({ length: 100 }, (_, index) => `concurrent-learner-${String(index + 1).padStart(3, '0')}`);
+    await Promise.all(subjects.map(async (employeeNo, index) => {
+      const response = await fetch(`${baseUrl}/api/v1/auth/sso`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ employeeNo, name: `并发学员 ${index + 1}`, department: 'AI 工程团队' }),
+      });
+      assert.equal(response.status, 201);
+    }));
     const submissions = await Promise.all(subjects.map(async (subjectId) => {
       const response = await fetch(`${baseUrl}/api/v1/events/event-auto-concurrency/submissions:upload`, {
         method: 'POST',
@@ -64,7 +72,7 @@ test('ten people can submit to an AUTO event and all runs drain through the boun
     assert.equal(new Set(submissions.map((submission) => submission.id)).size, subjects.length);
     assert.ok(submissions.every((submission) => submission.state === 'QUEUED'));
 
-    const deadline = Date.now() + 15_000;
+    const deadline = Date.now() + 60_000;
     let completed = 0;
     while (Date.now() < deadline) {
       const states = await Promise.all(submissions.map(async (submission) => {

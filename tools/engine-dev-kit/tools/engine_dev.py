@@ -128,10 +128,14 @@ def load_manifest(root: Path) -> dict[str, Any]:
         skills = agent.get("skills")
         if not isinstance(skills, list) or not skills:
             raise ValueError("agent.skills 至少需要一个路径")
-        paths = [instruction, *(safe_package_path(item, "agent.skills") for item in skills)]
-        for path in paths:
-            if not (root / path).is_file():
-                raise ValueError(f"找不到 Agent 文件：{path}")
+        if not (root / instruction).is_file():
+            raise ValueError(f"找不到 Agent 指令文件：{instruction}")
+        for item in skills:
+            path = safe_package_path(item, "agent.skills")
+            target = root / path
+            skill_file = target / "SKILL.md" if target.is_dir() else target
+            if not skill_file.is_file() or skill_file.name != "SKILL.md":
+                raise ValueError(f"Skill 必须指向包含 SKILL.md 的目录：{path}")
     if manifest.get("platformDependencies"):
         raise ValueError("独立上传引擎不能声明 platformDependencies")
 

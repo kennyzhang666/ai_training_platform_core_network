@@ -239,7 +239,9 @@ assets/hidden-tests/
 assets/reference/                # 可选，自检用
 ```
 
-`engine.json` 见 `contracts/evaluation-engine-package.schema.json`。1.1 清单必须声明 `agent.instruction` 与 `agent.skills`；管理员也可以在赛题版本中覆盖这些相对路径。
+`engine.json` 见 `contracts/evaluation-engine-package.schema.json`。1.1 清单必须声明 `agent.instruction` 与 `agent.skills`；管理员也可以在赛题版本中覆盖这些相对路径。`agent.instruction` 指向文件，`agent.skills` 中每一项指向一个包含 `SKILL.md` 的目录。平台兼容旧包中直接指向 `SKILL.md` 的写法，并在生成批次时统一为目录路径。
+
+`runtime.requirements` 可指向包内的 Python requirements 文件。Worker 按引擎包哈希创建并缓存隔离环境，通过 `AI_TRAINING_ENGINE_PYTHON` 把解释器交给 Code Agent；Code Agent 不应改用系统 Python。内网离线部署可设置 `ENGINE_PIP_OFFLINE=true`，并使用 `ENGINE_PIP_FIND_LINKS` 或 `ENGINE_PIP_FIND_LINKS_JSON` 指定预下载的 wheel 目录。引擎升级依赖时必须发布新版本和新包，不能修改已上传包。
 
 ## 线下结果录入
 

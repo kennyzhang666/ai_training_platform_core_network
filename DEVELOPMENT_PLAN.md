@@ -1,9 +1,10 @@
 # AI 能力训战平台开发总览
 
-> 当前版本：`v0.9.0`
-> 更新日期：2026-08-07
-> 当前阶段：v0.9.0 本地生产模式部署与内网 LDAP3 接入能力已收口；生产目标环境仍需完成身份网关、Worker 服务身份、对象存储策略、沙箱资源限制和发布回滚门禁
-> 发布范围：补齐本地生产模式到内网部署的闭环，修复 LDAP3 中文身份传输、并发首次建档和 Worker 服务身份问题，增加纯 HTTP 内网开关、退出登录和空目录首屏行为；不修改评分 Schema 和数据库迁移。
+> 当前版本：`v0.9.5`
+> 更新日期：2026-08-10
+> 当前阶段：`v0.9.5` 已发布；单服务器业务闭环、Windows x64 / Linux x64 离线发布契约和 SDD 综合训战端到端验收已完成，尚待两类真实断网服务器 UAT
+> 发布范围：收口两阶段上传、不可变快照、评测批次、引擎 Skills/Python 依赖、首位管理员与 SSO 部门匹配；新增 `0016_upload_session_subject_binding`、SDD 日志脱敏综合赛题，以及同机 PostgreSQL、本地交付件、独立 Worker 且不依赖 MinIO、Redis、Kafka 或 Docker 的单服务器部署档。
+> 下一优先级：在 Windows Server x64 与 Linux x64 目标机验证离线包、真实 PostgreSQL/SSO/Code Agent 后，继续一次安装、系统服务、自动备份、离线升级和脱敏诊断。
 > 文档职责：项目架构、整体设计、版本沿革、当前边界、后续路线和 Codex 交接入口
 
 ## 1. 如何使用和维护本文档
@@ -61,8 +62,8 @@ NestJS + Fastify Platform API
   |-- 评测批次租约与结果幂等录入
   |-- 报告、画像、公告与审计
   |
-  |-- PlatformStore ------> 开发：文件适配器；生产：PostgreSQL/Prisma 规范化表（快照信封仅作迁移兼容）
-  |-- ObjectStorage ------> 开发：本地目录；生产：S3-compatible 对象存储
+  |-- PlatformStore ------> 本地开发：文件适配器；所有生产档：PostgreSQL/Prisma
+  |-- ObjectStorage ------> 本地开发/单服务器：本地目录；多服务器：S3-compatible 对象存储
   |-- GitSnapshotter -----> 当前：受控本地 Git；目标：GitLab 适配器
   |
   v
@@ -93,6 +94,7 @@ Platform API 校验、重算、幂等保存
 | `challenges/` | 示例赛题、版本化引擎包、instruction 和 Skills |
 | `services/platform-api/prisma/` | 生产关系模型和版本化迁移契约；PostgreSQL 运行时已接入，快照信封仅作兼容 |
 | `docs/` | 稳定的专项协议、架构决策和能力模型说明 |
+| `deploy/single-node/` | 单服务器生产档、Nginx 模板、离线配置及启停/备份/恢复脚本 |
 | `tmp/` | 本地运行数据、交付件和临时工作区，不进入版本库 |
 
 ### 3.2 API 内部边界
@@ -200,7 +202,7 @@ Platform API 校验、重算、幂等保存
 
 员工只能看到按训战揭晓策略开放的结果；管理员在权限范围内可进行运营和复核。
 
-## 5. 当前实现状态（v0.8.8）
+## 5. 当前实现状态（v0.9.5）
 
 ### 5.1 已可本地验收
 
@@ -225,7 +227,7 @@ Platform API 校验、重算、幂等保存
 当前代码仍可“无需外部依赖即可验收”，但尚未完成目标环境生产发布门禁，不应直接暴露到生产网络：
 
 - 开发环境仍可由 `PlatformStore` 写入 `tmp/platform-data.json`；生产配置下由 PostgreSQL/Prisma 规范化表作为运行时事实来源；
-- 交付包和引擎包开发环境仍可落本地目录；生产上传、读取和 Worker 物化走 S3-compatible `ObjectStorage`；PostgreSQL 模式的上传会话落在 `UploadSession`，文件适配器仍只用于本地开发；
+- 交付包和引擎包开发环境与单服务器生产档可落本地目录，多服务器生产档走 S3-compatible `ObjectStorage`；两种生产档的上传会话都落在 PostgreSQL `UploadSession`，可跨 API 重启恢复，文件 Repository 仍只用于本地开发；
 - 身份认证仍以开发请求头为主，SSO 同步接口不等于完整的生产登录会话；
 - 本地 Git 适配器只访问 `LOCAL_GIT_ROOT`，尚未接入真实 GitLab；
 - Code Agent 本地 bridge 用确定性评测器验证协议，真实 Agent、沙箱和凭据治理由部署环境提供；
@@ -406,6 +408,52 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 
 版本验证记录：发布前执行 `pnpm lint`、`pnpm test`、`pnpm contract:test`、`pnpm grader:test`、`pnpm kit:test`、`pnpm ldap3:test`、`pnpm build`、`git diff --check`，并通过本地 PostgreSQL、LDAP3 Mock、Nginx 反向代理和空目录 API 验收；最终结果以本次发布命令输出为准。
 
+### 5.14 v0.9.1 发布状态（2026-08-09）
+
+本次以“内网单服务器、少外部依赖、单场 50–100 人跑通真实训战”为边界，先修复阻断闭环的缺陷，再增加部署档：
+
+- 本地演示训战改用稳定时间窗，并仅在无提交时修复旧演示时间；真实训战仍严格执行管理员配置的开放时间；
+- 新增首位全局管理员工号引导，覆盖本地开发的空文件仓储与生产空 PostgreSQL；SSO 部门仅按组织 ID、路径或真实名称匹配，不再把“团队”等通用层级标签当作部门；
+- 两阶段上传能力绑定操作者、训战和目标学员，提交时由能力证明首次交付件归属并创建不可变快照；新增 `0016_upload_session_subject_binding`，OpenAPI 同步 `uploadId` 与能力头；
+- 引擎 `agent.skills` 规范化为目录，旧 `SKILL.md` 文件路径仍兼容；Worker 按包哈希缓存 Python 环境，支持内网镜像、离线 wheelhouse，并通过 `AI_TRAINING_ENGINE_PYTHON` 将解释器交给 Code Agent；
+- 新增 `PLATFORM_DEPLOYMENT_PROFILE=single-node`：同机 PostgreSQL 作为业务事实来源，交付件与引擎包保存在本地目录，只运行一个 API 进程和独立 Worker；新环境不注入任何演示用户、赛题或训战；
+- 单 API 内的 PostgreSQL 领域写入按序提交，避免集中提交时的快照 revision 争抢；本地对象存储的上传会话持久化到 PostgreSQL，API 重启后仍可确认已上传内容；
+- LDAP3 WSGI 服务改为线程化；Windows 部署包提供配置检查、迁移、隐藏进程启动、状态、停止、PostgreSQL 与本地交付件一致性备份和可恢复还原，Linux Nginx/systemd 手册同步独立 Worker；
+- 自动队列已完成 100 名学员集中提交与有界评测验收；外部 Worker + Code Agent 整批协议保持 20 名学员双引擎 20/20 验收。PostgreSQL 100 人并发写入集成用例已进入显式数据库测试和 GitLab CI，本机无数据库凭据时不伪造通过记录。
+
+版本验证记录：`pnpm test` 141 项（140 通过、1 项按配置跳过）、`pnpm contract:test` 7/7、`pnpm grader:test` 18/18、`pnpm kit:test` 2/2、`pnpm ldap3:test` 20/20、`pnpm deployment:test` 5/5、`pnpm acceptance:local` 的 100 名学员全部完成，并通过 `pnpm lint`、`pnpm build` 和 `git diff --check`。PostgreSQL 集成套件仍需显式目标数据库，本机没有可用凭据，本轮未执行；新增的 100 人 PostgreSQL 写入用例由 GitLab 隔离数据库和目标服务器复验。
+
+#### v0.9.1 部署成熟度结论
+
+`v0.9.1` 已经达到“单服务器、少组件、可离线部署”，但还没有达到真正的一包安装和无人值守运维：
+
+| 项目 | v0.9.1 现状 | 极简目标 |
+| --- | --- | --- |
+| 基础设施 | 同机 PostgreSQL + 本地磁盘，无 MinIO/Redis/Kafka/Docker | 保持不变，不为方便安装退回 JSON/SQLite |
+| 目标机安装 | 仍需人工准备 Node、pnpm、Python、PowerShell 7、Nginx、PostgreSQL 和 Code Agent | 发布包携带平台运行时与已构建产物；目标机只要求 PostgreSQL、Code Agent 和企业 LDAP 可用 |
+| 初始化 | 复制并手填 `.env`，再执行依赖安装、构建和 `Prepare` | 一份配置 + `Install`；自动生成随机密钥、执行迁移并检查端口、磁盘、LDAP、数据库和 Agent |
+| 进程管理 | `manage.ps1` 启停隐藏进程并保存 PID | 注册为系统服务，开机自启、异常重启，仍由一个管理入口统一操作 |
+| 备份 | 已能生成 PostgreSQL 与本地交付件的一致性 ZIP | 操作系统定时任务自动备份、校验、轮转和低磁盘预警 |
+| 升级 | 仍需拉代码、安装依赖和重新构建 | 使用离线版本包升级；升级前自动备份，失败后恢复版本、数据库和交付件 |
+| 排障 | 已有状态与进程日志 | 增加 `Doctor` 和脱敏诊断包，普通运维不需要阅读源码或拼命令 |
+
+因此，当前架构已经足够简洁，后续不应通过引入容器编排、消息队列或更多存储服务来“优化运维”；应优先把现有组件包装成稳定的发布和服务管理流程。
+
+### 5.15 v0.9.5 发布状态：单服务器闭环与双平台离线发布（2026-08-10）
+
+本版本把此前未单独推送的单服务器闭环、双平台离线发布和 SDD 真实训战验收统一收口。离线包纵切面只保证“在发布机生成可搬运运行包，目标机无需源码和构建工具”，没有提前宣称一次安装、系统服务和自动升级已经完成：
+
+- 发布契约固定为 `win32-x64` 与 `linux-x64`。两者共用 Web/API、PostgreSQL Schema 与迁移、Worker、评分契约和本地数据目录语义，平台差异仅限运行时、归档格式和管理入口；
+- 新增可复现发布组装器：发布机先构建 Web/API，并生成不含开发依赖的实体 Node 依赖树，再打包 Node、Python、Nginx、LDAP 网关、wheelhouse、迁移、Worker、契约、运维脚本、`VERSION`、逐文件 SHA-256 清单和归档校验文件；
+- Windows 包增加内置 PowerShell 入口 `manage.cmd`，生产依赖不含符号链接，不要求目标机开启开发者模式；ZIP 生成支持 Windows 长路径。Linux 包增加 `manage.sh`，与 Windows 对齐 `Prepare`、`Start`、`Stop`、`Status`、`Backup`、`Restore`、`Doctor`；
+- 发布任务强制在目标系统和 x64 架构上执行，避免跨平台复制 Prisma 引擎、Python 扩展或 Nginx；目标服务器仍只需准备同机 PostgreSQL、企业 LDAP 和 Code Agent；
+- 发布包拒绝真实 `.env`、平台 TypeScript 源码和测试目录，允许生产依赖自身必要的 `src` 文件；发布目录与 ZIP/tar.gz 都通过清单复核，固定时间戳时归档字节可重复；
+- GitLab 构建门禁已加入双平台发布契约和部署脚本测试；Linux Runner 会实际执行 Bash 语法检查，本地 Windows 会实际执行 PowerShell 语法检查。
+- 新增“基于SDD的运维日志脱敏工具开发实战演练”：以 `SPEC.md` 为主要证据，交叉核对实现、测试和 AI 协作记录；提供严格五文件交付契约、Code Agent 指令、评测 Skill、四维 16 点 A/B/C/D 规则、满分参考件和合规学员样例。
+- 本机已按真实角色完成管理员发布、员工上传、精确选择提交、Worker 批次物化、引擎执行、结果回传、服务端重算、报告、排名、审计和个人画像验收；样例得分 95.75，9 项交付件测试全部通过。
+
+本地证据：`pnpm test` 144 项（143 通过、1 项 PostgreSQL 集成按配置跳过），契约 7/7、Python grader 18/18、SDD 专项 3/3、评测资料包 2/2、发布 5/5；`pnpm deployment:test` 在 Windows 为 8 项通过、Linux Bash 项按平台跳过；100 人集中提交和有界队列通过。Windows 实际生产 Node 依赖曾完成 13,530 文件、零符号链接的布局与 ZIP/SHA-256 验证；本机当前未提供正式双平台运行时输入，因此不把测试归档冒充目标服务器发布包。Linux 原生生产依赖、真实运行时、断网启动、真实 LDAP/PostgreSQL/Code Agent 仍必须在目标机复验。
+
 ## 6. 版本沿革
 
 详细变更和修复见 `CHANGELOG.md`，这里仅保留交接所需的架构演进。
@@ -431,14 +479,40 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 | `v0.8.7` | 2026-08-06 | 增加评测进行中的同训战提交锁定、跨页面状态同步和可关闭锁定提示。 |
 | `v0.8.8` | 2026-08-06 | 赛题说明富文本支持 PNG/JPEG/WebP 图片插入，并在浏览器和 API 边界执行大小、类型、魔数与危险属性校验。 |
 | `v0.9.0` | 2026-08-07 | 收口本地生产模式与内网部署：LDAP3 Mock/中文身份传输、纯 HTTP 开关、Worker 服务身份、并发建档重试、反向代理同源 API、退出登录和空目录初始化。 |
+| `v0.9.1` | 2026-08-09 | 修复首次管理员、上传快照、Skills/依赖和 SSO 匹配；新增同机 PostgreSQL 单服务器生产档、离线 Worker 环境、统一运维脚本及 100 人集中提交验收。 |
+| `v0.9.5` | 2026-08-10 | 收口单服务器闭环、Windows/Linux 可复现离线发布契约和 SDD 日志脱敏综合赛题真实端到端验收；真实目标机 UAT 与无人值守运维继续推进。 |
 
 ## 7. 后续开发路线
 
 路线以“先完成可部署的核心平台，再接最后的 GitLab 自动评测接口”为原则。每次只实现一个有契约、有测试、可演示的纵切面。
 
-### 7.1 v0.7.0：生产数据与身份底座（最高优先级）
+### 7.1 v0.9.6：目标机验收与极简运维（下一阶段）
 
-目标：移除单机文件和浏览器身份头对正式环境的依赖。本轮已完成代码候选与本地适配器级证据，剩余工作集中在真实 PostgreSQL、对象存储和目标环境发布门禁。
+目标：在一台干净的内网服务器上，不访问互联网、不拉源码、不执行前端构建，运维人员使用 `v0.9.5` 对应平台的离线发布包和一份配置，在 30 分钟内完成安装并获得可自动恢复的长期运行服务。
+
+保持以下架构约束：
+
+- 正式业务数据继续使用同机 PostgreSQL，交付件和引擎包继续使用本地磁盘；
+- API 与 Worker 继续分进程，Code Agent 不进入 API 进程；
+- 不引入 Docker、Kubernetes、Redis、Kafka、MinIO 或额外配置中心；
+- 不为了少装 PostgreSQL 而把正式数据改回 JSON 文件或 SQLite；
+- 所有安装、诊断、备份和升级输出必须脱敏，不打印数据库密码、SSO 断言、Cookie、令牌或完整源码。
+
+按以下纵切面依次实现，每一项独立补测试和验收：
+
+1. **离线发布包（代码完成，目标机 UAT 待完成）**：已新增可复现的 Windows x64 ZIP 与 Linux x64 tar.gz 发布任务，包含已构建 Web/API、实体生产 Node 依赖、数据库迁移、平台 Python 运行时、固定依赖、wheelhouse、Nginx、Windows PowerShell/服务包装器、Worker、契约、双平台运维脚本、版本清单和 SHA-256 校验；目标机不再运行 `pnpm install`、`pnpm build` 或 `git pull`。PostgreSQL 与 Code Agent 使用公司统一软件包，不由平台联网下载。
+2. **一次安装与自检**：将 `manage.ps1` 扩展为 `Install`、`Doctor` 和 `Uninstall`；安装时生成内部随机密钥，校验并保存一份正式配置，执行数据库迁移，检查端口、目录权限、剩余磁盘、PostgreSQL、LDAP、Nginx、Worker 身份和 Code Agent 命令。`Doctor` 只输出检查结论和脱敏原因。
+3. **系统服务**：随发布包携带单个服务包装器，把 API、LDAP 网关、Worker 和 Nginx 注册为自动启动、异常重启的 Windows 服务；Linux 继续生成等价 systemd 单元。运维仍只使用 `Start`、`Stop`、`Restart`、`Status`，不直接管理各子进程。
+4. **自动备份与保留**：增加 `Schedule-Backup`、`Verify-Backup` 和 `Prune-Backups`，复用 Windows 任务计划或 systemd timer，不新增常驻服务；默认每日备份、保留最近 7 份，备份前检查空间，备份后校验 manifest、数据库图谱和 ZIP 可读性。
+5. **离线升级与失败回退**：增加 `Upgrade -Package`，校验版本和哈希后自动停止服务、生成恢复点、部署新版本、执行迁移并做健康检查；失败时恢复旧程序、数据库和 `data/`。已发布迁移不反向修改，数据库回退始终使用升级前恢复点。
+6. **诊断与日志轮转**：增加 `Collect-Diagnostics`，收集版本、健康检查、迁移状态、磁盘容量、服务状态和截断日志；自动过滤密钥与身份头。日志按大小轮转并设置保留天数，避免单机长期运行耗尽磁盘。
+7. **目标环境验收**：分别在断网的全新 Windows Server x64 与 Linux x64 服务器上验证安装、重启、自启动、100 人提交、真实 Code Agent 全批次回传、定时备份、整机恢复和故意升级失败回退；记录安装时间、峰值 CPU/内存/磁盘和评测总时长。
+
+完成标准：目标机日常只需要 `Status`、`Backup`、`Upgrade`、`Restore`、`Doctor` 五类操作；除 PostgreSQL、Code Agent 和企业 LDAP 外，不要求运维理解 Node、pnpm、Python 虚拟环境或平台源码。
+
+### 7.2 生产数据与身份底座（长期演进）
+
+目标：为生产运行提供 PostgreSQL 事实来源，并为需要多 API 实例和独立存储服务的标准生产档提供 S3 能力。v0.9.5 的单服务器档固定使用同机 PostgreSQL、真实 SSO、一个 API 进程、独立 Worker 和本地交付件目录，不引入 MinIO、Redis、Kafka 或 Docker；多 API 实例再切换独立 PostgreSQL 与 S3-compatible 对象存储。
 
 - 实现 `PlatformRepository` 边界，将 `PlatformStore` 的持久化职责迁移到 Prisma/PostgreSQL（W1 组织/人员/审计已完成，其他高频领域继续迁移）；
 - 为提交、评测运行、批次租约、结果导入和审计增加数据库事务与唯一约束；
@@ -449,7 +523,7 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 
 验收证据：PostgreSQL 集成测试、并发唯一性测试、SSO 越权矩阵、对象存储集成测试、迁移回滚演练记录。
 
-### 7.2 v0.8.x：正式评测运行环境（已发布，2026-08-05）
+### 7.3 正式评测运行环境（长期演进）
 
 v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录、独立评测引擎资料包、管理端运行详情和赛题生命周期管理的代码纵切面。目标环境还需要继续完成以下部署级工作：
 
@@ -462,9 +536,9 @@ v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录
 
 验收证据：沙箱安全测试、Worker 身份测试、故障恢复测试、批次观测面板、容量基线和生产回滚记录。v0.8.0 已提供本地/受控开发验证入口，但不将本地 bridge 或 API 内嵌执行器视为生产证据。
 
-### 7.3 v0.9.0：业务完整性与可运营性（本次已发布部署收口，业务扩展继续排期）
+### 7.4 v0.9.x：业务完整性与可运营性（单服务器基础档已完成，业务扩展继续排期）
 
-本次 v0.9.0 先完成真实本地生产模式、LDAP3 网关和 Worker 服务身份的部署收口；以下业务完整性工作仍是后续迭代目标，不能把本地 Mock 验收视为生产身份和沙箱验收证据。
+v0.9.5 已完成单服务器基础档、真实 SSO 边界、独立 Worker、离线引擎依赖、100 人集中提交验收、20 人外部 Worker 协议验收和 SDD 综合赛题单人真实端到端验收；以下业务完整性工作仍是后续迭代目标，目标环境仍需使用真实 LDAP、PostgreSQL 与 Code Agent 复验。
 
 目标：满足真实部门试点的日常配置、复核和复盘需求。
 
@@ -478,7 +552,7 @@ v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录
 
 验收证据：角色化 UAT 脚本、可访问性检查、XSS 安全测试、跨部门隔离测试、浏览器 E2E。
 
-### 7.4 v1.0.0：试点发布与生产验收
+### 7.5 v1.0.0：试点发布与生产验收
 
 目标：完成一个部门到多部门试点的生产发布准备。
 
@@ -487,18 +561,19 @@ v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录
 - 产品指标、SLA/SLO、告警阈值和版本发布清单；
 - 用真实但脱敏的训战完成从建题到能力画像的全链路验收。
 
-### 7.5 后置接口：GitLab CI 自动评测
+### 7.6 后置接口：GitLab CI 自动评测
 
 根据当前产品决策，GitLab CI 自动评测接口放在核心平台完成之后。它应作为新的 `GradingExecutor`/Worker 适配器接入，不得复制一套评分或结果入库逻辑。接口仍必须输出同一 `evaluation-result` 契约，并经过平台的 Schema、归属、幂等和重算校验。
 
 ## 8. 下一位 Codex 的推荐起点
 
-当前代码纵切面已经覆盖 PostgreSQL Repository/Unit of Work、服务端员工分页、赛题/训战与提交/评测的关键约束、对象存储物化和规范化备份恢复；本地生产模式已完成 PostgreSQL、MinIO、Nginx、LDAP3 Mock、Worker 和空目录验收，但这不替代目标环境门禁。下一步不再重复 W1 迁移，而是进入生产发布门禁与剩余业务领域收口：
+当前代码已覆盖单服务器训战所需的 SSO 首次建档、组织与角色、赛题/训战、不可变提交、100 人集中提交队列、20 人外部 Worker 协议评测、报告画像和 PostgreSQL/本地交付件一致性备份恢复。下一位 Codex 应优先执行 §7.1，并保持每次只交付一个可验收纵切面：
 
-1. 在目标环境接入真实 S3 兼容对象存储，验证上传确认、哈希、下载物化、Worker 清理和故障重试（本地 MinIO 生产配置验收已完成）；
-2. 接入真实 OIDC/JWKS 与 Worker 服务身份，执行组织/角色/场次访问矩阵及审计留存验收；
-3. 在目标环境复验 PostgreSQL 迁移、JSON 导入、备份恢复、并发租约，并补容量压测和安全扫描；
-4. 复核 OpenAPI、Schema、迁移、CHANGELOG 和回滚清单后，在目标环境完成 v0.8.x 的身份、对象存储、Worker 沙箱和回滚门禁。
+1. 在 Windows x64 与 Linux x64 发布机分别准备固定版本的 Node、Python、Nginx、PowerShell/服务包装器和平台 wheelhouse，生成两个候选包并把输入版本、SHA-256 和系统 ABI 记录到发布清单；
+2. 在两台干净、断网的目标服务器上执行 `Prepare`、`Doctor`、`Start`、SSO 登录、提交、批次评测、备份和恢复，确认目标机没有隐式源码、pnpm、网络或符号链接依赖；
+3. UAT 通过后实现 `Install` 与配置生成，再接入 Windows 服务和 Linux systemd、自动备份；不要同时重写业务模块；
+4. 完成 `Upgrade` 和失败恢复后，使用真实 LDAP、同机 PostgreSQL、Nginx 和目标 Code Agent 执行 50–100 人全链路 UAT；
+5. 记录实际赛题引擎的批次耗时与资源占用；只有单 API 或本地磁盘达到容量边界时，才切换独立 PostgreSQL 与 S3-compatible 对象存储的多服务器生产档。
 
 ### 8.1 v0.8.2 评审提出的优先事项
 
@@ -506,7 +581,7 @@ v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录
 
 1. **服务端富文本白名单清洗（已在 v0.8.8 完成）。** 赛题详情 `description` 的 API 写入路径现在与浏览器端共用危险标签、属性、图片 data URL、文件魔数和大小边界校验；前端清洗仍保留为纵深防御，已有数据回填和目标环境复验仍需按数据治理要求执行。
 2. **Worker 解压的独立体积上限。** `scripts/evaluation-worker.mjs` 的 `safeExtract` 正确拒绝了绝对路径、`..` 和符号链接，但没有自己的解压后体积上限，完全依赖 API 入库前的 `validateArchive`。Worker 是独立进程且未来会从对象存储直接物化，应在解压侧也强制 `maxFiles` / `maxExpandedBytes`，让防护不依赖调用方。
-3. **拆分 `store.ts` 与 `admin.tsx`。** 两个文件分别为 240KB 和 228KB，`PlatformStore` 同时承担状态机、授权、审计和持久化四种职责。这是当前最大的可维护性风险，也是 §7.3 前端模块化的前置条件。建议按领域（赛题/训战、提交/评测、组织/人员、报告/画像）逐个切出窄接口，每次迁移保持测试绿色，不要一次性重写。
+3. **拆分 `store.ts` 与 `admin.tsx`。** 两个文件分别为 240KB 和 228KB，`PlatformStore` 同时承担状态机、授权、审计和持久化四种职责。这是当前最大的可维护性风险，也是 §7.4 前端模块化的前置条件。建议按领域（赛题/训战、提交/评测、组织/人员、报告/画像）逐个切出窄接口，每次迁移保持测试绿色，不要一次性重写。
 4. **补齐身份层的算法矩阵测试。** 本轮的 `ES256` 缺陷之所以能发布，是因为 `identity.test.ts` 只覆盖了 `RS256`。允许列表中的每个算法（`RS256`/`RS384`/`RS512`/`ES256`）都应有一条使用真实密钥对的正向用例，新增算法时同步补充。
 5. **让契约测试覆盖 `postinstall` 之类的环境前置。** 建议在 CI 增加一个从干净容器执行 `pnpm install && pnpm test` 的作业，避免再次出现「本地绿、全新克隆红」的偏差。
 

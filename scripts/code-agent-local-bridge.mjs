@@ -7,8 +7,8 @@
  * skills, then invoking the frozen deterministic engine once per submission.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,9 +23,13 @@ if (!['1.0', '1.1'].includes(manifest.schemaVersion)) throw new Error('不支持
 // their contents to the agent context; this deterministic adapter only checks
 // that the frozen assets are present and readable.
 readFileSync(manifest.agent.instructionPath, 'utf8');
-for (const skillPath of manifest.agent.skillPaths) readFileSync(join(skillPath, 'SKILL.md'), 'utf8');
+for (const skillPath of manifest.agent.skillPaths) {
+  const skillFile = statSync(skillPath).isDirectory() ? join(skillPath, 'SKILL.md') : skillPath;
+  if (basename(skillFile) !== 'SKILL.md') throw new Error(`Skill 路径必须指向目录或 SKILL.md：${skillPath}`);
+  readFileSync(skillFile, 'utf8');
+}
 
-const python = process.env.PYTHON ?? (existsSync(join(root, '.venv', 'Scripts', 'python.exe')) ? join(root, '.venv', 'Scripts', 'python.exe') : 'python');
+const python = process.env.AI_TRAINING_ENGINE_PYTHON ?? process.env.PYTHON ?? (existsSync(join(root, '.venv', 'Scripts', 'python.exe')) ? join(root, '.venv', 'Scripts', 'python.exe') : 'python');
 const launcher = join(root, 'sandbox', 'launch.py');
 const results = [];
 const failures = [];

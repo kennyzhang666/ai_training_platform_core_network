@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { PlatformStore } from '../src/store';
+import { assertEventSubmissionWindow, PlatformStore } from '../src/store';
 
 const uploadSnapshot = {
   sourceType: 'UPLOAD' as const,
@@ -18,11 +18,56 @@ test('database startup can opt out of local demo fixtures', () => {
   assert.deepEqual(store.exportState().events, []);
 });
 
+test('an explicitly configured SSO employee bootstraps the first global administrator', () => {
+  const previous = process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO;
+  process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO = 'bootstrap-admin';
+  try {
+    const store = new PlatformStore({ dataFile: ':memory:', seed: false });
+    const learner = store.syncSsoIdentity({ employeeNo: 'first-learner', name: '首位普通员工', department: '未配置部门' });
+    assert.deepEqual(learner.user.roles, ['learner']);
+
+    const administrator = store.syncSsoIdentity({ employeeNo: 'bootstrap-admin', name: '初始管理员', department: '未配置部门' });
+    assert.deepEqual(administrator.user.roles, ['global_admin']);
+    assert.deepEqual(administrator.user.roleBindings, [{ role: 'global_admin', scopeOrgPath: '/' }]);
+    assert.ok(store.exportState().audits.some((audit) => audit.actorId === 'bootstrap-admin' && audit.action === 'sso.user-provision'));
+
+    const later = store.syncSsoIdentity({ employeeNo: 'later-learner', name: '后续员工', department: '未配置部门' });
+    assert.deepEqual(later.user.roles, ['learner']);
+  } finally {
+    if (previous === undefined) delete process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO;
+    else process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO = previous;
+  }
+});
+
+test('bootstrap configuration never grants a second global administrator', () => {
+  const previous = process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO;
+  process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO = 'configured-second-admin';
+  try {
+    const store = new PlatformStore(':memory:');
+    const result = store.syncSsoIdentity({ employeeNo: 'configured-second-admin', name: '已存在管理员后的员工', department: 'AI 工程团队' });
+    assert.deepEqual(result.user.roles, ['learner']);
+  } finally {
+    if (previous === undefined) delete process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO;
+    else process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO = previous;
+  }
+});
+
+test('the in-memory demo event stays usable regardless of the wall clock', () => {
+  const store = new PlatformStore(':memory:');
+  const event = store.getEvent('event-local', 'w00123');
+  assert.doesNotThrow(() => assertEventSubmissionWindow(event));
+  assert.ok(Date.parse(event.startsAt ?? '') <= Date.parse(uploadSnapshot.submittedAt));
+  assert.ok(Date.parse(event.endsAt ?? '') >= Date.parse(uploadSnapshot.submittedAt));
+});
+
 test('file startup compacts the legacy local fixture to the supported demo roster', () => {
   const dataFile = join(__dirname, '..', 'tmp', `store-minimal-${process.pid}-${Date.now()}.json`);
   mkdirSync(dirname(dataFile), { recursive: true });
   try {
     const legacy = new PlatformStore(':memory:').exportState();
+    const legacyEvent = legacy.events.find((event) => event.id === 'event-local')!;
+    legacyEvent.startsAt = '2026-08-01T09:00:00+08:00';
+    legacyEvent.endsAt = '2026-08-08T18:00:00+08:00';
     legacy.participants = [
       { eventId: 'event-local', subjectId: 'w00124', orgPathSnapshot: '/1/12/125/', importedAt: '2026-08-01T00:00:00.000Z' },
       { eventId: 'event-local', subjectId: 'w00127', orgPathSnapshot: '/1/12/125/', importedAt: '2026-08-01T00:00:00.000Z' },
@@ -51,7 +96,32 @@ test('file startup compacts the legacy local fixture to the supported demo roste
       departmentIds: ['org-125'],
       mentorIds: ['w00133'],
     });
+    assert.ok(Date.parse(state.events[0].startsAt ?? '') < Date.now());
+    assert.ok(Date.parse(state.events[0].endsAt ?? '') > Date.now() + 300 * 24 * 60 * 60 * 1000);
     assert.deepEqual(state.participants.map((participant) => participant.subjectId).sort(), ['w00124', 'w00126']);
+  } finally {
+    rmSync(dataFile, { force: true });
+  }
+});
+
+test('legacy demo dates remain immutable once the event has a submission', () => {
+  const dataFile = join(__dirname, '..', 'tmp', `store-legacy-window-${process.pid}-${Date.now()}.json`);
+  mkdirSync(dirname(dataFile), { recursive: true });
+  try {
+    const original = new PlatformStore(':memory:');
+    original.createSubmission('event-local', 'w00124', uploadSnapshot);
+    const state = original.exportState();
+    const event = state.events.find((item) => item.id === 'event-local')!;
+    event.startsAt = '2026-08-01T09:00:00+08:00';
+    event.endsAt = '2026-08-08T18:00:00+08:00';
+    delete event.deliveryConfig;
+    writeFileSync(dataFile, JSON.stringify(state), 'utf8');
+
+    const restarted = new PlatformStore({ dataFile, seedProfile: 'MINIMAL' });
+    const preserved = restarted.getEvent('event-local', 'w00123');
+    assert.equal(preserved.startsAt, '2026-08-01T09:00:00+08:00');
+    assert.equal(preserved.endsAt, '2026-08-08T18:00:00+08:00');
+    assert.deepEqual(preserved.deliveryConfig, { allowedFormats: ['zip'], maxBytes: 50 * 1024 * 1024 });
   } finally {
     rmSync(dataFile, { force: true });
   }
@@ -319,6 +389,24 @@ test('SSO first login provisions a learner and keeps an unmatched department for
   assert.equal(configured.orgPath, '/1/12/125/');
   assert.equal(configured.departmentHint, undefined);
   assert.deepEqual(configured.roles, ['learner', 'mentor']);
+});
+
+test('SSO department matching ignores generic organization labels', () => {
+  const store = new PlatformStore(':memory:');
+  const result = store.syncSsoIdentity({ employeeNo: 'w01002', name: '标签不匹配员工', department: '团队' });
+  assert.equal(result.departmentMatched, false);
+  assert.equal(result.user.orgUnitId, '');
+  assert.equal(result.user.orgPath, '');
+  assert.equal(result.user.departmentHint, '团队');
+});
+
+test('SSO department matching never assigns an employee to a root organization', () => {
+  const store = new PlatformStore(':memory:');
+  store.createOrgUnit({ id: 'company-root', name: '新公司', label: '集团' }, 'w00123');
+  const result = store.syncSsoIdentity({ employeeNo: 'w01003', name: '根组织不匹配员工', department: '新公司' });
+  assert.equal(result.departmentMatched, false);
+  assert.equal(result.user.orgUnitId, '');
+  assert.equal(result.user.departmentHint, '新公司');
 });
 
 test('a submission source must match the event configuration', () => {

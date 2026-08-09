@@ -23,7 +23,7 @@ python tools/engine_dev.py validate tmp/minimal-score-engine.zip
 
 ## 开发自己的引擎
 
-复制 `examples/minimal-engine`，修改 `engine.json`、`instruction.md`、Skills 和 Python 入口。入口按平台约定接收：
+复制 `examples/minimal-engine`，修改 `engine.json`、`instruction.md`、Skills 和 Python 入口。`agent.instruction` 指向指令文件，`agent.skills` 中每一项指向一个包含 `SKILL.md` 的目录；如有第三方 Python 依赖，在 `runtime.requirements` 中声明包内 requirements 文件。入口按平台约定接收：
 
 ```text
 python -I judge.py --input <invocation.json> --output <result.json>

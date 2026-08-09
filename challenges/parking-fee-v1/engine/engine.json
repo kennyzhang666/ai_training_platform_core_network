@@ -1,12 +1,17 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "id": "parking-fee-packaged",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "停车场计费的打包评测引擎：四档隐藏测试 + 提交契约校验 + 代码度量，自带判据，不依赖平台内置 grader。",
   "runtime": {
     "type": "python",
     "entrypoint": "judge.py",
+    "requirements": "requirements.txt",
     "pythonVersion": ">=3.11"
+  },
+  "agent": {
+    "instruction": "instruction.md",
+    "skills": ["skills/evaluation"]
   },
   "limits": {
     "wallClockSeconds": 120,

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
+import { basename, delimiter, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import Ajv2020, { ValidateFunction } from 'ajv/dist/2020';
@@ -14,6 +14,20 @@ const MAX_PACKAGE_BYTES = Number(process.env.ENGINE_PACKAGE_MAX_BYTES ?? 32 * 10
 const MAX_PACKAGE_FILES = Number(process.env.ENGINE_PACKAGE_MAX_FILES ?? 5000);
 const MAX_PACKAGE_EXPANDED_BYTES = Number(process.env.ENGINE_PACKAGE_MAX_EXPANDED_BYTES ?? 128 * 1024 * 1024);
 const DEPENDENCY_INSTALL_TIMEOUT_MS = Number(process.env.ENGINE_DEPENDENCY_TIMEOUT_MS ?? 300_000);
+
+function engineFindLinks(): string[] {
+  const json = process.env.ENGINE_PIP_FIND_LINKS_JSON?.trim();
+  if (json) {
+    try {
+      const parsed: unknown = JSON.parse(json);
+      if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string' || !value.trim())) throw new Error();
+      return parsed.map((value) => value.trim());
+    } catch {
+      throw new BadRequestException({ code: 'ENGINE_PIP_FIND_LINKS_INVALID', message: 'ENGINE_PIP_FIND_LINKS_JSON 必须是非空字符串数组' });
+    }
+  }
+  return (process.env.ENGINE_PIP_FIND_LINKS ?? '').split(delimiter).map((value) => value.trim()).filter(Boolean);
+}
 
 /**
  * Safe unpack: reject absolute paths, `..`, symlinks, too many entries and zip
@@ -165,6 +179,22 @@ export class EnginePackageStore {
         throw new BadRequestException({ code: 'ENGINE_PACKAGE_PATH_MISSING', message: `引擎包中不存在 ${label} 指向的 ${value}` });
       }
     }
+    if (typed.agent) {
+      const instruction = this.resolveInsidePackage(packageHash, typed.agent.instruction);
+      if (!statSync(instruction).isFile()) {
+        throw new BadRequestException({ code: 'ENGINE_PACKAGE_AGENT_INSTRUCTION_INVALID', message: 'agent.instruction 必须指向文件' });
+      }
+      for (const configuredPath of typed.agent.skills) {
+        const target = this.resolveInsidePackage(packageHash, configuredPath);
+        const skillFile = statSync(target).isDirectory() ? join(target, 'SKILL.md') : target;
+        if (basename(skillFile) !== 'SKILL.md' || !existsSync(skillFile) || !statSync(skillFile).isFile()) {
+          throw new BadRequestException({
+            code: 'ENGINE_PACKAGE_SKILL_INVALID',
+            message: `agent.skills 必须指向包含 SKILL.md 的目录：${configuredPath}`,
+          });
+        }
+      }
+    }
     return typed;
   }
 
@@ -197,6 +227,7 @@ export class EnginePackageStore {
         await execFileAsync(this.python(), ['-m', 'venv', environmentRoot], { cwd: this.projectRoot(), timeout: DEPENDENCY_INSTALL_TIMEOUT_MS, windowsHide: true });
         const install = ['-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', requirements];
         if (process.env.ENGINE_PIP_INDEX_URL) install.push('--index-url', process.env.ENGINE_PIP_INDEX_URL);
+        for (const source of engineFindLinks()) install.push('--find-links', source);
         if (process.env.ENGINE_PIP_OFFLINE === 'true') install.push('--no-index');
         await execFileAsync(interpreter, install, { cwd: this.projectRoot(), timeout: DEPENDENCY_INSTALL_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, windowsHide: true });
       } catch (error) {

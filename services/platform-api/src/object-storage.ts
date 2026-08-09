@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { ArtifactEntry, ArtifactStore, inspectArchiveFile, snapshotHashFile, StoredArtifact, validateArchiveFile } from './artifact-store';
+import { isSingleNodeProduction } from './deployment-profile';
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client, CopyObjectCommand } from '@aws-sdk/client-s3';
 
 export const OBJECT_STORAGE = Symbol('OBJECT_STORAGE');
@@ -11,6 +12,7 @@ export const OBJECT_STORAGE = Symbol('OBJECT_STORAGE');
 export interface UploadSessionRequest {
   actorId: string;
   eventId: string;
+  subjectId?: string;
   fileName: string;
   declaredSize: number;
   maxBytes: number;
@@ -23,6 +25,7 @@ export interface UploadSession {
   objectKey: string;
   actorId: string;
   eventId: string;
+  subjectId: string;
   fileName: string;
   declaredSize: number;
   expiresAt: string;
@@ -53,6 +56,7 @@ export interface PersistedUploadSession {
   objectKey: string;
   actorId: string;
   eventId: string;
+  subjectId: string;
   fileName: string;
   declaredSize: number;
   expiresAt: string;
@@ -78,6 +82,7 @@ export interface ObjectStorage {
   createUpload(request: UploadSessionRequest): Promise<UploadSession>;
   put(uploadId: string, uploadToken: string, bytes: Uint8Array, actorId: string): Promise<UploadedObjectMetadata>;
   confirm(uploadId: string, uploadToken: string, actorId: string, expected?: UploadedObjectMetadata): Promise<StoredArtifact>;
+  completeForSubmission(uploadId: string, uploadToken: string, actorId: string, eventId: string, subjectId: string): Promise<{ artifact: StoredArtifact; fileName: string }>;
   read(uri: string): Promise<Buffer>;
   materialize(uri: string, fileName?: string): Promise<MaterializedArtifact>;
   contentHash(uri: string): Promise<string>;
@@ -105,7 +110,7 @@ function tokenDigest(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-function compareToken(session: SessionState, token: string): boolean {
+function compareToken(session: Pick<SessionState, 'tokenHash'>, token: string): boolean {
   const received = Buffer.from(tokenDigest(token), 'hex');
   const expected = Buffer.from(session.tokenHash, 'hex');
   return received.length === expected.length && timingSafeEqual(received, expected);
@@ -122,7 +127,7 @@ export class LocalObjectStorage implements ObjectStorage {
   private readonly sessions = new Map<string, SessionState>();
   private readonly stagingRoot = resolve(process.env.ARTIFACT_UPLOAD_TMP_ROOT ?? join(process.cwd(), 'tmp', 'artifact-uploads'));
 
-  constructor(private readonly artifacts: ArtifactStore) {}
+  constructor(private readonly artifacts: ArtifactStore, private readonly persistence?: UploadSessionPersistence) {}
 
   async createUpload(request: UploadSessionRequest): Promise<UploadSession> {
     if (!request.actorId?.trim() || !request.eventId?.trim()) throw new BadRequestException('actorId and eventId are required');
@@ -138,39 +143,82 @@ export class LocalObjectStorage implements ObjectStorage {
       objectKey: `uploads/${uploadId}/${safeFileName(request.fileName)}`,
       actorId: request.actorId.trim(),
       eventId: request.eventId.trim(),
+      subjectId: request.subjectId?.trim() || request.actorId.trim(),
       fileName: safeFileName(request.fileName),
       declaredSize: request.declaredSize,
       expiresAt,
       stagingPath: join(this.stagingRoot, `${uploadId}.part`),
     };
     await mkdir(this.stagingRoot, { recursive: true });
-    this.sessions.set(uploadId, session);
-    return { uploadId, uploadToken, objectKey: session.objectKey, actorId: session.actorId, eventId: session.eventId, fileName: session.fileName, declaredSize: session.declaredSize, expiresAt };
+    if (this.persistence) {
+      await this.persistence.create({
+        uploadId: session.uploadId,
+        tokenHash: session.tokenHash,
+        objectKey: session.objectKey,
+        actorId: session.actorId,
+        eventId: session.eventId,
+        subjectId: session.subjectId,
+        fileName: session.fileName,
+        declaredSize: session.declaredSize,
+        expiresAt: session.expiresAt,
+        status: 'CREATED',
+      });
+    } else {
+      this.sessions.set(uploadId, session);
+    }
+    return { uploadId, uploadToken, objectKey: session.objectKey, actorId: session.actorId, eventId: session.eventId, subjectId: session.subjectId, fileName: session.fileName, declaredSize: session.declaredSize, expiresAt };
   }
 
-  private sessionFor(uploadId: string, uploadToken: string, actorId: string): SessionState {
-    const session = this.sessions.get(uploadId);
+  private async sessionFor(uploadId: string, uploadToken: string, actorId: string): Promise<SessionState> {
+    const persisted = this.persistence ? await this.persistence.get(uploadId) : undefined;
+    const session: SessionState | undefined = persisted
+      ? { ...persisted, uploadToken: '', stagingPath: join(this.stagingRoot, `${uploadId}.part`) }
+      : this.sessions.get(uploadId);
     if (!session || !compareToken(session, uploadToken) || session.actorId !== actorId) throw new BadRequestException('upload handle is invalid');
     if (Date.parse(session.expiresAt) <= Date.now()) throw new BadRequestException('upload handle has expired');
     return session;
   }
 
   async put(uploadId: string, uploadToken: string, bytes: Uint8Array, actorId: string): Promise<UploadedObjectMetadata> {
-    const session = this.sessionFor(uploadId, uploadToken, actorId);
+    const session = await this.sessionFor(uploadId, uploadToken, actorId);
     if (session.completed) return { size: session.completed.size, sha256: session.completed.sha256 };
     if (session.uploaded) throw new BadRequestException('upload has already been received');
     if (!bytes.length || bytes.length !== session.declaredSize) throw new BadRequestException('uploaded size does not match the declared size');
+    if (this.persistence) {
+      const claim = await this.persistence.claim(uploadId);
+      if (claim === 'MISSING') throw new BadRequestException('upload handle is invalid');
+      if (claim === 'BUSY') throw new ConflictException('upload is currently being written');
+      if (claim === 'DONE') {
+        const current = await this.persistence.get(uploadId);
+        if (current?.completed) return { size: current.completed.size, sha256: current.completed.sha256 };
+        if (current?.uploaded) return current.uploaded;
+        throw new ConflictException('upload has already been received');
+      }
+    }
     const content = Buffer.from(bytes);
     const metadata = { size: content.length, sha256: createHash('sha256').update(content).digest('hex') };
-    await writeFile(session.stagingPath, content, { flag: 'wx' });
-    session.uploaded = metadata;
-    return metadata;
+    try {
+      await writeFile(session.stagingPath, content, { flag: 'wx' });
+      if (this.persistence) await this.persistence.markUploaded(uploadId, metadata);
+      else session.uploaded = metadata;
+      return metadata;
+    } catch (error) {
+      if (this.persistence) {
+        const current = await this.persistence.get(uploadId).catch(() => undefined);
+        if (!current?.uploaded && !current?.completed) {
+          await rm(session.stagingPath, { force: true }).catch(() => undefined);
+          await this.persistence.release(uploadId).catch(() => undefined);
+        }
+      }
+      throw error;
+    }
   }
 
   async confirm(uploadId: string, uploadToken: string, actorId: string, expected?: UploadedObjectMetadata): Promise<StoredArtifact> {
-    const session = this.sessionFor(uploadId, uploadToken, actorId);
+    const session = await this.sessionFor(uploadId, uploadToken, actorId);
     if (session.completed) {
       if (expected && (expected.size !== session.completed.size || expected.sha256 !== session.completed.sha256)) throw new BadRequestException('confirmed object metadata does not match');
+      await rm(session.stagingPath, { force: true }).catch(() => undefined);
       return session.completed;
     }
     if (!session.uploaded) throw new BadRequestException('upload has not been received');
@@ -179,9 +227,20 @@ export class LocalObjectStorage implements ObjectStorage {
     const actual = { size: content.length, sha256: createHash('sha256').update(content).digest('hex') };
     if (actual.size !== session.uploaded.size || actual.sha256 !== session.uploaded.sha256) throw new BadRequestException('staged object was modified');
     const stored = await this.artifacts.saveBuffer(content, session.fileName);
+    if (this.persistence) {
+      const persisted = await this.persistence.markCompleted(uploadId, stored);
+      await rm(session.stagingPath, { force: true });
+      return persisted.completed ?? stored;
+    }
     session.completed = stored;
     await rm(session.stagingPath, { force: true });
     return stored;
+  }
+
+  async completeForSubmission(uploadId: string, uploadToken: string, actorId: string, eventId: string, subjectId: string): Promise<{ artifact: StoredArtifact; fileName: string }> {
+    const session = await this.sessionFor(uploadId, uploadToken, actorId);
+    if (session.eventId !== eventId || session.subjectId !== subjectId) throw new BadRequestException('upload handle is invalid for this submission');
+    return { artifact: await this.confirm(uploadId, uploadToken, actorId), fileName: session.fileName };
   }
 
   read(uri: string): Promise<Buffer> { return this.artifacts.readBuffer(uri); }
@@ -194,6 +253,15 @@ export class LocalObjectStorage implements ObjectStorage {
   inspectArchive(uri: string): Promise<ArtifactEntry[]> { return this.artifacts.inspectArchive(uri); }
 
   async discardExpired(now = new Date()): Promise<number> {
+    if (this.persistence) {
+      let removed = 0;
+      for (const session of await this.persistence.listExpired(now)) {
+        await rm(join(this.stagingRoot, `${session.uploadId}.part`), { force: true });
+        await this.persistence.remove(session.uploadId);
+        removed += 1;
+      }
+      return removed;
+    }
     let removed = 0;
     for (const [uploadId, session] of this.sessions) {
       if (session.completed || Date.parse(session.expiresAt) > now.getTime()) continue;
@@ -253,13 +321,13 @@ export class S3ObjectStorage implements ObjectStorage {
     const fileName = safeFileName(request.fileName);
     const expiresAt = new Date(Date.now() + Math.min(Math.max(request.expiresInSeconds ?? 900, 30), 3_600) * 1000).toISOString();
     const stagingKey = `${this.prefix}/uploads/${uploadId}/${fileName}.part`;
-    const session: S3Session = { uploadId, objectKey: stagingKey, actorId: request.actorId.trim(), eventId: request.eventId.trim(), fileName, declaredSize: request.declaredSize, expiresAt, tokenHash: tokenDigest(uploadToken), stagingKey, status: 'CREATED' };
+    const session: S3Session = { uploadId, objectKey: stagingKey, actorId: request.actorId.trim(), eventId: request.eventId.trim(), subjectId: request.subjectId?.trim() || request.actorId.trim(), fileName, declaredSize: request.declaredSize, expiresAt, tokenHash: tokenDigest(uploadToken), stagingKey, status: 'CREATED' };
     if (this.persistence) {
       await this.persistence.create(session);
     } else {
       this.sessions.set(uploadId, session);
     }
-    return { uploadId, uploadToken, objectKey: stagingKey, actorId: request.actorId.trim(), eventId: request.eventId.trim(), fileName, declaredSize: request.declaredSize, expiresAt };
+    return { uploadId, uploadToken, objectKey: stagingKey, actorId: session.actorId, eventId: session.eventId, subjectId: session.subjectId, fileName, declaredSize: request.declaredSize, expiresAt };
   }
 
   private async sessionFor(uploadId: string, uploadToken: string, actorId: string): Promise<S3Session> {
@@ -357,6 +425,12 @@ export class S3ObjectStorage implements ObjectStorage {
     }
   }
 
+  async completeForSubmission(uploadId: string, uploadToken: string, actorId: string, eventId: string, subjectId: string): Promise<{ artifact: StoredArtifact; fileName: string }> {
+    const session = await this.sessionFor(uploadId, uploadToken, actorId);
+    if (session.eventId !== eventId || session.subjectId !== subjectId) throw new BadRequestException('upload handle is invalid for this submission');
+    return { artifact: await this.confirm(uploadId, uploadToken, actorId), fileName: session.fileName };
+  }
+
   async read(uri: string): Promise<Buffer> {
     const match = /^s3:\/\/([^/]+)\/(.+)$/.exec(uri);
     if (!match || match[1] !== this.options.bucket) throw new BadRequestException('artifactUri is not a permitted object URI');
@@ -446,13 +520,14 @@ function requiredEnv(name: string): string {
 export function createObjectStorage(artifacts: ArtifactStore, uploadSessions?: UploadSessionPersistence): ObjectStorage {
   const configured = process.env.OBJECT_STORAGE_MODE?.trim().toLowerCase();
   const mode = configured || (process.env.NODE_ENV === 'production' ? 's3' : 'local');
+  const durableSessions = uploadSessions?.enabled === false ? undefined : uploadSessions;
   if (mode === 'local') {
-    if (process.env.NODE_ENV === 'production') throw new Error('local object storage is not allowed in production');
-    return new LocalObjectStorage(artifacts);
+    if (process.env.NODE_ENV === 'production' && !isSingleNodeProduction()) throw new Error('local object storage is not allowed in production');
+    if (isSingleNodeProduction() && !durableSessions) throw new Error('durable upload-session persistence is required for local object storage in single-node production');
+    return new LocalObjectStorage(artifacts, durableSessions);
   }
   if (mode !== 's3') throw new Error(`unsupported OBJECT_STORAGE_MODE: ${mode}`);
   const bucket = requiredEnv('OBJECT_STORAGE_BUCKET');
-  const durableSessions = uploadSessions?.enabled === false ? undefined : uploadSessions;
   if (process.env.NODE_ENV === 'production' && !durableSessions) throw new Error('durable upload-session persistence is required for S3 object storage in production');
   const region = process.env.OBJECT_STORAGE_REGION?.trim() || 'us-east-1';
   const endpoint = process.env.OBJECT_STORAGE_ENDPOINT?.trim() || undefined;

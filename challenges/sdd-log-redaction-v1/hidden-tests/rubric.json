@@ -1,0 +1,165 @@
+{
+  "schemaVersion": "1.0",
+  "criteria": [
+    {
+      "key": "V1", "dim": "verify", "name": "主流程与验收验证", "max": 8,
+      "rule": "核心处理流程、验收标准、自动测试和复现命令形成闭环。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "all", "path": "SPEC.md", "terms": ["AC-01", "AC-02"], "description": "主流程验收标准已编号", "fix": "补充 JSON 与普通文本主流程的验收标准。" },
+        { "kind": "all", "path": "tests/test_log_redactor.py", "terms": ["test_json", "test_plain_text"], "description": "主流程自动测试齐全", "fix": "为 JSON 和普通文本各增加一个可执行测试。" },
+        { "kind": "unit_tests", "description": "交付件单元测试全部通过", "fix": "修复失败测试并记录复现命令。" },
+        { "kind": "all", "path": "README.md", "terms": ["unittest", "redact_line"], "description": "运行与验证入口可复现", "fix": "在 README 中给出运行与测试命令。" }
+      ]
+    },
+    {
+      "key": "V2", "dim": "verify", "name": "异常与边界验证", "max": 12,
+      "rule": "边界、畸形输入、嵌套结构和 Unicode 均有规格与测试证据。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "all", "path": "SPEC.md", "terms": ["嵌套", "Unicode", "畸形"], "description": "关键边界已写入规格", "fix": "补充嵌套对象、Unicode 和畸形日志处理规则。" },
+        { "kind": "all", "path": "tests/test_log_redactor.py", "terms": ["test_nested", "test_unicode", "test_malformed"], "description": "关键边界均有测试", "fix": "为嵌套、Unicode 和畸形输入增加测试。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["空值", "超长", "多行"], "description": "空值、超长和多行边界明确", "fix": "定义空值、超长行和多行日志的处理策略。" },
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["JSONDecodeError", "ensure_ascii=False"], "description": "实现包含安全降级和 Unicode 保真", "fix": "显式处理 JSON 解析失败并保留 Unicode。" }
+      ]
+    },
+    {
+      "key": "V3", "dim": "verify", "name": "规则澄清与事实核验", "max": 12,
+      "rule": "歧义、规则优先级和敏感数据分类经过明确决策与验证。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "all", "path": "SPEC.md", "terms": ["歧义", "假设", "决策"], "description": "需求歧义与决策有记录", "fix": "记录未明确需求、采用的假设及最终决策。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["规则优先级", "冲突"], "description": "规则冲突处理明确", "fix": "定义多条规则同时命中时的优先级。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["手机号", "身份证", "邮箱", "IP", "令牌"], "description": "敏感数据分类完整", "fix": "列出本题要求的五类敏感数据及处理方式。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["核验", "证据", "结论"], "description": "关键事实有核验记录", "fix": "记录核验对象、证据和结论。" }
+      ]
+    },
+    {
+      "key": "V4", "dim": "verify", "name": "变更回归验证", "max": 8,
+      "rule": "规则变化能定位影响范围并完成回归。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "all", "path": "SPEC.md", "terms": ["变更影响", "影响范围"], "description": "规格定义变更影响分析", "fix": "增加变更影响分析，列出受影响接口、规则和测试。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["回归清单", "全量测试"], "description": "规格包含回归清单", "fix": "补充规则变更后的全量回归清单。" },
+        { "kind": "any", "path": "tests/test_log_redactor.py", "terms": ["test_rule_change", "test_custom_rule"], "description": "测试覆盖规则变化", "fix": "增加一条新增或调整脱敏规则后的回归测试。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["变更回归", "复测通过"], "description": "协作记录包含变更复测结果", "fix": "记录变更定位、复测命令与最终结果。" }
+      ]
+    },
+    {
+      "key": "S1", "dim": "spec", "name": "目标、边界与需求澄清", "max": 10,
+      "rule": "规格清楚定义目标、非目标、约束、假设和需求编号。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "headings", "path": "SPEC.md", "terms": ["目标与非目标", "范围与约束"], "description": "目标、非目标与范围可定位", "fix": "补充目标、非目标、范围和约束章节。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["REQ-01", "REQ-02", "REQ-03"], "description": "核心需求使用稳定编号", "fix": "为核心需求分配稳定编号。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["关键假设", "决策记录"], "description": "假设与决策单独记录", "fix": "增加关键假设和决策记录。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["隐私", "运维", "审计"], "description": "利益相关方与合规目标明确", "fix": "说明运维、隐私和审计三方诉求。" }
+      ]
+    },
+    {
+      "key": "S2", "dim": "spec", "name": "验收用例与追踪设计", "max": 8,
+      "rule": "需求、设计、验收标准与测试名称可双向追踪。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "all", "path": "SPEC.md", "terms": ["追踪矩阵", "需求", "设计", "测试"], "description": "规格包含追踪矩阵", "fix": "增加需求到设计和测试的追踪矩阵。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["AC-01", "AC-06"], "description": "验收标准覆盖主流程和安全边界", "fix": "将验收标准编号并覆盖安全失败路径。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["输入", "期望输出", "判定"], "description": "验收用例具备明确判定", "fix": "为验收用例补充输入、期望输出和判定条件。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["test_json", "test_malformed"], "description": "规格引用真实测试名称", "fix": "在追踪矩阵中引用对应测试名称。" }
+      ]
+    },
+    {
+      "key": "S3", "dim": "spec", "name": "异常、边界与失败策略", "max": 4,
+      "rule": "异常输入、资源边界和脱敏失败均采用显式安全策略。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "all", "path": "SPEC.md", "terms": ["失败策略", "失败关闭"], "description": "失败策略采用安全默认值", "fix": "明确无法可靠脱敏时的失败关闭策略。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["畸形 JSON", "普通文本"], "description": "畸形结构有确定降级路径", "fix": "定义畸形 JSON 的安全降级行为。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["最大行长", "资源上限"], "description": "资源边界明确", "fix": "声明最大行长、内存或处理时限。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["不得记录原文", "脱敏后摘要"], "description": "诊断信息不会泄露原文", "fix": "限制错误日志，只记录脱敏摘要和稳定错误码。" }
+      ]
+    },
+    {
+      "key": "S4", "dim": "spec", "name": "变更影响与回滚设计", "max": 3,
+      "rule": "规则升级的兼容性、影响范围、回归入口和回滚方式明确。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "headings", "path": "SPEC.md", "terms": ["变更与回滚"], "description": "存在独立变更与回滚章节", "fix": "增加变更与回滚章节。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["规则版本", "向后兼容"], "description": "规则版本与兼容策略明确", "fix": "定义规则版本和向后兼容口径。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["影响范围", "组件"], "description": "受影响组件可定位", "fix": "列出规则变更涉及的解析、匹配、输出和测试组件。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["回滚步骤", "回滚验证"], "description": "回滚步骤及验证明确", "fix": "补充回滚到上一规则版本的步骤和验证方法。" }
+      ]
+    },
+    {
+      "key": "C1", "dim": "code", "name": "规则常量与配置管理", "max": 6,
+      "rule": "敏感规则使用有意义的常量和可替换配置表达。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["DEFAULT_RULES", "Rule"], "description": "规则以命名常量和结构表达", "fix": "用命名常量和规则结构替代散落字面量。" },
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["MOBILE", "IDENTITY", "EMAIL", "IP", "TOKEN"], "description": "业务规则具有可读标识", "fix": "为每类敏感数据使用可读规则标识。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["规则表", "DEFAULT_RULES"], "description": "规格与实现规则映射一致", "fix": "在规格中建立规则表与实现常量的映射。" },
+        { "kind": "ast", "path": "src/log_redactor.py", "test": "parse", "description": "源码可由 Python AST 解析", "fix": "修复 Python 语法错误。" }
+      ]
+    },
+    {
+      "key": "C2", "dim": "code", "name": "异常与安全边界处理", "max": 5,
+      "rule": "异常、无效输入和失败路径均显式处理，且不会回退到原文泄露。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["try:", "except json.JSONDecodeError"], "description": "解析异常显式处理", "fix": "显式捕获 JSON 解析异常。" },
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["TypeError", "ValueError"], "description": "无效参数被拒绝", "fix": "对无效输入和规则配置抛出稳定异常。" },
+        { "kind": "not_any", "path": "src/log_redactor.py", "terms": ["print(record)", "print(line)"], "description": "实现不打印原始日志", "fix": "移除原始日志输出，只记录安全摘要。" },
+        { "kind": "any", "path": "tests/test_log_redactor.py", "terms": ["assertRaises", "test_invalid"], "description": "失败路径有自动测试", "fix": "增加无效输入或配置的失败测试。" }
+      ]
+    },
+    {
+      "key": "C3", "dim": "code", "name": "类型与数据保真", "max": 4,
+      "rule": "结构化日志保持类型、Unicode 和非敏感字段语义。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["Mapping", "Sequence", "str |"], "description": "公开接口具备类型标注", "fix": "为规则、输入和输出补充类型标注。" },
+        { "kind": "all", "path": "tests/test_log_redactor.py", "terms": ["[\"status\"], 200", "[\"ok\"], True"], "description": "非字符串字段类型保持不变", "fix": "增加数值和布尔字段保真测试。" },
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["ensure_ascii=False", "sort_keys=True"], "description": "Unicode 与确定性输出明确", "fix": "使用 Unicode 保真和稳定键顺序输出。" },
+        { "kind": "all", "path": "tests/test_log_redactor.py", "terms": ["test_idempotent", "test_unicode"], "description": "幂等与 Unicode 由测试验证", "fix": "增加幂等和 Unicode 回归测试。" }
+      ]
+    },
+    {
+      "key": "C4", "dim": "code", "name": "模块化与变更友好设计", "max": 5,
+      "rule": "解析、递归处理、文本脱敏和命令入口职责分离。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["def redact_text", "def redact_record", "def redact_line", "def main"], "description": "核心职责已拆分", "fix": "拆分文本匹配、结构递归、单行处理和命令入口。" },
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["rules: Sequence", "DEFAULT_RULES"], "description": "规则可注入替换", "fix": "允许调用方注入规则集合。" },
+        { "kind": "ast", "path": "src/log_redactor.py", "test": "functions", "description": "函数规模与数量可维护", "fix": "降低单函数复杂度并拆分职责。" },
+        { "kind": "all", "path": "README.md", "terms": ["扩展规则", "自定义规则"], "description": "扩展入口有正式说明", "fix": "说明如何新增或替换脱敏规则。" }
+      ]
+    },
+    {
+      "key": "P1", "dim": "collab", "name": "规格与验收先行", "max": 4,
+      "rule": "AI 协作从目标、约束和验收标准开始，而非直接生成代码。", "path": "AI_WORKLOG.md",
+      "checks": [
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["先写规格", "再实现"], "description": "协作顺序为规格先行", "fix": "记录先明确规格和验收、再实现代码的顺序。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["目标", "约束", "验收标准"], "description": "首次上下文包含关键约束", "fix": "在首次任务中给出目标、约束和验收标准。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["假设", "确认"], "description": "关键假设经过确认", "fix": "列出待确认假设及确认结果。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["SPEC.md", "追踪矩阵"], "description": "协作产物回写规格", "fix": "记录规格和追踪矩阵的更新。" }
+      ]
+    },
+    {
+      "key": "P2", "dim": "collab", "name": "小步迭代与工具编排", "max": 4,
+      "rule": "任务按小步拆分，并在每步后运行明确的验证。", "path": "AI_WORKLOG.md",
+      "checks": [
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["迭代 1", "迭代 2", "迭代 3"], "description": "至少三轮小步迭代", "fix": "按规格、实现、边界回归拆成至少三轮。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["本轮目标", "验证命令", "验证结果"], "description": "每轮都有目标和验证", "fix": "为每轮记录目标、命令和结果。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["失败", "调整"], "description": "记录失败后的调整", "fix": "保留至少一次失败、分析和调整证据。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["unittest", "静态检查"], "description": "代码与测试工具形成流水线", "fix": "记录单元测试和静态检查的调用顺序。" }
+      ]
+    },
+    {
+      "key": "P3", "dim": "collab", "name": "提示词与上下文设计", "max": 4,
+      "rule": "提示词包含角色、上下文、约束、输出格式和自检清单。", "path": "AI_WORKLOG.md",
+      "checks": [
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["角色", "上下文", "约束"], "description": "提示词上下文完整", "fix": "补充角色、业务上下文和硬约束。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["输出格式", "检查清单"], "description": "输出和自检要求明确", "fix": "指定输出格式和提交前检查清单。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["可复用提示词", "边界用例"], "description": "形成可复用提示词模板", "fix": "沉淀一份包含边界用例要求的提示词模板。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["不得泄露", "逐项核对"], "description": "安全与自检约束进入提示词", "fix": "把隐私边界和逐项核对要求写入提示词。" }
+      ]
+    },
+    {
+      "key": "P4", "dim": "collab", "name": "变更定位与复测", "max": 3,
+      "rule": "新需求进入后能定位影响、执行回归并保留回滚依据。", "path": "AI_WORKLOG.md",
+      "checks": [
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["变更请求", "规则优先级"], "description": "真实变更请求有记录", "fix": "记录一项规则变更及其业务原因。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["影响文件", "影响测试"], "description": "影响范围定位到文件和测试", "fix": "列出受影响文件、接口和测试。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["变更回归", "复测通过"], "description": "变更后完成回归", "fix": "执行并记录变更后的全量复测结果。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["回滚依据", "上一规则版本"], "description": "保留可执行回滚依据", "fix": "记录回滚目标、条件和验证入口。" }
+      ]
+    }
+  ]
+}

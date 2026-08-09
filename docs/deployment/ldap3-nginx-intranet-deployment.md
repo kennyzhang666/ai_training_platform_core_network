@@ -41,10 +41,13 @@ LDAP3 网关使用内网 LDAP 域账号校验登录，成功后保存 HttpOnly �
 - Node.js 20 或更高版本；
 - pnpm 11.8.0；
 - Python 3.11 或更高版本；
+- PostgreSQL 16 或更高版本；
 - Nginx；
 - Git；
 - OpenSSL；
-- PostgreSQL 和生产对象存储（平台生产模式要求）。
+- Code Agent（例如 OpenCode）。
+
+本手册使用 `single-node` 生产档：PostgreSQL、平台和 Worker 位于同一台服务器，交付件与评测引擎保存在本地磁盘，不需要 MinIO、Redis、Kafka 或 Docker。该档只允许一个 API 进程，面向单场 50–100 人；需要多 API 实例时再把 PostgreSQL 和交付件切换为独立数据库与对象存储。
 
 检查版本：
 
@@ -52,17 +55,34 @@ LDAP3 网关使用内网 LDAP 域账号校验登录，成功后保存 HttpOnly �
 node --version
 pnpm --version
 python3 --version
+psql --version
 nginx -v
 git --version
 ~~~
 
 如果 Node.js 低于 20，先停止部署并升级 Node.js。
 
+创建只监听本机的数据库和账号，下面的密码必须替换，并与后续 `DATABASE_URL` 一致：
+
+~~~bash
+sudo -u postgres psql
+~~~
+
+~~~sql
+CREATE ROLE ai_training LOGIN PASSWORD '<独立强密码>';
+CREATE DATABASE ai_training OWNER ai_training ENCODING 'UTF8';
+\q
+~~~
+
+不要把 PostgreSQL 的 5432 端口加入办公网入站规则。
+
 创建运行用户和目录：
 
 ~~~bash
 sudo useradd --system --home-dir /opt/ai-training-platform --shell /usr/sbin/nologin ai-platform
 sudo mkdir -p /opt/ai-training-platform/deploy
+sudo mkdir -p /opt/ai-training-platform/data
+sudo mkdir -p /opt/ai-training-platform/backups
 sudo mkdir -p /etc/nginx/tls
 sudo chown -R ai-platform:ai-platform /opt/ai-training-platform
 ~~~
@@ -96,10 +116,11 @@ sudo nano /opt/ai-training-platform/deploy/platform-api.env
 
 写入下面内容，并替换尖括号中的值：
 
-platform-api.env 会被 systemd 和迁移命令读取；含有空格、# 或 $ 的值必须使用单引号包住。数据库密码中的特殊字符必须先按 URL 规则编码后再放入 DATABASE_URL。
+platform-api.env 会被 systemd 读取；含有空格、# 或 $ 的值必须使用单引号包住。
 
 ~~~env
 NODE_ENV=production
+PLATFORM_DEPLOYMENT_PROFILE=single-node
 HOST=127.0.0.1
 PORT=3000
 
@@ -108,23 +129,32 @@ TRUSTED_GATEWAY_HMAC_SECRET=<复制同一条随机密钥到 LDAP3 网关>
 TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
 
 PLATFORM_REPOSITORY=postgres
-DATABASE_URL=postgresql://<数据库用户>:<数据库密码>@<数据库地址>:5432/<数据库名>
+DATABASE_URL='postgresql://ai_training:<数据库密码>@127.0.0.1:5432/ai_training?schema=public&connection_limit=10&pool_timeout=30'
+PERSIST_TRANSACTION_TIMEOUT_MS=120000
+PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO=<首位全局管理员工号>
 
-OBJECT_STORAGE_MODE=s3
-OBJECT_STORAGE_BUCKET=<对象存储桶>
-OBJECT_STORAGE_REGION=<对象存储区域>
-OBJECT_STORAGE_ENDPOINT=<内网对象存储地址>
-OBJECT_STORAGE_ACCESS_KEY_ID=<对象存储访问密钥>
-OBJECT_STORAGE_SECRET_ACCESS_KEY=<对象存储私钥>
-OBJECT_STORAGE_FORCE_PATH_STYLE=true
-OBJECT_STORAGE_PREFIX=platform
+OBJECT_STORAGE_MODE=local
 
 PROJECT_ROOT=/opt/ai-training-platform
-ARTIFACT_ROOT=/opt/ai-training-platform/tmp/artifacts
-ENGINE_PACKAGE_ROOT=/opt/ai-training-platform/tmp/engine-packages
+ARTIFACT_ROOT=/opt/ai-training-platform/data/artifacts
+ENGINE_PACKAGE_ROOT=/opt/ai-training-platform/data/engine-packages
 LOCAL_WORKSPACE_ROOT=/opt/ai-training-platform
 EMBEDDED_EVALUATION_WORKER=false
 CORS_ORIGINS=https://ai-platform.intra.example
+
+PLATFORM_API=http://127.0.0.1:3000/api/v1
+EVALUATION_WORKER_ID=single-node-worker
+EVALUATION_WORKER_EMPLOYEE_NO=<已有全局管理员工号>
+EVALUATION_WORKER_NAME='<该管理员的 SSO 姓名>'
+EVALUATION_WORKER_DEPARTMENT='<该管理员的 SSO 部门>'
+EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET=<与 TRUSTED_GATEWAY_HMAC_SECRET 相同>
+EVALUATION_BATCH_ROOT=/opt/ai-training-platform/data/evaluation-batches
+EVALUATION_LOG_ROOT=/opt/ai-training-platform/data/evaluation-logs
+ENGINE_PIP_OFFLINE=true
+ENGINE_PIP_FIND_LINKS=/opt/ai-training-platform/deploy/wheelhouse
+PIP_CACHE_DIR=/opt/ai-training-platform/data/pip-cache
+CODE_AGENT_COMMAND=opencode
+CODE_AGENT_ARGS_JSON=[]
 ~~~
 
 生成 HMAC 密钥的方法：
@@ -209,14 +239,14 @@ sudo -u ai-platform env VITE_API_BASE="$VITE_API_BASE" VITE_AUTH_LOGIN_PATH="$VI
 /opt/ai-training-platform/services/platform-api/dist/main.js
 ~~~
 
-首次使用 PostgreSQL 时，在启动 API 前执行迁移：
+首次构建后必须使用正式环境变量执行版本化迁移：
 
 ~~~bash
 cd /opt/ai-training-platform
-sudo -u ai-platform bash -lc 'set -a; source /opt/ai-training-platform/deploy/platform-api.env; set +a; cd /opt/ai-training-platform; pnpm --filter @ai-training/platform-api prisma:migrate:deploy'
+sudo -u ai-platform bash -c 'set -a; source deploy/platform-api.env; set +a; pnpm --filter @ai-training/platform-api prisma:migrate:deploy'
 ~~~
 
-如果这条命令报错，不要删除迁移目录；先检查 DATABASE_URL、数据库网络和数据库权限。
+迁移失败时不要启动 API。空数据库首次启动不会注入演示数据，由 `PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO` 对应员工完成首次登录和组织配置。
 
 ## 7. 创建 systemd 服务
 
@@ -226,8 +256,8 @@ sudo -u ai-platform bash -lc 'set -a; source /opt/ai-training-platform/deploy/pl
 sudo tee /etc/systemd/system/ai-platform-api.service > /dev/null <<'EOF'
 [Unit]
 Description=AI Training Platform API
-After=network-online.target
-Wants=network-online.target
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
 
 [Service]
 Type=simple
@@ -272,14 +302,42 @@ WantedBy=multi-user.target
 EOF
 ~~~
 
+### 7.3 评测 Worker
+
+~~~bash
+sudo tee /etc/systemd/system/ai-platform-worker.service > /dev/null <<'EOF'
+[Unit]
+Description=AI Training Platform Evaluation Worker
+After=ai-platform-api.service network-online.target
+Requires=ai-platform-api.service
+
+[Service]
+Type=simple
+User=ai-platform
+Group=ai-platform
+WorkingDirectory=/opt/ai-training-platform
+EnvironmentFile=/opt/ai-training-platform/deploy/platform-api.env
+ExecStart=/usr/bin/node /opt/ai-training-platform/scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --worker single-node-worker --cache /opt/ai-training-platform/data/worker-engines
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+~~~
+
 启动服务：
 
 ~~~bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now ai-platform-api.service
 sudo systemctl enable --now ai-platform-ldap3.service
+sudo systemctl enable --now ai-platform-worker.service
 sudo systemctl status ai-platform-api.service --no-pager
 sudo systemctl status ai-platform-ldap3.service --no-pager
+sudo systemctl status ai-platform-worker.service --no-pager
 ~~~
 
 ## 8. 配置 Nginx
@@ -451,7 +509,8 @@ curl -i http://127.0.0.1:3000/api/v1/me
 | API 返回 trusted gateway identity is expired | 两个服务的系统时间；NTP；TRUSTED_GATEWAY_MAX_AGE_SECONDS |
 | 员工姓名或部门为空 | 检查 AD title 格式是否为 工号,姓名,部门，以及 department、displayName 字段 |
 | Nginx 返回 413 | 增大 client_max_body_size，当前平台示例为 75m |
-| API 服务启动失败 | journalctl -u ai-platform-api -n 100 --no-pager；重点检查数据库和对象存储变量 |
+| API 服务启动失败 | journalctl -u ai-platform-api -n 100 --no-pager；重点检查 PostgreSQL、DATABASE_URL、迁移和身份变量 |
+| 评测一直排队 | systemctl status ai-platform-worker；检查 Code Agent 命令、Worker 管理员身份和 wheelhouse |
 
 查看日志：
 
@@ -465,22 +524,29 @@ sudo tail -f /var/log/nginx/error.log
 
 ## 11. 更新版本
 
-更新前先备份数据库、对象存储和 deploy/*.env：
+更新前先停止服务，并把 PostgreSQL 一致性快照与整个 `data/` 放进同一个备份目录；环境文件含密钥，应由运维单独加密保管：
 
 ~~~bash
 cd /opt/ai-training-platform
-sudo systemctl stop ai-platform-api.service ai-platform-ldap3.service
+sudo systemctl stop ai-platform-worker.service ai-platform-api.service ai-platform-ldap3.service
+stamp=$(date +%Y%m%d-%H%M%S)
+sudo -u ai-platform mkdir -p "/opt/ai-training-platform/backups/$stamp"
+backup_file="/opt/ai-training-platform/backups/$stamp/database.json"
+sudo -u ai-platform env BACKUP_FILE="$backup_file" bash -c 'set -a; source deploy/platform-api.env; set +a; pnpm --filter @ai-training/platform-api backup:postgres -- --output "$BACKUP_FILE"'
+sudo -u ai-platform cp -a data "/opt/ai-training-platform/backups/$stamp/data"
+sudo -u ai-platform tar -C /opt/ai-training-platform/backups -czf "/opt/ai-training-platform/backups/ai-training-$stamp.tar.gz" "$stamp"
 sudo -u ai-platform git pull --ff-only
 sudo -u ai-platform pnpm install --frozen-lockfile
+sudo -u ai-platform bash -c 'set -a; source deploy/platform-api.env; set +a; pnpm --filter @ai-training/platform-api prisma:migrate:deploy'
 sudo -u ai-platform services/ldap3-gateway/.venv/bin/pip install -r services/ldap3-gateway/requirements.txt
 export VITE_API_BASE=/api/v1
 export VITE_AUTH_LOGIN_PATH=/auth/login
 sudo -u ai-platform env VITE_API_BASE="$VITE_API_BASE" VITE_AUTH_LOGIN_PATH="$VITE_AUTH_LOGIN_PATH" pnpm build
-sudo systemctl start ai-platform-api.service ai-platform-ldap3.service
+sudo systemctl start ai-platform-api.service ai-platform-ldap3.service ai-platform-worker.service
 sudo nginx -t && sudo systemctl reload nginx
 ~~~
 
-如果数据库迁移失败，停止后续操作，恢复备份并联系平台开发人员。不要删除 prisma/migrations。
+如果构建或启动失败，停止后续操作并使用同一时间点的 `database.json` 与 `data/` 恢复。不要只恢复数据库或只恢复交付件，也不要手工修改关系表。
 
 ## 12. 部署完成回报模板
 

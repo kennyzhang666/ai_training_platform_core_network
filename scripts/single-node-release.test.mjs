@@ -1,0 +1,141 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  RELEASE_TARGETS,
+  assembleReleaseLayout,
+  createReleaseArchive,
+  verifyReleaseLayout,
+} from './build-single-node-release.mjs';
+
+async function put(root, path, content = path) {
+  const target = join(root, ...path.split('/'));
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, content);
+}
+
+async function fixture(root) {
+  const sourceRoot = join(root, 'source');
+  const apiDeployRoot = join(root, 'api-deploy');
+  const wheelhouseRoot = join(root, 'wheelhouse');
+
+  for (const path of [
+    'apps/web/dist/index.html',
+    'contracts/evaluation-result.schema.json',
+    'docs/evaluation-contract-authoring.md',
+    'executors/drill-grader/engine.json',
+    'sandbox/launch.py',
+    'scripts/evaluation-worker.mjs',
+    'services/ldap3-gateway/ldap3_gateway.py',
+    'services/ldap3-gateway/requirements.txt',
+    'services/ldap3-gateway/static/login.html',
+    'deploy/single-node/manage.ps1',
+    'deploy/single-node/manage.cmd',
+    'deploy/single-node/manage.sh',
+    'deploy/single-node/nginx-http.conf.template',
+    'deploy/release/windows.env.example',
+    'deploy/release/linux.env.example',
+    'deploy/release/README.md',
+  ]) await put(sourceRoot, path);
+  await put(sourceRoot, '.env', 'DATABASE_URL=do-not-package');
+
+  for (const path of [
+    'dist/main.js',
+    'node_modules/@prisma/client/index.js',
+    'node_modules/prisma/build/index.js',
+    'node_modules/runtime-dependency/src/index.js',
+    'prisma/schema.prisma',
+    'prisma/migrations/0016/example.sql',
+    'scripts/backup-postgres.mjs',
+    'scripts/restore-postgres.mjs',
+    'package.json',
+  ]) await put(apiDeployRoot, path, path === 'package.json' ? '{"name":"@ai-training/platform-api"}' : path);
+  await put(apiDeployRoot, `node_modules/runtime-dependency/dist/${'a'.repeat(60)}/${'b'.repeat(60)}/${'c'.repeat(60)}/${'d'.repeat(60)}/index.js`);
+  await put(apiDeployRoot, 'src/must-not-ship.ts');
+  await put(apiDeployRoot, 'test/must-not-ship.test.ts');
+  await put(wheelhouseRoot, 'offline-dependency.whl');
+  return { sourceRoot, apiDeployRoot, wheelhouseRoot };
+}
+
+async function runtimeFixture(root, target) {
+  const runtimeRoot = join(root, `runtime-${target}`);
+  for (const path of RELEASE_TARGETS[target].runtimeFiles) await put(runtimeRoot, path, path);
+  return runtimeRoot;
+}
+
+test('release contract supports Windows x64 and Linux x64 with platform runtimes', () => {
+  assert.deepEqual(Object.keys(RELEASE_TARGETS).sort(), ['linux-x64', 'win32-x64']);
+  assert.ok(RELEASE_TARGETS['win32-x64'].runtimeFiles.includes('node/node.exe'));
+  assert.ok(RELEASE_TARGETS['win32-x64'].runtimeFiles.includes('powershell/pwsh.exe'));
+  assert.ok(RELEASE_TARGETS['win32-x64'].runtimeFiles.includes('service/winsw.exe'));
+  assert.ok(RELEASE_TARGETS['linux-x64'].runtimeFiles.includes('node/bin/node'));
+  assert.equal(RELEASE_TARGETS['win32-x64'].archiveExtension, '.zip');
+  assert.equal(RELEASE_TARGETS['linux-x64'].archiveExtension, '.tar.gz');
+});
+
+test('release builder creates a portable production dependency tree with pnpm 11', async () => {
+  const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), 'build-single-node-release.mjs'), 'utf8');
+  assert.match(source, /'--config\.node-linker=hoisted', 'deploy', '--prod', '--legacy', apiDeployRoot/);
+});
+
+for (const target of ['win32-x64', 'linux-x64']) {
+  test(`${target} release contains runtime assets and deployable application only`, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ai-training-release-test-'));
+    try {
+      const inputs = await fixture(root);
+      const runtimeRoot = await runtimeFixture(root, target);
+      const outputRoot = join(root, 'output');
+      await assembleReleaseLayout({
+        ...inputs,
+        runtimeRoot,
+        outputRoot,
+        target,
+        version: '0.9.2-test',
+        sourceDateEpoch: 1_786_320_000,
+      });
+
+      const manifest = await verifyReleaseLayout(outputRoot);
+      assert.equal(manifest.target, target);
+      assert.equal(manifest.version, '0.9.2-test');
+      assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/dist/main.js'));
+      assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/prisma/build/index.js'));
+      assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/runtime-dependency/src/index.js'));
+      assert.ok(manifest.files.some((file) => file.path === RELEASE_TARGETS[target].runtimeFiles[0].replace(/^/, 'runtime/')));
+      assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', RELEASE_TARGETS[target].manager)));
+      if (target === 'win32-x64') assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', 'manage.cmd')));
+      if (target === 'linux-x64' && process.platform !== 'win32') {
+        assert.equal(manifest.files.find((file) => file.path === 'deploy/single-node/manage.sh')?.mode, 0o755);
+      }
+      assert.equal(existsSync(join(outputRoot, '.env')), false);
+      assert.equal(existsSync(join(outputRoot, 'services', 'platform-api', 'src')), false);
+      assert.equal(existsSync(join(outputRoot, 'services', 'platform-api', 'test')), false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test('Windows ZIP and Linux tar.gz are deterministic for the same release layout', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ai-training-release-archive-'));
+  try {
+    const inputs = await fixture(root);
+    for (const target of ['win32-x64', 'linux-x64']) {
+      const runtimeRoot = await runtimeFixture(root, target);
+      const outputRoot = join(root, `output-${target}`);
+      await assembleReleaseLayout({ ...inputs, runtimeRoot, outputRoot, target, version: '0.9.2-test', sourceDateEpoch: 1_786_320_000 });
+      const first = join(root, `first${RELEASE_TARGETS[target].archiveExtension}`);
+      const second = join(root, `second${RELEASE_TARGETS[target].archiveExtension}`);
+      await createReleaseArchive({ releaseRoot: outputRoot, archivePath: first, target });
+      await createReleaseArchive({ releaseRoot: outputRoot, archivePath: second, target });
+      const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+      assert.equal(digest(await readFile(first)), digest(await readFile(second)));
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -5,6 +5,7 @@ import { AuditAppendInput, NormalizedUserListQuery, PageInfo, UserListQuery, Use
 import { PlatformStore } from './store';
 import { PrismaPlatformRepository } from './prisma-platform-repository';
 import { randomUUID } from 'node:crypto';
+import { isSingleNodeProduction } from './deployment-profile';
 
 export const USER_DIRECTORY_REPOSITORY = Symbol('USER_DIRECTORY_REPOSITORY');
 
@@ -62,10 +63,10 @@ export class FileUserDirectoryRepository implements UserDirectoryRepository {
   }
 
   async listOrgUnits(parentId?: string): Promise<OrgUnit[]> {
-    // The local adapter's seeded administrator gives the application service
-    // an unscoped projection; authorization is applied there using the real
-    // actor, just as it is for PostgreSQL.
-    return this.store.listOrgUnits(parentId, 'w00123');
+    // Authorization is applied by UserDirectoryService using the real actor.
+    // Read the file snapshot directly so an empty production store does not
+    // depend on a seeded development administrator.
+    return this.store.exportState().orgUnits.filter((unit) => unit.parentId === parentId);
   }
 
   async createOrgUnit(input: OrgUnit, actorId: string): Promise<OrgUnit> {
@@ -81,10 +82,7 @@ export class FileUserDirectoryRepository implements UserDirectoryRepository {
   }
 
   async list(query: NormalizedUserListQuery): Promise<UserPage> {
-    // The seeded local administrator is only an adapter read context. The
-    // application service has already checked the real actor and passes the
-    // resulting scope paths into this query.
-    return filePage(this.store.listUsers(undefined, 'w00123'), query);
+    return filePage(this.store.exportState().users, query);
   }
 
   async updateWithAudit(id: string, patch: UserPatch, audit: AuditAppendInput): Promise<AppUser> {
@@ -163,7 +161,10 @@ export function createUserDirectoryRepository(store: PlatformStore): UserDirecto
     return new PrismaUserDirectoryRepository(new PrismaPlatformRepository(), store);
   }
   if (mode !== 'file') throw new Error(`unsupported PLATFORM_REPOSITORY: ${mode}`);
-  if (process.env.NODE_ENV === 'production') throw new Error('file repository is not allowed in production');
+  if (process.env.NODE_ENV === 'production') {
+    if (isSingleNodeProduction()) throw new Error('single-node production requires PLATFORM_REPOSITORY=postgres');
+    throw new Error('file repository is not allowed in production');
+  }
   return new FileUserDirectoryRepository(store);
 }
 

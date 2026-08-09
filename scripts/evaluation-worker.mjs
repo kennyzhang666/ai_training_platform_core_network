@@ -21,11 +21,12 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
@@ -56,7 +57,11 @@ const environmentCodeAgentCommand = process.env.CODE_AGENT_COMMAND;
 // preserves the existing local/test behaviour (x-employee-id only).
 const trustedGatewaySecret = process.env.EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET ?? process.env.TRUSTED_GATEWAY_HMAC_SECRET;
 const trustedEmployeeNo = process.env.EVALUATION_WORKER_EMPLOYEE_NO ?? employeeId;
-const trustedName = process.env.EVALUATION_WORKER_NAME ?? trustedEmployeeNo;
+const configuredTrustedName = process.env.EVALUATION_WORKER_NAME?.trim();
+if (trustedGatewaySecret && !configuredTrustedName) {
+  throw new Error('TRUSTED_GATEWAY 模式下必须配置 EVALUATION_WORKER_NAME，且应与该管理员的 SSO 姓名一致');
+}
+const trustedName = configuredTrustedName ?? trustedEmployeeNo;
 const trustedDepartment = process.env.EVALUATION_WORKER_DEPARTMENT ?? '';
 const DEFAULT_AGENT_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
 const DEFAULT_WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024;
@@ -348,6 +353,119 @@ async function materializeEngine(task, target) {
   return { root: target, runtimeAssets };
 }
 
+function configuredEngineFindLinks() {
+  const json = process.env.ENGINE_PIP_FIND_LINKS_JSON?.trim();
+  if (json) {
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string' || !value.trim())) {
+      throw new Error('ENGINE_PIP_FIND_LINKS_JSON 必须是非空字符串数组');
+    }
+    return parsed.map((value) => value.trim());
+  }
+  return (process.env.ENGINE_PIP_FIND_LINKS ?? '').split(delimiter).map((value) => value.trim()).filter(Boolean);
+}
+
+function prepareEngineEnvironment(task, engineRoot, batchLog) {
+  if (!task.engine.requirements) return python;
+  const requirements = resolve(engineRoot, task.engine.requirements);
+  assertInside(engineRoot, requirements, '评测引擎依赖文件');
+  if (!existsSync(requirements) || !lstatSync(requirements).isFile()) {
+    throw new Error(`评测引擎依赖文件不存在: ${task.engine.requirements}`);
+  }
+  const requirementsHash = sha256(readFileSync(requirements));
+  const environmentsRoot = join(engineCache, '.environments-v1');
+  const environmentRoot = join(environmentsRoot, task.engine.packageHash);
+  const markerPath = join(environmentRoot, '.ai-training-environment.json');
+  const interpreterPath = (base) => process.platform === 'win32'
+    ? join(base, 'Scripts', 'python.exe')
+    : join(base, 'bin', 'python');
+  const environmentMatches = () => {
+    if (!existsSync(markerPath) || !existsSync(interpreterPath(environmentRoot))) return false;
+    try {
+      const marker = readJsonFile(markerPath, 16 * 1024, '评测引擎依赖环境标记');
+      return marker.packageHash === task.engine.packageHash && marker.requirementsHash === requirementsHash;
+    } catch {
+      return false;
+    }
+  };
+  mkdirSync(environmentsRoot, { recursive: true });
+  assertInside(environmentsRoot, environmentRoot, '评测引擎依赖环境');
+  if (environmentMatches()) {
+    batchLog.writeInteraction('engine.environment_reused', { packageHash: task.engine.packageHash });
+    return interpreterPath(environmentRoot);
+  }
+  if (existsSync(environmentRoot)) {
+    // Move an invalid cache entry out of the publish path atomically. Never
+    // delete the final path after building: another Worker may already be
+    // executing with a valid environment it won the race to publish.
+    const quarantine = `${environmentRoot}.${process.pid}.${Date.now()}.invalid`;
+    assertInside(environmentsRoot, quarantine, '评测引擎损坏环境');
+    try {
+      renameSync(environmentRoot, quarantine);
+      rmSync(quarantine, { recursive: true, force: true });
+    } catch (error) {
+      if (environmentMatches()) {
+        batchLog.writeInteraction('engine.environment_reused', { packageHash: task.engine.packageHash });
+        return interpreterPath(environmentRoot);
+      }
+      if (existsSync(environmentRoot)) throw error;
+    }
+  }
+
+  const staging = `${environmentRoot}.${process.pid}.${Date.now()}.staging`;
+  assertInside(environmentsRoot, staging, '评测引擎依赖临时环境');
+  rmSync(staging, { recursive: true, force: true });
+  const configuredTimeout = Number(process.env.ENGINE_DEPENDENCY_TIMEOUT_MS ?? 300_000);
+  if (!Number.isFinite(configuredTimeout) || configuredTimeout <= 0) {
+    throw new Error('ENGINE_DEPENDENCY_TIMEOUT_MS 必须是正数');
+  }
+  const timeoutMs = Math.max(10_000, configuredTimeout);
+  const findLinks = configuredEngineFindLinks();
+  try {
+    // Some intranet Python distributions cannot bootstrap pip inside a child venv.
+    // Build the isolated environment without pip, then let the platform Python install into it.
+    execFileSync(python, ['-m', 'venv', '--without-pip', staging], {
+      cwd: engineRoot, windowsHide: true, stdio: 'pipe', timeout: timeoutMs,
+    });
+    const install = ['-m', 'pip', '--python', staging, 'install', '--no-input', '--disable-pip-version-check', '-r', requirements];
+    if (process.env.ENGINE_PIP_INDEX_URL?.trim()) install.push('--index-url', process.env.ENGINE_PIP_INDEX_URL.trim());
+    for (const source of findLinks) install.push('--find-links', source);
+    if (process.env.ENGINE_PIP_OFFLINE === 'true') install.push('--no-index');
+    execFileSync(python, install, {
+      cwd: engineRoot,
+      windowsHide: true,
+      stdio: 'pipe',
+      timeout: timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
+      env: { ...process.env, PIP_CACHE_DIR: process.env.PIP_CACHE_DIR ?? join(engineCache, 'pip-cache') },
+    });
+    writeFileSync(join(staging, '.ai-training-environment.json'), JSON.stringify({
+      packageHash: task.engine.packageHash,
+      requirementsHash,
+      createdAt: new Date().toISOString(),
+    }, null, 2), 'utf8');
+    try {
+      renameSync(staging, environmentRoot);
+    } catch (error) {
+      if (!environmentMatches()) throw error;
+      rmSync(staging, { recursive: true, force: true });
+    }
+    batchLog.writeInteraction('engine.environment_prepared', {
+      packageHash: task.engine.packageHash,
+      offline: process.env.ENGINE_PIP_OFFLINE === 'true',
+      findLinks: findLinks.length,
+    });
+    return interpreterPath(environmentRoot);
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    const stderr = error && typeof error === 'object' && 'stderr' in error
+      ? Buffer.from(error.stderr ?? '').toString('utf8').trim()
+      : '';
+    const details = `${error instanceof Error ? error.message : String(error)}${stderr ? `\n${stderr}` : ''}`;
+    throw new Error(`评测引擎依赖安装失败: ${details.slice(-1200)}`);
+  }
+}
+
 async function materializeSubmission(item, target) {
   const workspace = join(target, 'workspace');
   mkdirSync(workspace, { recursive: true });
@@ -403,8 +521,21 @@ function mandatoryAgentPrompt(configuredPrompt, manifestPath) {
     `批次清单：${manifestPath}`,
     '读取清单中的 instructionPath 和全部 skillPaths，只处理 submissions 中列出的交付件。',
     '逐份使用清单指定的评测引擎，将单人结果写入 outputPath，最后将批次索引写入 resultIndexPath。',
+    '调用 Python 评测引擎时必须使用环境变量 AI_TRAINING_ENGINE_PYTHON 指定的解释器。',
     '输出必须符合清单中 contracts.output.path 指向的 JSON Schema；不得修改交付快照、评测引擎或契约。',
   ].filter(Boolean).join('\n\n');
+}
+
+function materializedSkillDirectory(engineRoot, configuredPath) {
+  const target = resolve(engineRoot, configuredPath);
+  assertInside(engineRoot, target, 'Code Agent Skill');
+  if (!existsSync(target)) throw new Error(`Code Agent Skill 不存在: ${configuredPath}`);
+  const directory = lstatSync(target).isDirectory() ? target : dirname(target);
+  const skillFile = lstatSync(target).isDirectory() ? join(target, 'SKILL.md') : target;
+  if (basename(skillFile) !== 'SKILL.md' || !existsSync(skillFile) || !lstatSync(skillFile).isFile()) {
+    throw new Error(`Code Agent Skill 必须是包含 SKILL.md 的目录: ${configuredPath}`);
+  }
+  return directory;
 }
 
 function platformInvocation(runtime, manifestPath, cwd) {
@@ -452,7 +583,7 @@ function resolveCodeAgentInvocation(task, manifestPath, cwd) {
   return null;
 }
 
-function runCodeAgent(task, manifestPath, cwd, timeoutMs, batchLog) {
+function runCodeAgent(task, manifestPath, cwd, timeoutMs, batchLog, enginePython) {
   const invocation = resolveCodeAgentInvocation(task, manifestPath, cwd);
   if (!invocation) {
     throw new Error('未配置 CODE_AGENT_COMMAND；请将它指向实现 Code Agent batch bridge 契约的可执行文件');
@@ -474,7 +605,7 @@ function runCodeAgent(task, manifestPath, cwd, timeoutMs, batchLog) {
       cwd,
       windowsHide: true,
       shell: false,
-      env: { ...process.env, AI_TRAINING_BATCH_MANIFEST: manifestPath },
+      env: { ...process.env, AI_TRAINING_BATCH_MANIFEST: manifestPath, AI_TRAINING_ENGINE_PYTHON: enginePython },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -535,6 +666,7 @@ async function runBatch(task) {
   try {
     const materializedEngine = await materializeEngine(task, join(directory, 'engine'));
     const engineRoot = materializedEngine.root;
+    const enginePython = prepareEngineEnvironment(task, engineRoot, batchLog);
     const assets = { ...copyChallengeAssets(task, directory), ...materializedEngine.runtimeAssets };
     const resultsRoot = join(directory, 'results');
     mkdirSync(resultsRoot, { recursive: true });
@@ -558,7 +690,7 @@ async function runBatch(task) {
       output: materializeProtocolContract(task.contracts?.output, join(contractsRoot, 'evaluation-result.schema.json'), '评测结果契约'),
     };
     const instructionPath = join(engineRoot, task.engine.agent.instruction);
-    const skillPaths = task.engine.agent.skills.map((path) => join(engineRoot, path));
+    const skillPaths = task.engine.agent.skills.map((path) => materializedSkillDirectory(engineRoot, path));
     const manifest = {
       schemaVersion: '1.1',
       generatedAt: new Date().toISOString(),
@@ -613,7 +745,7 @@ async function runBatch(task) {
       throw new Error('CODE_AGENT_BATCH_TIMEOUT_SECONDS 必须是正数');
     }
     batchLog.writeInteraction('batch.timeout_configured', { timeoutSeconds: batchTimeoutSeconds, heartbeatSeconds: Math.ceil(heartbeatMs / 1000) });
-    await runCodeAgent(task, manifestPath, directory, batchTimeoutSeconds * 1000, batchLog);
+    await runCodeAgent(task, manifestPath, directory, batchTimeoutSeconds * 1000, batchLog, enginePython);
     if (!existsSync(resultIndexPath)) throw new Error('Code Agent 未生成批次结果索引');
     const perResultLimit = Math.max(1024, Number(task.engine.limits?.outputBytes ?? 5 * 1024 * 1024));
     const resultIndexLimit = Math.min(

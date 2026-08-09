@@ -371,14 +371,15 @@ test('manual upload can be triggered and imported results are idempotent', async
 
 test('two-phase upload handles are actor-bound and confirm immutable objects', async () => {
   await withApp(async (baseUrl) => {
-    const content = Buffer.from('v07 upload object');
+    const content = Buffer.from(ZIP_FIXTURES.local, 'base64');
     const create = await fetch(`${baseUrl}/api/v1/uploads`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-employee-id': 'w00124' },
-      body: JSON.stringify({ eventId: 'event-local', fileName: 'delivery.zip', declaredSize: content.length }),
+      body: JSON.stringify({ eventId: 'event-local', subjectId: 'w00124', fileName: 'delivery.zip', declaredSize: content.length }),
     });
     assert.equal(create.status, 201);
-    const session = await create.json() as { uploadId: string; uploadToken: string };
+    const session = await create.json() as { uploadId: string; uploadToken: string; subjectId: string };
+    assert.equal(session.subjectId, 'w00124');
     const denied = await fetch(`${baseUrl}/api/v1/uploads/${session.uploadId}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json', 'x-employee-id': 'w00125', 'x-upload-token': session.uploadToken },
@@ -411,6 +412,44 @@ test('two-phase upload handles are actor-bound and confirm immutable objects', a
     assert.equal(stored.sha256, metadata.sha256);
     assert.equal(stored.size, metadata.size);
     assert.match(stored.uri, /^local:\/\//);
+
+    const submitted = await fetch(`${baseUrl}/api/v1/events/event-local/submissions:upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00124', 'x-upload-token': session.uploadToken },
+      body: JSON.stringify({
+        subjectId: 'w00124',
+        uploadId: session.uploadId,
+        snapshot: {
+          sourceType: 'UPLOAD',
+          artifactUri: stored.uri,
+          artifactHash: stored.sha256,
+          submittedAt: '2026-08-01T10:00:00Z',
+        },
+      }),
+    });
+    assert.equal(submitted.status, 201);
+    const submission = await submitted.json() as { state: string; snapshot: { artifactUri?: string; artifactHash?: string; artifactName?: string } };
+    assert.equal(submission.state, 'WAITING_TRIGGER');
+    assert.equal(submission.snapshot.artifactUri, stored.uri);
+    assert.equal(submission.snapshot.artifactHash, stored.sha256);
+    assert.equal(submission.snapshot.artifactName, 'delivery.zip');
+
+    const emptySubmission = await fetch(`${baseUrl}/api/v1/submissions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-employee-id': 'w00126' },
+      body: JSON.stringify({
+        eventId: 'event-local',
+        subjectId: 'w00126',
+        snapshot: {
+          sourceType: 'UPLOAD',
+          snapshotHash: 'a'.repeat(64),
+          artifactHash: 'b'.repeat(64),
+          submittedAt: '2026-08-01T10:00:00Z',
+        },
+      }),
+    });
+    assert.equal(emptySubmission.status, 400);
+    assert.equal((await emptySubmission.json() as { code?: string }).code, 'SUBMISSION_ARTIFACT_REQUIRED');
   });
 });
 
@@ -538,6 +577,10 @@ test('upload rejects a ZIP that does not match the challenge delivery layout', a
 
 test('external evaluation input can target one submission and import its prepared result', async () => {
   await withApp(async (baseUrl) => {
+    const current = Date.now();
+    const startsAt = new Date(current - 60 * 60 * 1000).toISOString();
+    const endsAt = new Date(current + 60 * 60 * 1000).toISOString();
+    const submittedAt = new Date(current).toISOString();
     const created = await fetch(`${baseUrl}/api/v1/events`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-employee-id': 'w00123' },
@@ -548,8 +591,8 @@ test('external evaluation input can target one submission and import its prepare
         trigger: 'IMPORT',
         reveal: 'IMMEDIATE',
         mode: 'WINDOW',
-        startsAt: '2026-08-01T09:00:00+08:00',
-        endsAt: '2026-08-08T18:00:00+08:00',
+        startsAt,
+        endsAt,
       }),
     });
     assert.equal(created.status, 201);
@@ -565,9 +608,9 @@ test('external evaluation input can target one submission and import its prepare
       assert.equal(response.status, 201);
       return await response.json() as { id: string; state: string; snapshot: { snapshotHash: string; artifactHash?: string; submittedAt: string; sourceType: string } };
     };
-    const first = await upload('w00124', firstBytes, '2026-08-01T10:00:00Z');
-    const second = await upload('w00126', secondBytes, '2026-08-01T10:01:00Z');
-    const duplicate = await upload('w00130', firstBytes, '2026-08-01T10:02:00Z');
+    const first = await upload('w00124', firstBytes, submittedAt);
+    const second = await upload('w00126', secondBytes, submittedAt);
+    const duplicate = await upload('w00130', firstBytes, submittedAt);
     assert.equal(first.state, 'WAITING_IMPORT');
     assert.equal(second.state, 'WAITING_IMPORT');
     assert.equal(duplicate.state, 'WAITING_IMPORT');
@@ -1442,6 +1485,7 @@ test('an evaluation environment leases work through the API for both engine sour
               package: { packageHash: enginePackage.packageHash },
               input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/engine-invocation.schema.json' },
               output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
+              agent: { instructionPath: 'instruction.md', skillPaths: ['skills/evaluation/SKILL.md'] },
             },
           }],
         }),
@@ -1456,9 +1500,10 @@ test('an evaluation environment leases work through the API for both engine sour
 
       const leased = await fetch(`${baseUrl}/api/v1/evaluation-batches:lease`, { method: 'POST', headers: admin, body: JSON.stringify({ workerId: 'eval-host-api', limit: 5 }) });
       assert.equal(leased.status, 200);
-      const { batches } = await leased.json() as { batches: Array<{ batchId: string; leaseId: string; engine: { source: string; id: string; entrypoint: string }; submissions: Array<{ runId: string }> }> };
+      const { batches } = await leased.json() as { batches: Array<{ batchId: string; leaseId: string; engine: { source: string; id: string; entrypoint: string; agent: { instruction: string; skills: string[] } }; submissions: Array<{ runId: string }> }> };
       const sources = batches.map((task) => task.engine.source).sort();
       assert.deepEqual(sources, ['BUILT_IN', 'PACKAGE']);
+      assert.deepEqual(batches.find((task) => task.engine.source === 'PACKAGE')?.engine.agent.skills, ['skills/evaluation']);
       // The package download the worker needs must be reachable.
       const download = await fetch(`${baseUrl}/api/v1/evaluation-engines/${enginePackage.packageHash}/package`, { headers: { 'x-employee-id': 'w00123' } });
       assert.equal(download.status, 200);

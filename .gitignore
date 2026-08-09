@@ -13,4 +13,12 @@ __pycache__/
 .mypy_cache/
 artifacts/
 tmp/
+deploy/single-node/.env
+deploy/single-node/data/
+deploy/single-node/data.before-restore-*/
+deploy/single-node/data.failed-restore-*/
+deploy/single-node/runtime/
+deploy/single-node/backups/
+deploy/single-node/wheelhouse/
+/release/
 services/platform-api/prisma/dev.db

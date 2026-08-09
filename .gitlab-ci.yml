@@ -58,6 +58,8 @@ build:
   stage: build
   script:
     - pnpm kit:test
+    - pnpm deployment:test
+    - pnpm release:test
     - pnpm build
 
 contract-test:

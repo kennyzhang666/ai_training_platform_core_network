@@ -26,11 +26,20 @@ import re
 import secrets
 import ssl
 import time
+from socketserver import ThreadingMixIn
 from dataclasses import dataclass
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Any, Callable, Mapping, MutableMapping, Sequence
 from urllib.parse import parse_qs
+from wsgiref.simple_server import WSGIServer, make_server
+
+
+class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
+    """Small threaded server for the expected 10–20 concurrent intranet users."""
+
+    daemon_threads = True
+    allow_reuse_address = True
 
 
 class LdapGatewayError(Exception):
@@ -633,13 +642,11 @@ class LdapGatewayApp:
 
 
 def main() -> None:
-    from wsgiref.simple_server import make_server
-
     config = GatewayConfig.from_env()
     host = os.environ.get("LDAP_GATEWAY_HOST", "127.0.0.1")
     port = _positive_int(os.environ, "LDAP_GATEWAY_PORT", 8081, 1, 65535)
     application = LdapGatewayApp(config)
-    with make_server(host, port, application) as server:
+    with make_server(host, port, application, server_class=ThreadingWSGIServer) as server:
         server.serve_forever()
 
 

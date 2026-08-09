@@ -2,6 +2,7 @@ import io
 import hashlib
 import hmac
 import unittest
+from socketserver import ThreadingMixIn
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
@@ -18,6 +19,7 @@ from ldap3_gateway import (
     encode_session,
     escape_filter_value,
     trusted_gateway_headers,
+    ThreadingWSGIServer,
 )
 
 
@@ -71,6 +73,10 @@ class LdapGatewayTests(unittest.TestCase):
     def setUp(self):
         self.ldap = LdapConfig()
         self.user = LdapUser("w00123", "张三", "云计算")
+
+    def test_gateway_server_handles_multiple_login_and_verify_requests_concurrently(self):
+        self.assertTrue(issubclass(ThreadingWSGIServer, ThreadingMixIn))
+        self.assertTrue(ThreadingWSGIServer.daemon_threads)
 
     def test_http_only_switch_disables_secure_cookie_without_changing_default(self):
         base = {

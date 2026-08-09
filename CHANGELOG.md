@@ -2,7 +2,38 @@
 
 ## Unreleased
 
-暂无已发布变更。
+暂无未发布变更。
+
+## 0.9.5 - 2026-08-10
+
+本版本将此前未单独推送的单服务器生产档、双平台离线发布能力和真实训战闭环统一收口为首个 `0.9.x` 可发布基线：
+
+- 新增 Windows x64 ZIP 与 Linux x64 tar.gz 双平台离线发布契约、可复现归档、逐文件 `release-manifest.json`、归档 SHA-256 和目标平台运行时检查；目标服务器无需源码、Git、pnpm 或前端构建；
+- 发布包裁剪实体生产 Node 依赖，携带 Prisma 迁移/备份/恢复工具、Web/API、Worker、LDAP 网关、契约、wheelhouse、Node、Python 和 Nginx；Windows 包同时携带 PowerShell 和统一 `manage.cmd` 入口；
+- Linux 新增与 Windows 对齐的 `Prepare`、`Start`、`Stop`、`Status`、`Backup`、`Restore`、`Doctor` 管理脚本；Nginx 保持前台运行并由平台管理入口持有；
+- 修复 pnpm 11 可搬运生产目录生成失败、Windows 普通权限无法复制符号链接、依赖自身 `src` 目录被误判为平台源码、Python ZIP 生成超过 Windows 传统路径长度时失败等发布阻断问题；
+- 收口两阶段上传、不可变快照、PostgreSQL 上传会话、批次租约恢复、离线 Python 引擎依赖、SSO 首位管理员与部门匹配等单服务器必修链路；新增迁移 `0016_upload_session_subject_binding`；
+- 新增“基于SDD的运维日志脱敏工具开发实战演练”赛题包、严格五文件交付契约、Code Agent 指令、评测 Skill、16 点四维评分规则、满分参考件和合规学员样例；
+- 完成一次真实本地端到端验收：管理员发布赛题、员工上传冻结交付件、管理员精确选择提交、Worker 物化引擎与 Skills、结果回传、服务端重算、详细报告、排名、审计和能力画像全部通过；样例结果为 95.75 分，9 项交付件测试全部通过；
+- GitLab 构建门禁加入部署与发布契约测试，新增双平台发布说明；100 人集中提交与有界队列测试通过。真实 Windows Server/Linux 断网启动、真实 PostgreSQL/SSO/Code Agent 联调和系统服务、自动备份、升级回退仍是目标环境门禁。
+
+版本验证：`pnpm test` 144 项（143 通过、1 项 PostgreSQL 集成按配置跳过）、`pnpm contract:test` 7/7、`pnpm grader:test` 18/18、SDD 赛题专项 3/3、`pnpm kit:test` 2/2、`pnpm deployment:test` 8/9（Linux Bash 语法检查仅在 Linux Runner 执行）、`pnpm release:test` 5/5；`pnpm lint`、`pnpm build` 和 `git diff --check` 通过。双平台离线包的布局与可复现归档已验证，但本机没有正式运行时输入，未把测试运行时归档冒充生产发布包。
+
+## 0.9.1 - 2026-08-09
+
+以“内网可信用户、单服务器、单场 50–100 人先跑通训战闭环”为目标，修复提交与评测必修问题并提供可落地的单服务器生产档：
+
+- 修复本地种子训战依赖固定日期而整体过期的问题，已有提交时保持历史时间不变；新增空环境首位全局管理员工号配置，首次 SSO 登录可安全完成初始化，且不会产生第二位全局管理员；
+- 打通两阶段上传句柄到首次不可变提交：上传能力绑定操作者、训战和学员，提交时校验真实交付件、哈希、ZIP 与目录契约；通用提交接口不再接受无法物化的空上传快照；新增迁移 `0016_upload_session_subject_binding`；
+- 统一引擎 Skills 为“包含 `SKILL.md` 的目录”，兼容旧文件路径；外部 Worker 按引擎包哈希创建并缓存 Python 隔离环境，支持内网镜像、离线 wheelhouse 和 `AI_TRAINING_ENGINE_PYTHON`；
+- 修复 SSO 部门用“团队”等通用组织标签误匹配、或把员工挂到组织根节点的问题；可信网关 Worker 必须显式配置与 SSO 一致的管理员姓名，避免覆盖真实人员资料；
+- 新增 `single-node` 生产档：业务数据使用同机 PostgreSQL，交付件与引擎包保存在本地目录，只启动一个 API 进程和独立 Worker，空环境不注入演示数据；LDAP3 网关改为线程化服务，可处理多人并发登录和会话校验；
+- PostgreSQL 领域写入在单 API 内按序提交，避免集中写入争抢快照 revision；本地对象存储的上传会话持久化到 PostgreSQL，API 重启后仍可继续确认上传；
+- 新增 Windows 单服务器部署目录、Nginx 模板、离线配置、数据库迁移、统一启停/状态、PostgreSQL 与本地交付件一致性备份/恢复脚本，并把 Linux 单服务器手册切换到相同档位；
+- 100 名学员的集中提交与有界评测队列已完成自动验收；外部 Worker + Code Agent 整批协议保持 20 名学员双引擎 20/20 结果录入。PostgreSQL 100 人写入测试已加入显式集成套件和 GitLab CI，仍需目标数据库执行。
+- 开发总览正式收口到 `v0.9.1`，区分当前“少依赖、统一脚本”与后续“一包安装、系统服务、自动备份、离线升级、脱敏诊断”的极简运维目标，并将其列为 `v0.9.2` 下一优先级。
+
+版本验证：`pnpm test` 141 项（140 通过、1 项 PostgreSQL 集成按配置跳过）、契约 7/7、Python grader 18/18、LDAP3 20/20、部署 5/5、评测引擎资料包 2/2、100 名学员本地集中提交全部完成；`pnpm lint`、`pnpm build` 和 `git diff --check` 通过。本机未配置可用的 PostgreSQL 凭据，因此不把新增的 PostgreSQL 100 人集成用例记为本地通过。
 
 ## 0.9.0 - 2026-08-07
 

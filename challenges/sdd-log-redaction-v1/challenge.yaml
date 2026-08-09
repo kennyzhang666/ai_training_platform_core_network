@@ -1,0 +1,53 @@
+schemaVersion: "1.0"
+id: sdd-log-redaction
+version: 1
+title: 基于SDD的运维日志脱敏工具开发实战演练
+description: >-
+  面向真实运维日志治理场景，使用规格驱动开发方法完成需求澄清、脱敏规则建模、
+  可执行验收设计、Python 实现与复盘记录。评测以 SPEC.md 为主证据，同时核对实现、
+  测试和 AI 协作记录的一致性、可复现性与安全边界。
+objectives:
+  - 将日志脱敏目标、非目标、约束和歧义转化为可追踪的规格
+  - 设计覆盖结构化与非结构化日志的确定性脱敏规则
+  - 建立需求、设计、验收用例和实现之间的双向追踪关系
+  - 形成可运行、可回归、可审计的工程交付件
+requirements:
+  - SPEC.md 必须定义敏感数据分类、规则优先级、输入输出契约和失败策略
+  - SPEC.md 必须包含需求编号、验收标准、测试映射和变更影响分析
+  - 工具必须支持 JSON 日志和普通文本日志，并保持非敏感字段语义
+  - 交付件不得输出未脱敏的原始敏感信息或把密钥写入代码
+  - AI_WORKLOG.md 必须记录关键假设、提示词结构、验证证据和迭代决策
+constraints:
+  - 使用 Python 3.11 标准库，不依赖外部网络或在线服务
+  - 脱敏结果必须确定、幂等，相同输入和规则产生相同输出
+  - 对无法安全处理的输入采用显式失败策略，不得静默泄露原文
+  - 评测以冻结的交付快照为准，所有得分必须能追溯到文件证据
+deliverables:
+  - SPEC.md
+  - README.md
+  - AI_WORKLOG.md
+  - src/log_redactor.py
+  - tests/test_log_redactor.py
+tags: [SDD, 日志治理, 数据脱敏, Python, 规格驱动开发]
+estimatedMinutes: 240
+origin: official
+zone: yellow
+languagePolicy:
+  mode: fixed
+  languages: [python]
+deliveryPolicy:
+  allowedSources: [UPLOAD]
+  upload:
+    formats: [zip]
+    maxBytes: 52428800
+    maxFiles: 200
+    allowResubmit: true
+rubricVersion: "1.0"
+submissionContract: submission-contract.json
+resources:
+  reference: reference
+resourceLimits:
+  timeoutSeconds: 180
+  memoryMb: 512
+  maxOutputBytes: 2097152
+visibility: ORG

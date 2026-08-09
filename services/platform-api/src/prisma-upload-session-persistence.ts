@@ -8,9 +8,9 @@ import {
 } from './object-storage';
 
 /**
- * PostgreSQL-backed upload-session state.  Object bytes stay in S3; this
- * table only holds the short-lived capability, its compare-and-set status and
- * the immutable object metadata needed to survive an API restart.
+ * PostgreSQL-backed upload-session state. Object bytes stay in S3-compatible
+ * storage or the single-server artifact directory; this table only holds the
+ * short-lived capability, its compare-and-set status and immutable metadata.
  */
 @Injectable()
 export class PrismaUploadSessionPersistence implements UploadSessionPersistence, OnModuleDestroy {
@@ -37,6 +37,7 @@ export class PrismaUploadSessionPersistence implements UploadSessionPersistence,
     objectKey: string;
     actorId: string;
     eventId: string;
+    subjectId: string;
     fileName: string;
     declaredSize: number;
     expiresAt: Date;
@@ -60,6 +61,7 @@ export class PrismaUploadSessionPersistence implements UploadSessionPersistence,
       objectKey: row.objectKey,
       actorId: row.actorId,
       eventId: row.eventId,
+      subjectId: row.subjectId,
       fileName: row.fileName,
       declaredSize: row.declaredSize,
       expiresAt: row.expiresAt.toISOString(),
@@ -77,6 +79,7 @@ export class PrismaUploadSessionPersistence implements UploadSessionPersistence,
         objectKey: session.objectKey,
         actorId: session.actorId,
         eventId: session.eventId,
+        subjectId: session.subjectId,
         fileName: session.fileName,
         declaredSize: session.declaredSize,
         expiresAt: new Date(session.expiresAt),

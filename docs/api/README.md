@@ -6,7 +6,7 @@ OpenAPI 入口为 [`contracts/openapi.yaml`](../../contracts/openapi.yaml)。结
 
 生产 SSO 同步使用 `POST /api/v1/auth/sso`，请求体只包含 `employeeNo`、`name` 和可选的 `department`。平台按工号幂等登记员工，能匹配组织树时自动写入部门，无法匹配时保留未配置部门；管理端不提供新增员工接口，`PATCH /api/v1/users/{userId}` 仅维护 `orgUnitId`、`roles` 和角色范围。组织使用 `POST /org-units`、`PATCH /org-units/{id}` 和 `DELETE /org-units/{id}` 维护；删除只允许没有下级部门、员工、权限绑定、训战范围或其他业务引用的非根部门。
 
-`POST /api/v1/events/{eventId}/submissions:upload` 在本地支持三种交付输入：`artifactBase64`、已存在且由服务端重算的 `artifactUri`，或 `workspacePath`。客户端提供的 `snapshotHash`/`artifactHash` 只用于一致性校验；服务端会以实际内容覆盖并固化快照。`artifactBase64` 与 `workspacePath` 不能同时提供。
+`POST /api/v1/events/{eventId}/submissions:upload` 支持四种交付输入：`uploadId` + `X-Upload-Token`（`POST /uploads` 两阶段上传）、`artifactBase64`、同一学员在同一场次已登记的 `artifactUri`，或本地开发用 `workspacePath`。客户端提供的 `snapshotHash`/`artifactHash` 只用于一致性校验；服务端会读取实际交付件并固化不可变快照。文件提交不能只传哈希而不传实际交付件。
 
 评测完成或线下导入后，结果中的 `subject` 由服务端根据提交记录补齐 `id/name/orgPath`；不会信任评测器或导入 JSON 自报的组织信息。`gradingRunId` 在平台内全局唯一，只有同一提交的同一幂等键可以重试。
 

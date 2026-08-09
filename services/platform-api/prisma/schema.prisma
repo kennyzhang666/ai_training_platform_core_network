@@ -395,6 +395,7 @@ model UploadSession {
   objectKey       String
   actorId         String
   eventId         String
+  subjectId       String
   fileName        String
   declaredSize    Int
   status          String   @default("CREATED")
@@ -409,4 +410,5 @@ model UploadSession {
 
   @@index([expiresAt, status])
   @@index([actorId, eventId])
+  @@index([actorId, eventId, subjectId])
 }

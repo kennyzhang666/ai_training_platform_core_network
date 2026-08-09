@@ -863,6 +863,12 @@ export class PlatformController {
       if (body.snapshot.artifactUri) this.assertRegisteredArtifactInStore(store, body.eventId, body.subjectId, body.snapshot.artifactUri);
       return { event, version: store.challengeVersionForEvent(body.eventId) };
     });
+    if (body.snapshot.sourceType === 'UPLOAD' && !body.snapshot.artifactUri && !body.snapshot.workspacePath) {
+      throw new BadRequestException({
+        code: 'SUBMISSION_ARTIFACT_REQUIRED',
+        message: '文件提交必须包含已登记的交付件或本地工作区快照',
+      });
+    }
     const snapshot = this.normalizeSnapshot(body.snapshot);
     const version = context.version;
     if (snapshot.artifactUri) {
@@ -883,8 +889,18 @@ export class PlatformController {
   }
 
   @Post('/events/:eventId/submissions:upload')
-  async upload(@Param('eventId') eventId: string, @Body() body: { subjectId: string; snapshot: SubmissionSnapshot; artifactBase64?: string; fileName?: string }, @Headers('x-employee-id') employeeId?: string) {
+  async upload(
+    @Param('eventId') eventId: string,
+    @Body() body: { subjectId: string; snapshot: SubmissionSnapshot; artifactBase64?: string; fileName?: string; uploadId?: string },
+    @Headers('x-upload-token') uploadToken?: string,
+    @Headers('x-employee-id') employeeId?: string,
+  ) {
     const actorId = this.actor(employeeId);
+    const uploadId = body.uploadId?.trim();
+    if (uploadId && !uploadToken?.trim()) throw new UnauthorizedException('x-upload-token is required when uploadId is provided');
+    if (uploadId && (body.artifactBase64 || body.snapshot.workspacePath)) {
+      throw new BadRequestException('uploadId cannot be combined with artifactBase64 or workspacePath');
+    }
     const context = await this.domainUnitOfWork.read((store) => {
       store.assertSelfOrAdmin(actorId, body.subjectId);
       store.assertSubmissionSubject(eventId, body.subjectId);
@@ -915,7 +931,7 @@ export class PlatformController {
         throw new BadRequestException(`artifact exceeds event maxBytes ${event.deliveryConfig.maxBytes}`);
       }
       const maxBytes = Number(event.deliveryConfig?.maxBytes ?? process.env.ARTIFACT_MAX_BYTES ?? 50 * 1024 * 1024);
-      const uploadSession = await this.objectStorage.createUpload({ actorId, eventId, fileName, declaredSize: uploadedBytes.length, maxBytes });
+      const uploadSession = await this.objectStorage.createUpload({ actorId, eventId, subjectId: body.subjectId, fileName, declaredSize: uploadedBytes.length, maxBytes });
       await this.objectStorage.put(uploadSession.uploadId, uploadSession.uploadToken, uploadedBytes, actorId);
       const stored = await this.objectStorage.confirm(uploadSession.uploadId, uploadSession.uploadToken, actorId);
       if (event.deliveryConfig?.maxBytes && stored.size > event.deliveryConfig.maxBytes) {
@@ -935,6 +951,31 @@ export class PlatformController {
         artifactHash: stored.sha256,
         artifactUri: stored.uri,
         artifactName: fileName,
+        snapshotHash: computedSnapshotHash,
+      };
+    } else if (uploadId) {
+      const completed = await this.objectStorage.completeForSubmission(uploadId, uploadToken!.trim(), actorId, eventId, body.subjectId);
+      const stored = completed.artifact;
+      if (snapshot.artifactUri && snapshot.artifactUri !== stored.uri) {
+        throw new BadRequestException('artifactUri does not match the completed upload');
+      }
+      if (event.deliveryConfig?.maxBytes && stored.size > event.deliveryConfig.maxBytes) {
+        throw new BadRequestException(`artifact exceeds event maxBytes ${event.deliveryConfig.maxBytes}`);
+      }
+      if (snapshot.artifactHash && snapshot.artifactHash !== stored.sha256) {
+        throw new BadRequestException('artifactHash does not match uploaded bytes');
+      }
+      await this.objectStorage.validateArchive(stored.uri, event.deliveryConfig?.maxFiles ?? 2000);
+      await this.submissionContracts.validateArtifact(context.version, stored.uri);
+      const computedSnapshotHash = await this.objectStorage.snapshotHash(stored.uri);
+      if (snapshot.snapshotHash && snapshot.snapshotHash !== computedSnapshotHash) {
+        throw new BadRequestException('snapshotHash does not match uploaded workspace contents');
+      }
+      snapshot = {
+        ...snapshot,
+        artifactHash: stored.sha256,
+        artifactUri: stored.uri,
+        artifactName: completed.fileName,
         snapshotHash: computedSnapshotHash,
       };
     } else if (snapshot.artifactUri) {
@@ -960,7 +1001,7 @@ export class PlatformController {
     const submission = await this.domainUnitOfWork.run((store) => {
       store.assertSelfOrAdmin(actorId, body.subjectId);
       store.assertSubmissionSubject(eventId, body.subjectId);
-      if (snapshot.artifactUri && !body.artifactBase64) this.assertRegisteredArtifactInStore(store, eventId, body.subjectId, snapshot.artifactUri, true);
+      if (snapshot.artifactUri && !body.artifactBase64 && !uploadId) this.assertRegisteredArtifactInStore(store, eventId, body.subjectId, snapshot.artifactUri, true);
       const created = store.createSubmission(eventId, body.subjectId, this.normalizeSnapshot(snapshot));
       if (created.gradingRunId && store.getEvent(eventId).trigger === 'AUTO' && process.env.EMBEDDED_EVALUATION_WORKER !== 'true') {
         store.createEvaluationBatch([created.gradingRunId], 'system');
@@ -1196,8 +1237,7 @@ export class PlatformController {
       throw new BadRequestException({ code: 'UPLOAD_FORMAT_NOT_ALLOWED', message: `文件格式不符合训战要求: ${eventId}` });
     }
     const configuredLimit = Number(event.deliveryConfig?.maxBytes ?? process.env.ARTIFACT_MAX_BYTES ?? 50 * 1024 * 1024);
-    const session = await this.objectStorage.createUpload({ actorId, eventId, fileName, declaredSize: Number(body.declaredSize), maxBytes: configuredLimit });
-    return { ...session, subjectId };
+    return this.objectStorage.createUpload({ actorId, eventId, subjectId, fileName, declaredSize: Number(body.declaredSize), maxBytes: configuredLimit });
   }
 
   /** Upload bytes to a previously issued handle. JSON base64 is retained for local clients; S3 uses the same server-side checks. */

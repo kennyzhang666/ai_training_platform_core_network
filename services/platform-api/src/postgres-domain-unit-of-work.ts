@@ -15,6 +15,25 @@ function snapshotState(value: Prisma.JsonValue | null | undefined): Partial<impo
 }
 
 /**
+ * A single API process must not let a burst of PostgreSQL snapshot mutations
+ * race the revision compare-and-set.  The queue preserves request order,
+ * propagates each request's own error, and always releases later requests.
+ */
+export class SerialExecutionQueue {
+  private tail: Promise<void> = Promise.resolve();
+
+  run<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.tail.then(operation, operation);
+    this.tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  async drain(): Promise<void> {
+    await this.tail;
+  }
+}
+
+/**
  * Request-scoped PostgreSQL Unit of Work for domains that are still exposed
  * through the mature PlatformStore business rules.
  *
@@ -27,6 +46,7 @@ function snapshotState(value: Prisma.JsonValue | null | undefined): Partial<impo
 @Injectable()
 export class PostgresDomainUnitOfWork implements OnModuleDestroy {
   private readonly client?: PrismaClient;
+  private readonly writes = new SerialExecutionQueue();
 
   constructor(@Inject(PlatformStore) private readonly cache: PlatformStore) {
     const mode = repositoryMode();
@@ -59,23 +79,25 @@ export class PostgresDomainUnitOfWork implements OnModuleDestroy {
   async run<T>(operation: (store: PlatformStore) => T | Promise<T>): Promise<T> {
     if (!this.client) return operation(this.cache);
 
-    const committed = await this.client.$transaction(async (db) => {
-      const snapshot = await db.platformSnapshot.findUnique({ where: { id: SNAPSHOT_ID } });
-      const working = await this.workingStore(db);
+    return this.writes.run(async () => {
+      const committed = await this.client!.$transaction(async (db) => {
+        const snapshot = await db.platformSnapshot.findUnique({ where: { id: SNAPSHOT_ID } });
+        const working = await this.workingStore(db);
 
-      const revision = await claimSnapshotRevision(db, snapshot?.revision ?? 0);
-      const result = await operation(working);
-      const state = working.exportState();
-      await synchronizeNormalized(db, state, revision);
-      return { result, state };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: Number(process.env.PERSIST_TRANSACTION_TIMEOUT_MS ?? 120_000) });
+        const revision = await claimSnapshotRevision(db, snapshot?.revision ?? 0);
+        const result = await operation(working);
+        const state = working.exportState();
+        await synchronizeNormalized(db, state, revision);
+        return { result, state };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: Number(process.env.PERSIST_TRANSACTION_TIMEOUT_MS ?? 120_000) });
 
-    // Keep this process's authorization and compatibility read cache aligned
-    // with the committed canonical state.  No persistence write is queued;
-    // `noteExternalCommit` only advances the CAS cursor for the legacy writer.
-    this.cache.importState(committed.state);
-    this.cache.noteExternalCommit();
-    return committed.result;
+      // Keep this process's authorization and compatibility read cache aligned
+      // with the committed canonical state. No persistence write is queued;
+      // `noteExternalCommit` only advances the CAS cursor for the legacy writer.
+      this.cache.importState(committed.state);
+      this.cache.noteExternalCommit();
+      return committed.result;
+    });
   }
 
   /** Read the latest canonical graph without touching the process cache. */
@@ -85,6 +107,7 @@ export class PostgresDomainUnitOfWork implements OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    await this.writes.drain();
     await this.client?.$disconnect();
   }
 }

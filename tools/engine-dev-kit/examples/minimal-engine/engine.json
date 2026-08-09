@@ -10,7 +10,7 @@
   },
   "agent": {
     "instruction": "instruction.md",
-    "skills": ["skills/evaluation/SKILL.md"]
+    "skills": ["skills/evaluation"]
   },
   "limits": {
     "wallClockSeconds": 60,

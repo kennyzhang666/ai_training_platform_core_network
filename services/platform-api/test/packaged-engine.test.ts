@@ -115,7 +115,7 @@ test('the packaged engine grades a real delivery inside the sandbox and the plat
       // The engine's output is a contract, not a trusted score.
       assert.deepEqual(validateEvaluationResult(result), []);
       assert.deepEqual(checkEvaluationScore(result as Record<string, unknown>).errors, []);
-      assert.equal((result as { graderVersion: string }).graderVersion, 'parking-fee-packaged@1.0.0');
+      assert.equal((result as { graderVersion: string }).graderVersion, 'parking-fee-packaged@1.1.0');
       const verify = (result as { dimensions: Record<string, { score: number; max: number }> }).dimensions.verify;
       assert.equal(verify.score, 40);
       assert.equal(verify.max, 40);

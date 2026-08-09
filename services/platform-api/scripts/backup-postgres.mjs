@@ -105,7 +105,7 @@ try {
     format: 'ai-training-platform-postgres-backup/v2',
     exportedAt: new Date().toISOString(),
     schemaVersion: Number.isInteger(snapshot?.schemaVersion) ? snapshot.schemaVersion : 1,
-    databaseRevision: '0014_capacity_query_indexes',
+    databaseRevision: '0016_upload_session_subject_binding',
     // Preserve the transitional envelope for the current API adapter. The
     // normalized tables above are the source of truth for the restored DB.
     state: snapshot?.state == null ? null : jsonSafe(snapshot.state),

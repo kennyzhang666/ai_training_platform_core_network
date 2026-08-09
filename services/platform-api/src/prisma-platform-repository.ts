@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, NotFoundExc
 import { Prisma, PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { AppUser, AuditRecord, OrgUnit, SsoIdentity } from './domain';
+import { hasGlobalAdminAccess } from './access-control';
 import {
   AuditAppendInput,
   AuditRepository,
@@ -316,9 +317,12 @@ class PrismaUserRepository implements UserRepository {
     const department = identity.department?.trim() || undefined;
     if (!employeeNo) throw new BadRequestException('SSO 工号不能为空');
     if (!name) throw new BadRequestException('SSO 姓名不能为空');
+    const configuredBootstrapAdmin = process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO?.trim();
+    const bootstrapGlobalAdmin = configuredBootstrapAdmin === employeeNo
+      && !(await this.db.appUser.findMany({ include: { roleBindings: true } })).some((row) => hasGlobalAdminAccess(mapUser(row)));
     const matchedUnit = department
       ? await this.db.orgUnit.findFirst({
-        where: { OR: [{ id: department }, { path: department }, { name: department }, { label: department }] },
+        where: { level: { gt: 0 }, OR: [{ id: department }, { path: department }, { name: department }] },
       })
       : undefined;
     const existingRow = await this.db.appUser.findUnique({ where: { employeeNo }, include: { roleBindings: true } });
@@ -333,13 +337,19 @@ class PrismaUserRepository implements UserRepository {
           orgPath: matchedUnit?.path,
           departmentHint: matchedUnit ? null : department,
           departmentSource: matchedUnit ? 'SSO' : null,
-          roles: ['learner'],
+          roles: bootstrapGlobalAdmin ? ['global_admin'] : ['learner'],
+          ...(bootstrapGlobalAdmin
+            ? { roleBindings: { create: [{ role: 'global_admin', scopeOrgPath: '/' }] } }
+            : {}),
         },
         include: { roleBindings: true },
       });
       return { user: mapUser(row), firstLogin: true, departmentMatched: Boolean(matchedUnit) };
     }
-    const data: Prisma.AppUserUpdateInput = { name };
+    const data: Prisma.AppUserUpdateInput = {
+      name,
+      ...(bootstrapGlobalAdmin ? { roles: ['global_admin'] } : {}),
+    };
     if (existingRow.departmentSource !== 'ADMIN' && matchedUnit) {
       data.orgUnit = { connect: { id: matchedUnit.id } };
       data.orgPath = matchedUnit.path;
@@ -352,6 +362,20 @@ class PrismaUserRepository implements UserRepository {
       data.departmentHint = matchedUnit ? null : department;
     } else if (department) {
       data.departmentHint = department;
+    }
+    if (bootstrapGlobalAdmin) {
+      data.roleBindings = {
+        connectOrCreate: {
+          where: {
+            userId_role_scopeOrgPath: {
+              userId: existingRow.id,
+              role: 'global_admin',
+              scopeOrgPath: '/',
+            },
+          },
+          create: { role: 'global_admin', scopeOrgPath: '/' },
+        },
+      };
     }
     const row = await this.db.appUser.update({ where: { id: existingRow.id }, data, include: { roleBindings: true } });
     return { user: mapUser(row), firstLogin: false, departmentMatched: Boolean(matchedUnit) };

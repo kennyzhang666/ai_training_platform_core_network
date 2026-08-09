@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-GRADER_VERSION = "parking-fee-packaged@1.0.0"
+GRADER_VERSION = "parking-fee-packaged@1.1.0"
 
 # 四档权重即四个 Verify 得分点的满分，合计 40。
 TIER_WEIGHTS = {"basic": 8.0, "boundary": 12.0, "clarification": 12.0, "change": 8.0}

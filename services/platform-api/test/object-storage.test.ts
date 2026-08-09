@@ -15,11 +15,20 @@ test('local object storage binds handles to actor, verifies checksum, and is ide
   try {
     const storage = new LocalObjectStorage(new ArtifactStore());
     const content = Buffer.from('immutable upload');
-    const session = await storage.createUpload({ actorId: 'worker-a', eventId: 'event-a', fileName: '../delivery.zip', declaredSize: content.length, maxBytes: 1024 });
+    const session = await storage.createUpload({ actorId: 'worker-a', eventId: 'event-a', subjectId: 'learner-a', fileName: '../delivery.zip', declaredSize: content.length, maxBytes: 1024 });
+    assert.equal(session.subjectId, 'learner-a');
     await assert.rejects(storage.put(session.uploadId, session.uploadToken, content, 'worker-b'), /invalid/);
     const metadata = await storage.put(session.uploadId, session.uploadToken, content, 'worker-a');
     assert.equal(metadata.size, content.length);
     const stored = await storage.confirm(session.uploadId, session.uploadToken, 'worker-a', metadata);
+    await assert.rejects(
+      storage.completeForSubmission(session.uploadId, session.uploadToken, 'worker-a', 'event-a', 'learner-b'),
+      /invalid/,
+    );
+    assert.deepEqual(
+      await storage.completeForSubmission(session.uploadId, session.uploadToken, 'worker-a', 'event-a', 'learner-a'),
+      { artifact: stored, fileName: 'delivery.zip' },
+    );
     assert.deepEqual(await storage.read(stored.uri), content);
     const materialized = await storage.materialize(stored.uri, 'delivery.bin');
     assert.equal(existsSync(materialized.path), true);
@@ -28,6 +37,52 @@ test('local object storage binds handles to actor, verifies checksum, and is ide
     assert.equal(existsSync(materialized.path), true, 'local materialization is owned by ArtifactStore and remains immutable');
     assert.deepEqual(await storage.confirm(session.uploadId, session.uploadToken, 'worker-a', metadata), stored);
     await assert.rejects(storage.confirm(session.uploadId, session.uploadToken, 'worker-a', { ...metadata, sha256: '0'.repeat(64) }), /does not match/);
+  } finally {
+    if (previousRoot === undefined) delete process.env.ARTIFACT_ROOT; else process.env.ARTIFACT_ROOT = previousRoot;
+    if (previousTmp === undefined) delete process.env.ARTIFACT_UPLOAD_TMP_ROOT; else process.env.ARTIFACT_UPLOAD_TMP_ROOT = previousTmp;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('local upload sessions survive an API restart when PostgreSQL persistence is enabled', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'object-store-durable-'));
+  const previousRoot = process.env.ARTIFACT_ROOT;
+  const previousTmp = process.env.ARTIFACT_UPLOAD_TMP_ROOT;
+  process.env.ARTIFACT_ROOT = join(root, 'objects');
+  process.env.ARTIFACT_UPLOAD_TMP_ROOT = join(root, 'staging');
+  const sessions = new Map<string, PersistedUploadSession>();
+  const persistence: UploadSessionPersistence = {
+    enabled: true,
+    async create(session) { sessions.set(session.uploadId, structuredClone(session)); },
+    async get(uploadId) { const session = sessions.get(uploadId); return session ? structuredClone(session) : undefined; },
+    async claim(uploadId) {
+      const session = sessions.get(uploadId);
+      if (!session) return 'MISSING';
+      if (session.status === 'CREATED') { session.status = 'UPLOADING'; return 'CLAIMED'; }
+      if (session.status === 'UPLOADING') return 'BUSY';
+      return 'DONE';
+    },
+    async release(uploadId) { const session = sessions.get(uploadId); if (session?.status === 'UPLOADING') session.status = 'CREATED'; },
+    async markUploaded(uploadId, metadata) { const session = sessions.get(uploadId)!; session.status = 'UPLOADED'; session.uploaded = metadata; return structuredClone(session); },
+    async markCompleted(uploadId, completed) { const session = sessions.get(uploadId)!; session.status = 'COMPLETED'; session.completed = completed; return structuredClone(session); },
+    async listExpired(now) { return [...sessions.values()].filter((session) => session.status !== 'COMPLETED' && Date.parse(session.expiresAt) <= now.getTime()).map((session) => structuredClone(session)); },
+    async remove(uploadId) { sessions.delete(uploadId); },
+  };
+  try {
+    const content = Buffer.from('durable local upload');
+    const firstInstance = new LocalObjectStorage(new ArtifactStore(), persistence);
+    const session = await firstInstance.createUpload({ actorId: 'worker-a', eventId: 'event-a', subjectId: 'learner-a', fileName: 'delivery.zip', declaredSize: content.length, maxBytes: 1024 });
+
+    const restartedInstance = new LocalObjectStorage(new ArtifactStore(), persistence);
+    await assert.rejects(restartedInstance.put(session.uploadId, session.uploadToken, content, 'worker-b'), /invalid/);
+    const metadata = await restartedInstance.put(session.uploadId, session.uploadToken, content, 'worker-a');
+    const stored = await restartedInstance.confirm(session.uploadId, session.uploadToken, 'worker-a', metadata);
+    assert.equal(sessions.get(session.uploadId)?.status, 'COMPLETED');
+    assert.deepEqual(
+      await restartedInstance.completeForSubmission(session.uploadId, session.uploadToken, 'worker-a', 'event-a', 'learner-a'),
+      { artifact: stored, fileName: 'delivery.zip' },
+    );
+    assert.deepEqual(await firstInstance.read(stored.uri), content);
   } finally {
     if (previousRoot === undefined) delete process.env.ARTIFACT_ROOT; else process.env.ARTIFACT_ROOT = previousRoot;
     if (previousTmp === undefined) delete process.env.ARTIFACT_UPLOAD_TMP_ROOT; else process.env.ARTIFACT_UPLOAD_TMP_ROOT = previousTmp;
@@ -156,28 +211,44 @@ test('S3 upload sessions survive an API instance restart when backed by durable 
   const options = { bucket: 'bucket', region: 'test', prefix: 'platform' } as const;
   const firstInstance = new S3ObjectStorage(fakeClient as never, options, persistence);
   const content = Buffer.from('durable upload');
-  const session = await firstInstance.createUpload({ actorId: 'worker-a', eventId: 'event-a', fileName: 'delivery.zip', declaredSize: content.length, maxBytes: 1024 });
+  const session = await firstInstance.createUpload({ actorId: 'worker-a', eventId: 'event-a', subjectId: 'learner-a', fileName: 'delivery.zip', declaredSize: content.length, maxBytes: 1024 });
   const restartedInstance = new S3ObjectStorage(fakeClient as never, options, persistence);
   await assert.rejects(restartedInstance.put(session.uploadId, session.uploadToken, content, 'worker-b'), /invalid/);
   const metadata = await restartedInstance.put(session.uploadId, session.uploadToken, content, 'worker-a');
   const stored = await restartedInstance.confirm(session.uploadId, session.uploadToken, 'worker-a', metadata);
   assert.equal(sessions.get(session.uploadId)?.status, 'COMPLETED');
+  await assert.rejects(
+    restartedInstance.completeForSubmission(session.uploadId, session.uploadToken, 'worker-a', 'event-a', 'learner-b'),
+    /invalid/,
+  );
+  assert.deepEqual(
+    await restartedInstance.completeForSubmission(session.uploadId, session.uploadToken, 'worker-a', 'event-a', 'learner-a'),
+    { artifact: stored, fileName: 'delivery.zip' },
+  );
   assert.deepEqual(await firstInstance.read(stored.uri), content);
   assert.deepEqual(await restartedInstance.confirm(session.uploadId, session.uploadToken, 'worker-a', metadata), stored);
   assert.equal([...objects.keys()].some((key) => key.endsWith('.part')), false, 'repeated confirmation retries staging cleanup');
 });
 
-test('object storage selection rejects local production and incomplete S3 configuration', () => {
+test('object storage selection requires durable sessions for single-node local storage and production S3', () => {
   const previousNodeEnv = process.env.NODE_ENV;
   const previousMode = process.env.OBJECT_STORAGE_MODE;
   const previousBucket = process.env.OBJECT_STORAGE_BUCKET;
   const previousRepository = process.env.PLATFORM_REPOSITORY;
   const previousAccessKey = process.env.OBJECT_STORAGE_ACCESS_KEY_ID;
   const previousSecret = process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY;
+  const previousDeploymentProfile = process.env.PLATFORM_DEPLOYMENT_PROFILE;
   try {
     process.env.NODE_ENV = 'production';
     process.env.OBJECT_STORAGE_MODE = 'local';
     assert.throws(() => createObjectStorage(new ArtifactStore()), /not allowed in production/);
+
+    process.env.PLATFORM_DEPLOYMENT_PROFILE = 'single-node';
+    assert.throws(() => createObjectStorage(new ArtifactStore()), /durable upload-session persistence is required/);
+    assert.throws(() => createObjectStorage(new ArtifactStore(), { enabled: false } as UploadSessionPersistence), /durable upload-session persistence is required/);
+    const durableSessions = { enabled: true } as UploadSessionPersistence;
+    assert.ok(createObjectStorage(new ArtifactStore(), durableSessions) instanceof LocalObjectStorage);
+    delete process.env.PLATFORM_DEPLOYMENT_PROFILE;
 
     process.env.OBJECT_STORAGE_MODE = 's3';
     delete process.env.OBJECT_STORAGE_BUCKET;
@@ -200,5 +271,6 @@ test('object storage selection rejects local production and incomplete S3 config
     if (previousRepository === undefined) delete process.env.PLATFORM_REPOSITORY; else process.env.PLATFORM_REPOSITORY = previousRepository;
     if (previousAccessKey === undefined) delete process.env.OBJECT_STORAGE_ACCESS_KEY_ID; else process.env.OBJECT_STORAGE_ACCESS_KEY_ID = previousAccessKey;
     if (previousSecret === undefined) delete process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY; else process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY = previousSecret;
+    if (previousDeploymentProfile === undefined) delete process.env.PLATFORM_DEPLOYMENT_PROFILE; else process.env.PLATFORM_DEPLOYMENT_PROFILE = previousDeploymentProfile;
   }
 });
