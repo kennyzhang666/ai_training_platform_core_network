@@ -630,14 +630,14 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务
           <button class="tab" role="tab" aria-selected="false" aria-controls="release-linux" id="release-tab-linux">Linux 发布机</button>
         </div>
         <div class="tabpanel active" id="release-windows" role="tabpanel" aria-labelledby="release-tab-windows">
-          <div class="codebox"><div class="codehead"><span>PowerShell</span><button class="copy" data-copy>复制</button></div><pre>pnpm release:build -- --target win32-x64 `
+          <div class="codebox"><div class="codehead"><span>PowerShell</span><button class="copy" data-copy>复制</button></div><pre>pnpm release:build --target win32-x64 `
   --runtime-root D:\release-inputs\win32-x64 `
   --wheelhouse D:\release-inputs\wheelhouse-win32-x64 `
   --version 0.9.8 `
   --source-date-epoch 1786320000</pre></div>
         </div>
         <div class="tabpanel" id="release-linux" role="tabpanel" aria-labelledby="release-tab-linux">
-          <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>pnpm release:build -- --target linux-x64 \
+          <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>pnpm release:build --target linux-x64 \
   --runtime-root /opt/release-inputs/linux-x64 \
   --wheelhouse /opt/release-inputs/wheelhouse-linux-x64 \
   --version 0.9.8 \

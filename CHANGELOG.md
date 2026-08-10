@@ -11,3 +11,4 @@
 - 修复 Windows 动态端口可能连续落入 Fetch 禁用区间导致 100 人本地验收偶发无法启动的问题，改为显式申请安全端口并重试占用冲突。
 - 为 Ubuntu 22.04 x64 增加从不可变版本标签构建的 GitHub Actions 原生离线发布流程，固定并校验 Node、Python、Nginx 运行时，生成 tar.gz、SHA-256 和运行时来源清单后上传 Release。
 - 修复 Code Agent 命令白名单和 Windows npm 原生包装器在非 Windows 测试机上的路径解析差异；Linux 发布门禁只执行目标平台适用的部署检查。
+- 修复 pnpm 在 Linux 上传递参数分隔符导致发布打包器误判空选项的问题，并兼容带或不带分隔符的发布命令。

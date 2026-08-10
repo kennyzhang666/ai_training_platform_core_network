@@ -387,7 +387,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - Python grader：18/18；
 - LDAP 网关：20/20；
 - 评测资料包：2/2；
-- 离线发布：8/8；
+- 离线发布：9/9；
 - Windows 部署门禁：15 项通过；Linux Bash 原生语法项在 Windows 上按平台跳过；
 - 100 人集中提交与有界评测队列：通过；
 - 构建、类型检查和 `git diff --check`：通过。
