@@ -111,7 +111,7 @@ jobs:
           pnpm test
           pnpm kit:test
           pnpm ldap3:test
-          pnpm deployment:test
+          node --test scripts/single-node-deployment.test.mjs
           pnpm release:test
           pnpm lint
 

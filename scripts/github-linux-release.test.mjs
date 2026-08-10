@@ -14,6 +14,8 @@ test('GitHub workflow builds tagged releases on native Ubuntu 22.04 and publishe
   assert.match(workflow, /permissions:\s*\n\s*contents: write/);
   assert.match(workflow, /runs-on: ubuntu-22\.04/);
   assert.doesNotMatch(workflow, /runs-on: ubuntu-latest/);
+  assert.match(workflow, /node --test scripts\/single-node-deployment\.test\.mjs/);
+  assert.doesNotMatch(workflow, /pnpm deployment:test/);
   assert.match(workflow, /pnpm release:build --/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /\.tar\.gz\.sha256/);

@@ -4,7 +4,7 @@ import { basename, delimiter, dirname, extname, isAbsolute, join, resolve, sep }
 
 function commandNames(value) {
   const normalized = String(value ?? '').trim().toLowerCase();
-  const name = basename(normalized);
+  const name = normalized.split(/[\\/]/).filter(Boolean).at(-1) ?? basename(normalized);
   const withoutNativeExtension = name.replace(/\.(?:exe|com|cmd|bat|ps1)$/i, '');
   return new Set([normalized, name, withoutNativeExtension].filter(Boolean));
 }
@@ -57,7 +57,8 @@ function resolveNpmNativeShim(shim) {
     if (!match) continue;
     const expanded = match[1]
       .replace(/%~dp0/gi, shimRoot)
-      .replace(/%dp0%/gi, shimRoot);
+      .replace(/%dp0%/gi, shimRoot)
+      .replace(/[\\/]+/g, sep);
     if (/%[^%]+%/.test(expanded)) continue;
     const candidate = resolve(expanded);
     if (nativeFile(candidate)) return candidate;
