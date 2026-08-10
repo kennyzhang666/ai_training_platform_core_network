@@ -1,10 +1,10 @@
 # AI 能力训战平台开发手册
 
-> 当前版本：`v0.9.8`
+> 当前发布版本：`v0.9.8`（主线包含未发布的一键安装改动）
 > 更新日期：2026-08-10
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本已经完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布的本地闭环，并提供 Ubuntu 22.04 x64 原生 GitHub 发布流水线；Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、系统服务化、自动备份和离线升级仍是下一阶段工作。
+企业内部 AI 训战、交付评测和能力复盘平台。当前主线已经完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布的本地闭环，并提供双平台一键安装入口与 Ubuntu 22.04 x64 原生 GitHub 发布流水线；Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是下一阶段工作。
 
 平台级文档只保留三个入口：
 
@@ -169,10 +169,12 @@ pnpm dev:web
 | `challenges/` | 示例赛题、引擎、Skill、参考件和样例交付件 |
 | `scripts/evaluation-worker.mjs` | 拉取式批次 Worker |
 | `scripts/code-agent-local-bridge.mjs` | 仅用于联调的本地 Code Agent 适配器 |
+| `scripts/prepare-single-node-environment.mjs` | 原生发布包配置初始化与随机密钥生成器 |
 | `scripts/build-single-node-release.mjs` | Windows/Linux 离线发布包组装器 |
 | `scripts/prepare-linux-release-runtime.sh` | Ubuntu 22.04 x64 固定版本运行时与离线 wheelhouse 准备器 |
 | `.github/workflows/release-linux-ubuntu-22.04.yml` | 从不可变版本标签构建并发布 Linux 离线包 |
 | `deploy/single-node/` | 单服务器运维脚本、配置模板与 Nginx 模板 |
+| `install.cmd` / `install.sh` | Windows/Linux 原生发布包一键安装入口 |
 | `tools/engine-dev-kit/` | 可独立交付给评测引擎开发者的工具包 |
 | `tmp/` | 本地数据、日志和临时工作区，不进入版本库 |
 
@@ -452,13 +454,15 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 全局管理员与部门管理员的组织范围隔离；
 - 难题审核、待揭榜、揭榜成功、解决方案提交和公开控制；
 - Windows x64/Linux x64 离线发布布局、双平台管理命令和一致性备份恢复；
+- Windows/Linux `Install` / `Uninstall`、随机密钥生成和开机自启注册；
 - Ubuntu 22.04 x64 原生 GitHub Actions 构建、SHA-256 校验、运行时冒烟和 Release 附件发布；
 - SDD 运维日志脱敏综合训战的真实角色端到端验收，以及版本化 v2 进阶赛题的 24 项隐藏强度用例。
 
 ### 15.2 当前限制
 
 - Windows Server x64 与 Linux x64 真实断网目标机 UAT 尚未完成；
-- 一次 `Install`、系统服务、开机自启、自动备份、离线升级和诊断包尚未实现；
+- 一键安装与开机自启已通过脚本和发布布局门禁，但尚未在两台干净断网目标服务器完成 UAT；
+- 自动备份、离线升级、诊断包和进程异常退出后的自动拉起尚未实现；
 - 单服务器档固定一个 API 实例；标准模式的多实例容量和故障切换尚未形成生产证据；
 - 真实 GitLab 取件与 GitLab CI 自动评测适配器按产品决策后置；
 - 真实 Agent 沙箱、凭据、网络和资源限制由部署环境提供，当前本地 bridge 不是生产沙箱；
@@ -475,8 +479,8 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 按纵切面推进：
 
 1. Windows Server x64 原生发布包，以及 Ubuntu 22.04.5 断网目标机 UAT；
-2. `Install` / `Uninstall`、随机密钥、目录权限、磁盘、LDAP、数据库和 Agent 自检；
-3. Windows 服务与 Linux systemd，开机自启和异常重启；
+2. 在断网目标机验证 `Install` / `Uninstall`、随机密钥、目录权限、LDAP、数据库和 Agent 自检；
+3. 在现有 Windows 开机任务和 Linux systemd 基础上补进程异常退出自动拉起；
 4. 定时备份、校验、轮转和低磁盘预警；
 5. 离线 `Upgrade`、升级前恢复点与失败回退；
 6. 脱敏诊断包和日志轮转；

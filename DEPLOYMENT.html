@@ -146,7 +146,7 @@
         <a href="#troubleshooting"><span class="n">10</span>故障排查</a>
         <a href="#boundaries"><span class="n">11</span>当前边界</a>
       </nav>
-      <div class="side-note">版本 v0.9.8<br>Windows x64 / Linux x64<br>离线单服务器优先</div>
+      <div class="side-note">v0.9.8 后续主线<br>Windows x64 / Linux x64<br>原生一键安装</div>
     </aside>
 
     <main>
@@ -158,7 +158,7 @@
         </div>
         <div class="actions">
           <button class="button" type="button" onclick="window.print()">打印 / 导出 PDF</button>
-          <a class="button" href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases/tag/v0.9.8">下载 v0.9.8</a>
+          <a class="button" href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases">查看发布包</a>
           <a class="button primary" href="#quick">直接部署</a>
         </div>
       </div>
@@ -168,7 +168,7 @@
       </div>
 
       <div class="callout warning">
-        <strong>v0.9.8 当前事实：</strong><code>Prepare</code>、<code>Doctor</code>、<code>Start</code>、<code>Stop</code>、<code>Status</code>、<code>Backup</code>、<code>Restore</code> 已实现；一键 <code>Install</code>、系统服务、自动备份和离线 <code>Upgrade</code> 尚未实现。服务器重启后需要再次执行 <code>Start</code>。
+        <strong>当前主线事实：</strong>原生发布包已经提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成和开机自启；自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。已发布的 v0.9.8 附件不包含这些未发布改动，必须使用后续重新构建的原生包。
       </div>
 
       <section id="start">
@@ -207,7 +207,7 @@
 
       <section id="quick">
         <h2>02 · 一页纸傻瓜部署</h2>
-        <p>下面是目标服务器的最短路径。Ubuntu 22.04 x64 从 <a href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases/tag/v0.9.8">v0.9.8 Release</a> 下载发布包和同名 <code>.sha256</code>；其他系统由发布人员提供对应平台文件。尖括号内容属于企业环境信息，必须替换；其余命令可以照抄。</p>
+        <p>下面是带一键安装入口的后续原生发布包最短路径。已发布的 v0.9.8 附件仍使用旧管理流程；重新构建后，Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。企业 PostgreSQL、LDAP、管理员和 Code Agent 信息必须填写，随机密钥由脚本生成。</p>
 
         <div class="tabs" role="tablist" aria-label="操作系统">
           <button class="tab" role="tab" aria-selected="true" aria-controls="quick-windows" id="tab-windows">Windows Server</button>
@@ -224,7 +224,8 @@ CREATE DATABASE ai_training OWNER ai_training ENCODING 'UTF8';</pre></div>
 
           <div class="step"><div class="stepno">2</div><div><h4>校验并解压发布包</h4>
             <div class="codebox"><div class="codehead"><span>管理员 PowerShell</span><button class="copy" data-copy>复制</button></div><pre>Set-Location D:\Release
-$archive = Resolve-Path .\ai-training-platform-0.9.8-win32-x64.zip
+$version = '&lt;新发布版本&gt;'
+$archive = Resolve-Path ".\ai-training-platform-$version-win32-x64.zip"
 $expected = (Get-Content "$archive.sha256").Split()[0].ToLower()
 $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
 if ($actual -ne $expected) { throw "发布包 SHA-256 校验失败" }
@@ -233,23 +234,17 @@ Expand-Archive -LiteralPath $archive -DestinationPath C:\AITraining -Force
 Set-Location C:\AITraining</pre></div>
           </div></div>
 
-          <div class="step"><div class="stepno">3</div><div><h4>生成两条密钥并创建配置</h4>
-            <div class="codebox"><div class="codehead"><span>管理员 PowerShell</span><button class="copy" data-copy>复制</button></div><pre>$trustedSecret = & .\runtime\python\python.exe -c "import secrets; print(secrets.token_hex(32))"
-$sessionSecret = & .\runtime\python\python.exe -c "import secrets; print(secrets.token_hex(32))"
-"TRUSTED_GATEWAY_HMAC_SECRET=$trustedSecret"
-"LDAP_GATEWAY_SESSION_SECRET=$sessionSecret"
-Copy-Item .\deploy\single-node\.env.example .\deploy\single-node\.env
-notepad .\deploy\single-node\.env</pre></div>
-            <p>把两条输出分别粘贴到配置文件。必须修改的项目见本页“配置说明”。不要把密钥发到聊天或提交 Git。</p>
+          <div class="step"><div class="stepno">3</div><div><h4>执行一键安装</h4>
+            <div class="codebox"><div class="codehead"><span>PowerShell 或双击</span><button class="copy" data-copy>复制</button></div><pre>Set-Location C:\AITraining
+.\install.cmd</pre></div>
+            <p>脚本会请求管理员权限、生成独立随机密钥并打开配置文件。填写本页“只改这些配置”中的企业信息，保存并关闭记事本后，脚本继续完成预检、数据库迁移、启动和开机自启注册。</p>
           </div></div>
 
-          <div class="step"><div class="stepno">4</div><div><h4>准备、体检并启动</h4>
+          <div class="step"><div class="stepno">4</div><div><h4>确认安装结果</h4>
             <div class="codebox"><div class="codehead"><span>管理员 PowerShell</span><button class="copy" data-copy>复制</button></div><pre>Set-Location C:\AITraining
-.\deploy\single-node\manage.cmd Prepare
 .\deploy\single-node\manage.cmd Doctor
-.\deploy\single-node\manage.cmd Start
 .\deploy\single-node\manage.cmd Status</pre></div>
-            <p><code>Prepare</code> 或 <code>Doctor</code> 失败时不要继续。按输出修正配置后重新执行。</p>
+            <p><code>install.cmd</code> 失败时按输出修正 <code>deploy\single-node\.env</code>，再次运行同一个入口；脚本不会覆盖已有配置。</p>
           </div></div>
 
           <div class="step"><div class="stepno">5</div><div><h4>开放用户访问端口</h4>
@@ -272,31 +267,26 @@ SQL</pre></div>
 
           <div class="step"><div class="stepno">2</div><div><h4>校验并解压发布包</h4>
             <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>cd /tmp/release
-sha256sum -c ai-training-platform-0.9.8-linux-x64.tar.gz.sha256
+version='&lt;新发布版本&gt;'
+sha256sum -c "ai-training-platform-$version-linux-x64.tar.gz.sha256"
 sudo mkdir -p /opt/ai-training
-sudo tar -xzf ai-training-platform-0.9.8-linux-x64.tar.gz -C /opt/ai-training
+sudo tar -xzf "ai-training-platform-$version-linux-x64.tar.gz" -C /opt/ai-training
 sudo chown -R "$USER":"$(id -gn)" /opt/ai-training
 cd /opt/ai-training
-chmod +x deploy/single-node/manage.sh</pre></div>
+chmod +x install.sh deploy/single-node/manage.sh</pre></div>
           </div></div>
 
-          <div class="step"><div class="stepno">3</div><div><h4>生成两条密钥并创建配置</h4>
-            <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>trusted_secret="$(./runtime/python/bin/python3 -c 'import secrets; print(secrets.token_hex(32))')"
-session_secret="$(./runtime/python/bin/python3 -c 'import secrets; print(secrets.token_hex(32))')"
-printf 'TRUSTED_GATEWAY_HMAC_SECRET=%s\n' "$trusted_secret"
-printf 'LDAP_GATEWAY_SESSION_SECRET=%s\n' "$session_secret"
-cp deploy/single-node/.env.example deploy/single-node/.env
-chmod 600 deploy/single-node/.env
-vi deploy/single-node/.env</pre></div>
-            <p>把两条输出分别粘贴到配置文件。Linux 中含特殊字符或空格的值使用单引号。</p>
-          </div></div>
-
-          <div class="step"><div class="stepno">4</div><div><h4>准备、体检并启动</h4>
+          <div class="step"><div class="stepno">3</div><div><h4>执行一键安装</h4>
             <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>cd /opt/ai-training
-./deploy/single-node/manage.sh Prepare
+EDITOR=vi ./install.sh</pre></div>
+            <p>脚本生成独立随机密钥并打开配置文件。填写企业信息并退出编辑器后，脚本完成预检、数据库迁移、启动和 systemd 开机自启；安装系统服务时会按需请求 sudo。</p>
+          </div></div>
+
+          <div class="step"><div class="stepno">4</div><div><h4>确认安装结果</h4>
+            <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>cd /opt/ai-training
 ./deploy/single-node/manage.sh Doctor
-./deploy/single-node/manage.sh Start
-./deploy/single-node/manage.sh Status</pre></div>
+./deploy/single-node/manage.sh Status
+systemctl status ai-training-platform.service --no-pager</pre></div>
           </div></div>
 
           <div class="step"><div class="stepno">5</div><div><h4>开放用户访问端口</h4><p>按服务器发行版选择一条，不要两条都执行：</p>
@@ -318,8 +308,8 @@ curl -I http://127.0.0.1:8080/</pre></div>
           <thead><tr><th>配置项</th><th>填写内容</th><th>约束</th></tr></thead>
           <tbody>
             <tr><td><code>DATABASE_URL</code></td><td>刚创建的 PostgreSQL 用户、密码和数据库</td><td>单服务器主机固定 127.0.0.1；特殊字符需 URL 编码</td></tr>
-            <tr><td><code>TRUSTED_GATEWAY_HMAC_SECRET</code></td><td>第一条 64 位十六进制密钥</td><td>API、LDAP 网关和 Worker 三处完全相同</td></tr>
-            <tr><td><code>LDAP_GATEWAY_SESSION_SECRET</code></td><td>第二条独立密钥</td><td>不能与 HMAC 密钥复用</td></tr>
+            <tr><td><code>TRUSTED_GATEWAY_HMAC_SECRET</code></td><td>安装器自动生成</td><td>不要手工复制或对外发送</td></tr>
+            <tr><td><code>LDAP_GATEWAY_SESSION_SECRET</code></td><td>安装器自动生成的另一条独立密钥</td><td>不会与 HMAC 密钥复用</td></tr>
             <tr><td><code>PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO</code></td><td>首位全局管理员工号</td><td>仅空系统第一次有效</td></tr>
             <tr><td><code>LDAP_SERVER</code></td><td>企业 LDAP/AD 主机名</td><td>不能写浏览器平台地址</td></tr>
             <tr><td><code>LDAP_PORT</code></td><td>StartTLS 通常 389，LDAPS 通常 636</td><td>与下面两个 TLS 开关一致</td></tr>
@@ -330,7 +320,7 @@ curl -I http://127.0.0.1:8080/</pre></div>
             <tr><td><code>LDAP_BIND_PREFIX</code></td><td>域账号前缀</td><td>例如 Windows <code>Corp\</code>；Linux env 注意反斜杠</td></tr>
             <tr><td><code>EVALUATION_WORKER_EMPLOYEE_NO</code></td><td>已有全局管理员工号</td><td>用于 Worker 领取和回传批次</td></tr>
             <tr><td><code>EVALUATION_WORKER_NAME</code></td><td>该工号在 SSO 中的真实姓名</td><td>必须与首次登记身份一致</td></tr>
-            <tr><td><code>EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET</code></td><td>第一条 HMAC 密钥</td><td>不能使用浏览器 Cookie</td></tr>
+            <tr><td><code>EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET</code></td><td>安装器自动同步为网关 HMAC 密钥</td><td>不能使用浏览器 Cookie</td></tr>
             <tr><td><code>CODE_AGENT_COMMAND</code></td><td>Code Agent 可执行文件或绝对路径</td><td>默认 <code>opencode</code></td></tr>
             <tr><td><code>CODE_AGENT_ARGS_JSON</code></td><td>参数 JSON 数组</td><td>OpenCode 默认 <code>["--prompt","{{prompt}}"]</code></td></tr>
             <tr><td><code>CODE_AGENT_ALLOWED_EXECUTABLES</code></td><td>允许启动的可执行文件，逗号分隔</td><td>必须包含命令名或绝对路径</td></tr>
@@ -401,7 +391,7 @@ SINGLE_NODE_LISTEN_PORT=8282</pre></div>
 
       <section id="standard">
         <h2>05 · 标准分离部署</h2>
-        <div class="callout warning"><strong>使用条件：</strong>只有在数据库、对象存储或 Worker 必须由不同团队维护时才使用。v0.9.8 的离线包管理脚本固定校验 <code>single-node</code>，不能拿它假装一键启动标准模式。标准模式需要平台开发/运维人员按组件部署并完成目标环境 UAT。</div>
+        <div class="callout warning"><strong>使用条件：</strong>只有在数据库、对象存储或 Worker 必须由不同团队维护时才使用。原生离线包管理脚本固定校验 <code>single-node</code>，不能拿它假装一键启动标准模式。标准模式需要平台开发/运维人员按组件部署并完成目标环境 UAT。</div>
 
         <div class="flow" aria-label="标准部署拓扑">用户
   |
@@ -517,7 +507,7 @@ LDAP_GATEWAY_COOKIE_SECURE=false
 SINGLE_NODE_LISTEN_PORT=8080</pre></div><p>LDAP 到目录服务器仍必须使用 StartTLS 或 LDAPS。</p></div>
           <div class="card"><h3>企业 HTTPS</h3><p>由企业入口网关或外部 Nginx 终止 TLS：</p><div class="codebox"><div class="codehead"><span>身份网关</span><button class="copy" data-copy>复制</button></div><pre>INTRANET_HTTP_ONLY=false
 LDAP_GATEWAY_COOKIE_SECURE=true
-CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务器管理器尚未自动生成 HTTPS 配置，不能只改 Cookie 开关就声称完成 HTTPS。</p></div>
+CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>当前单服务器管理器尚未自动生成 HTTPS 配置，不能只改 Cookie 开关就声称完成 HTTPS。</p></div>
         </div>
 
         <div class="callout danger"><strong>不能绕过：</strong>API 的 3000 端口和 LDAP 网关的 8081 端口不向用户网段开放；浏览器不能直连 API；LDAP 密码、Cookie、HMAC、OIDC Token 和完整身份断言不能写入日志。</div>
@@ -542,6 +532,8 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务
 .\deploy\single-node\manage.cmd Restore -Archive D:\Backup\ai-training-single-node-20260810-120000.zip
 .\deploy\single-node\manage.cmd Doctor
 .\deploy\single-node\manage.cmd Start</pre></div>
+          <div class="codebox"><div class="codehead"><span>移除开机自启（保留全部数据）</span><button class="copy" data-copy>复制</button></div><pre>Set-Location C:\AITraining
+.\deploy\single-node\manage.cmd Uninstall</pre></div>
         </div>
         <div class="tabpanel" id="ops-linux" role="tabpanel" aria-labelledby="ops-tab-linux">
           <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>cd /opt/ai-training
@@ -555,7 +547,11 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务
 ./deploy/single-node/manage.sh Restore --archive /backup/ai-training-single-node-20260810-120000.tar.gz
 ./deploy/single-node/manage.sh Doctor
 ./deploy/single-node/manage.sh Start</pre></div>
+          <div class="codebox"><div class="codehead"><span>移除开机自启（保留全部数据）</span><button class="copy" data-copy>复制</button></div><pre>cd /opt/ai-training
+./deploy/single-node/manage.sh Uninstall</pre></div>
         </div>
+
+        <p><code>Install</code> 可以重复执行，用于重新体检、迁移、启动并刷新开机自启配置。<code>Uninstall</code> 只移除 Windows 开机任务或 Linux systemd 单元并停止进程，不删除 <code>.env</code>、PostgreSQL 数据、<code>data/</code> 或 <code>backups/</code>。</p>
 
         <h3>备份规则</h3>
         <ul>
@@ -567,13 +563,13 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务
           <li>至少每季度在非生产环境做一次真实恢复演练。</li>
         </ul>
 
-        <h3>手工离线升级（v0.9.8）</h3>
+        <h3>手工离线升级</h3>
         <ol>
           <li>执行 <code>Backup</code>，把备份和旧发布包移到独立位置；</li>
           <li>执行 <code>Stop</code>；</li>
           <li>校验新发布包 SHA-256，解压到新目录，不覆盖旧目录；</li>
           <li>复制旧 <code>.env</code> 到新目录，并对照新模板补充新增字段；</li>
-          <li>在新目录执行 <code>Prepare</code>、<code>Doctor</code>、<code>Start</code>；</li>
+          <li>在新目录执行根目录 <code>install.cmd</code> 或 <code>install.sh</code>，更新开机自启到新目录，再执行 <code>Doctor</code>；</li>
           <li>完成登录、提交、评测和报告抽样；</li>
           <li>失败时停止新目录，使用升级前备份恢复数据库和交付件，再启动旧版本。</li>
         </ol>
@@ -614,8 +610,7 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务
 ├─ powershell/pwsh.exe
 ├─ python/python.exe
 ├─ nginx/nginx.exe
-├─ nginx/conf/mime.types
-└─ service/winsw.exe</div></div>
+└─ nginx/conf/mime.types</div></div>
           <div class="card"><h3>Linux 运行时输入</h3><div class="flow">linux-x64/
 ├─ node/bin/node
 ├─ python/bin/python3
@@ -633,14 +628,14 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务
           <div class="codebox"><div class="codehead"><span>PowerShell</span><button class="copy" data-copy>复制</button></div><pre>pnpm release:build --target win32-x64 `
   --runtime-root D:\release-inputs\win32-x64 `
   --wheelhouse D:\release-inputs\wheelhouse-win32-x64 `
-  --version 0.9.8 `
+  --version X.Y.Z `
   --source-date-epoch 1786320000</pre></div>
         </div>
         <div class="tabpanel" id="release-linux" role="tabpanel" aria-labelledby="release-tab-linux">
           <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>pnpm release:build --target linux-x64 \
   --runtime-root /opt/release-inputs/linux-x64 \
   --wheelhouse /opt/release-inputs/wheelhouse-linux-x64 \
-  --version 0.9.8 \
+  --version X.Y.Z \
   --source-date-epoch 1786320000</pre></div>
         </div>
 
@@ -664,7 +659,7 @@ git diff --check</pre></div>
         <p>按顺序执行，上一项失败时不要跳过。</p>
         <ol class="checklist">
           <li>发布包 SHA-256 与发布方一致；</li>
-          <li><code>Prepare</code> 成功完成全部数据库迁移；</li>
+          <li><code>Install</code> 成功生成配置、完成全部数据库迁移并注册开机自启；</li>
           <li><code>Doctor</code> 检查运行时、Python 模块、端口、数据库、Nginx 和 Code Agent 通过；</li>
           <li><code>Start</code> 后 <code>Status</code> 显示 API、LDAP 网关、Worker 和 Nginx 正常；</li>
           <li>服务器本机访问 API health 和 LDAP health 成功；</li>
@@ -679,7 +674,7 @@ git diff --check</pre></div>
           <li>平台显示已完成、详细报告、排名、证据链和个人画像；</li>
           <li>重复回传保持幂等，重新评测产生新运行而不覆盖旧结果；</li>
           <li>执行一次 <code>Backup</code>，在非生产环境完成 <code>Restore</code>；</li>
-          <li>服务器重启后重新执行 <code>Start</code>，确认平台恢复；</li>
+          <li>服务器重启后不执行人工命令，确认平台自动恢复；</li>
           <li>日志中没有密码、Cookie、HMAC、Token、SSO 断言或完整源码。</li>
         </ol>
 
@@ -731,11 +726,11 @@ cd /opt/ai-training
       <section id="boundaries">
         <h2>11 · 当前边界与下一步</h2>
         <table>
-          <thead><tr><th>能力</th><th>v0.9.8 状态</th><th>后续目标</th></tr></thead>
+          <thead><tr><th>能力</th><th>当前主线状态</th><th>后续目标</th></tr></thead>
           <tbody>
             <tr><td>Windows/Linux 离线包</td><td>布局、运行时和归档门禁已完成；真实断网双平台 UAT 待完成</td><td>两台干净服务器形成 UAT 记录</td></tr>
-            <tr><td>首次部署</td><td><code>Prepare + Doctor + Start</code></td><td>增加 <code>Install / Uninstall</code> 和配置生成</td></tr>
-            <tr><td>开机自启</td><td>未自动注册系统服务</td><td>Windows 服务 + Linux systemd</td></tr>
+            <tr><td>首次部署</td><td>根目录 <code>install.cmd</code> / <code>install.sh</code>，自动随机密钥、预检、迁移和启动</td><td>干净断网目标机 UAT</td></tr>
+            <tr><td>开机自启</td><td>Windows 任务计划程序 + Linux systemd</td><td>进程异常退出自动拉起与故障演练</td></tr>
             <tr><td>备份</td><td>手动一致性备份与恢复</td><td>计划任务、校验、轮转和空间告警</td></tr>
             <tr><td>升级</td><td>手工新目录升级和备份回退</td><td>离线 Upgrade、恢复点和失败自动回滚</td></tr>
             <tr><td>HTTPS</td><td>单服务器快捷包以隔离内网 HTTP 为主</td><td>企业证书模板和管理器自动配置</td></tr>
@@ -747,7 +742,7 @@ cd /opt/ai-training
         <div class="callout success"><strong>部署完成标准：</strong>用户只访问一个地址；真实 SSO 登录；管理员能建题、建训战、选人评测；员工能提交并查看报告；数据库和交付件能一致备份恢复；日常操作不需要理解 Node、pnpm、Python 虚拟环境或平台源码。</div>
       </section>
 
-      <div class="footer">AI 能力训战平台部署与运维手册 · v0.9.8 · 2026-08-10<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
+      <div class="footer">AI 能力训战平台部署与运维手册 · v0.9.8 后续主线 · 2026-08-10<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
     </main>
   </div>
   <div id="toast" role="status" aria-live="polite">已复制</div>

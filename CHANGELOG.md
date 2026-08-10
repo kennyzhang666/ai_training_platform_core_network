@@ -2,6 +2,15 @@
 
 本文件只记录发布事实；架构、开发流程、路线和运维说明分别以 `README.md`、`DESIGN.md`、`DEPLOYMENT.html` 为准。
 
+## 未发布
+
+- 原生 Windows/Linux 离线包新增根目录一键入口：`install.cmd` 与 `install.sh`。
+- 首次安装自动生成独立的网关 HMAC 和 LDAP 会话密钥，保留 PostgreSQL、LDAP、管理员及 Code Agent 等企业配置由管理员填写。
+- `Install` 自动执行预检、数据库迁移、Nginx 配置、健康启动并注册开机自启；Windows 使用任务计划程序，Linux 使用 systemd。
+- Windows 一键安装不再依赖未使用的 WinSW 包装器，减少离线运行时输入。
+- 新增幂等 `Uninstall`，只停止平台并移除开机自启，不删除配置、PostgreSQL 数据、交付件或备份。
+- 原生发布组装器与部署门禁覆盖双平台安装入口、配置生成器、持久数据保护和发布包文件权限。
+
 ## v0.9.8 · 2026-08-10
 
 - 保留已发布的 `sdd-log-redaction-v1`，新增不可覆盖历史版本的 `sdd-log-redaction-v2`。

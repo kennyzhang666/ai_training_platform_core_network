@@ -37,6 +37,7 @@ async function fixture(root) {
     'sandbox/launch.py',
     'scripts/evaluation-worker.mjs',
     'scripts/code-agent-executable.mjs',
+    'scripts/prepare-single-node-environment.mjs',
     'services/ldap3-gateway/ldap3_gateway.py',
     'services/ldap3-gateway/requirements.txt',
     'services/ldap3-gateway/static/login.html',
@@ -46,6 +47,8 @@ async function fixture(root) {
     'deploy/single-node/nginx-http.conf.template',
     'deploy/release/windows.env.example',
     'deploy/release/linux.env.example',
+    'install.cmd',
+    'install.sh',
     'DEPLOYMENT.html',
   ]) await put(sourceRoot, path);
   await put(sourceRoot, 'executors/drill-grader/engine.json', JSON.stringify({
@@ -89,7 +92,7 @@ test('release contract supports Windows x64 and Linux x64 with platform runtimes
   assert.deepEqual(Object.keys(RELEASE_TARGETS).sort(), ['linux-x64', 'win32-x64']);
   assert.ok(RELEASE_TARGETS['win32-x64'].runtimeFiles.includes('node/node.exe'));
   assert.ok(RELEASE_TARGETS['win32-x64'].runtimeFiles.includes('powershell/pwsh.exe'));
-  assert.ok(RELEASE_TARGETS['win32-x64'].runtimeFiles.includes('service/winsw.exe'));
+  assert.equal(RELEASE_TARGETS['win32-x64'].runtimeFiles.includes('service/winsw.exe'), false);
   assert.ok(RELEASE_TARGETS['linux-x64'].runtimeFiles.includes('node/bin/node'));
   assert.equal(RELEASE_TARGETS['win32-x64'].archiveExtension, '.zip');
   assert.equal(RELEASE_TARGETS['linux-x64'].archiveExtension, '.tar.gz');
@@ -167,12 +170,22 @@ for (const target of ['win32-x64', 'linux-x64']) {
       assert.ok(manifest.files.some((file) => file.path === 'grader/src/drill_grader/__init__.py'));
       assert.ok(manifest.files.some((file) => file.path === 'grader/profiles/yellow.yaml'));
       assert.ok(manifest.files.some((file) => file.path === 'scripts/code-agent-executable.mjs'));
+      assert.ok(manifest.files.some((file) => file.path === 'scripts/prepare-single-node-environment.mjs'));
       assert.ok(manifest.files.some((file) => file.path === RELEASE_TARGETS[target].runtimeFiles[0].replace(/^/, 'runtime/')));
       assert.ok(manifest.files.some((file) => file.path === 'DEPLOYMENT.html'));
       assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', RELEASE_TARGETS[target].manager)));
-      if (target === 'win32-x64') assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', 'manage.cmd')));
+      if (target === 'win32-x64') {
+        assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', 'manage.cmd')));
+        assert.ok(existsSync(join(outputRoot, 'install.cmd')));
+        assert.equal(existsSync(join(outputRoot, 'install.sh')), false);
+      }
+      if (target === 'linux-x64') {
+        assert.ok(existsSync(join(outputRoot, 'install.sh')));
+        assert.equal(existsSync(join(outputRoot, 'install.cmd')), false);
+      }
       if (target === 'linux-x64' && process.platform !== 'win32') {
         assert.equal(manifest.files.find((file) => file.path === 'deploy/single-node/manage.sh')?.mode, 0o755);
+        assert.equal(manifest.files.find((file) => file.path === 'install.sh')?.mode, 0o755);
       }
       assert.equal(existsSync(join(outputRoot, '.env')), false);
       assert.equal(existsSync(join(outputRoot, 'services', 'platform-api', 'src')), false);

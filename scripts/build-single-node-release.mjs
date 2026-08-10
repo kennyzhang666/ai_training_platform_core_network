@@ -29,6 +29,7 @@ export const RELEASE_TARGETS = Object.freeze({
     platform: 'win32',
     arch: 'x64',
     manager: 'manage.ps1',
+    installer: 'install.cmd',
     environmentTemplate: 'windows.env.example',
     archiveExtension: '.zip',
     runtimeFiles: Object.freeze([
@@ -37,13 +38,13 @@ export const RELEASE_TARGETS = Object.freeze({
       'python/python.exe',
       'nginx/nginx.exe',
       'nginx/conf/mime.types',
-      'service/winsw.exe',
     ]),
   }),
   'linux-x64': Object.freeze({
     platform: 'linux',
     arch: 'x64',
     manager: 'manage.sh',
+    installer: 'install.sh',
     environmentTemplate: 'linux.env.example',
     archiveExtension: '.tar.gz',
     runtimeFiles: Object.freeze([
@@ -232,6 +233,7 @@ export async function assembleReleaseLayout(options) {
     await copyExecutorDependencies(sourceRoot, outputRoot);
     await copyFile(join(sourceRoot, 'scripts', 'evaluation-worker.mjs'), join(outputRoot, 'scripts', 'evaluation-worker.mjs'), 'evaluation Worker');
     await copyFile(join(sourceRoot, 'scripts', 'code-agent-executable.mjs'), join(outputRoot, 'scripts', 'code-agent-executable.mjs'), 'Code Agent executable resolver');
+    await copyFile(join(sourceRoot, 'scripts', 'prepare-single-node-environment.mjs'), join(outputRoot, 'scripts', 'prepare-single-node-environment.mjs'), 'environment bootstrap');
     await copyFile(join(sourceRoot, 'services', 'ldap3-gateway', 'ldap3_gateway.py'), join(outputRoot, 'services', 'ldap3-gateway', 'ldap3_gateway.py'), 'LDAP3 gateway');
     await copyFile(join(sourceRoot, 'services', 'ldap3-gateway', 'requirements.txt'), join(outputRoot, 'services', 'ldap3-gateway', 'requirements.txt'), 'LDAP3 requirements');
     await copyDirectory(join(sourceRoot, 'services', 'ldap3-gateway', 'static'), join(outputRoot, 'services', 'ldap3-gateway', 'static'), 'LDAP3 static assets');
@@ -242,7 +244,9 @@ export async function assembleReleaseLayout(options) {
     await copyFile(join(apiDeployRoot, 'package.json'), join(outputRoot, 'services', 'platform-api', 'package.json'), 'API package manifest');
 
     await copyFile(join(sourceRoot, 'deploy', 'single-node', descriptor.manager), join(outputRoot, 'deploy', 'single-node', descriptor.manager), `${target} manager`);
+    await copyFile(join(sourceRoot, descriptor.installer), join(outputRoot, descriptor.installer), `${target} one-command installer`);
     if (descriptor.platform === 'linux') await chmod(join(outputRoot, 'deploy', 'single-node', descriptor.manager), 0o755);
+    if (descriptor.platform === 'linux') await chmod(join(outputRoot, descriptor.installer), 0o755);
     if (descriptor.platform === 'win32') {
       await copyFile(join(sourceRoot, 'deploy', 'single-node', 'manage.cmd'), join(outputRoot, 'deploy', 'single-node', 'manage.cmd'), 'Windows manager launcher');
     }

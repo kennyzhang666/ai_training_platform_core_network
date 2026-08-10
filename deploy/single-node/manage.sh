@@ -3,8 +3,8 @@ set -Eeuo pipefail
 
 action="${1:-}"
 case "$action" in
-  Prepare|Start|Stop|Status|Backup|Restore|Doctor) ;;
-  *) printf '用法：%s {Prepare|Start|Stop|Status|Backup|Restore|Doctor} [--archive PATH] [--environment PATH]\n' "$0" >&2; exit 2 ;;
+  Install|Uninstall|Prepare|Start|Stop|Status|Backup|Restore|Doctor) ;;
+  *) printf '用法：%s {Install|Uninstall|Prepare|Start|Stop|Status|Backup|Restore|Doctor} [--archive PATH] [--environment PATH]\n' "$0" >&2; exit 2 ;;
 esac
 shift
 
@@ -28,15 +28,43 @@ die() {
   exit 1
 }
 
+bootstrap_node() {
+  local bundled="$project_root/runtime/node/bin/node"
+  if [[ -f "$bundled" && -x "$bundled" ]]; then printf '%s' "$bundled"; return; fi
+  command -v node 2>/dev/null || die '无法生成配置：发布包缺少 Node.js 运行时'
+}
+
+new_environment_file() {
+  local template="$deploy_root/.env.example" generator="$project_root/scripts/prepare-single-node-environment.mjs" node
+  [[ -f "$template" ]] || die "配置模板不存在：$template"
+  [[ -f "$generator" ]] || die "配置生成器不存在：$generator"
+  node="$(bootstrap_node)"
+  "$node" "$generator" --template "$template" --output "$environment_file"
+  chmod 600 -- "$environment_file"
+}
+
+edit_environment_file() {
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    die "已生成配置文件：$environment_file。请填写配置后重新执行 install.sh。"
+  fi
+  local editor="${VISUAL:-${EDITOR:-vi}}"
+  command -v "$editor" >/dev/null 2>&1 || die "找不到配置编辑器：$editor。请设置 EDITOR 后重试。"
+  printf '%s\n' '请填写 PostgreSQL、LDAP、首位管理员、Worker 和 Code Agent 配置；保存并退出编辑器后将继续安装。'
+  "$editor" "$environment_file"
+}
+
 import_environment() {
   if [[ ! -f "$environment_file" ]]; then
-    if [[ "$action" == 'Prepare' ]]; then
-      cp -- "$deploy_root/.env.example" "$environment_file"
-      printf '已生成配置文件：%s\n' "$environment_file"
-      printf '%s\n' '请填写 PostgreSQL、SSO、LDAP、管理员、Worker 和 Code Agent 配置后重新执行 Prepare。'
-      exit 0
+    if [[ "$action" == 'Prepare' || "$action" == 'Install' ]]; then
+      new_environment_file
+      if [[ "$action" == 'Prepare' ]]; then
+        printf '%s\n' '请填写 PostgreSQL、LDAP、首位管理员、Worker 和 Code Agent 配置后重新执行 Prepare。'
+        exit 0
+      fi
+      edit_environment_file
+    else
+      die "配置文件不存在：$environment_file。请先执行 Install 或 Prepare。"
     fi
-    die "配置文件不存在：$environment_file。请先执行 Prepare。"
   fi
   set -a
   # shellcheck disable=SC1090
@@ -151,6 +179,8 @@ inside_path "$runtime_root" "$artifact_upload_root" || die "上传临时目录�
 pid_root="$runtime_root/pids"
 log_root="$runtime_root/process-logs"
 nginx_runtime_config="$runtime_root/nginx.conf"
+systemd_service_name='ai-training-platform.service'
+systemd_service_file="/etc/systemd/system/$systemd_service_name"
 runtime_node=""
 runtime_python=""
 runtime_gateway_python=""
@@ -440,6 +470,98 @@ show_status() {
     pid="$(managed_pid "$name" || true)"
     if [[ -n "$pid" ]]; then printf '%-10s %-10s %s\n' "$name" '运行中' "$pid"; else printf '%-10s %-10s %s\n' "$name" '已停止' '-'; fi
   done
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled "$systemd_service_name" >/dev/null 2>&1; then
+    printf '%s\n' '开机自启：已启用'
+  else
+    printf '%s\n' '开机自启：未安装'
+  fi
+}
+
+run_privileged() {
+  if ((EUID == 0)); then
+    "$@"
+  else
+    command -v sudo >/dev/null 2>&1 || die '安装开机自启需要 sudo 权限'
+    sudo "$@"
+  fi
+}
+
+systemd_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//%/%%}"
+  printf '%s' "$value"
+}
+
+register_system_service() {
+  command -v systemctl >/dev/null 2>&1 || die '当前系统没有 systemd，无法安装开机自启'
+  local service_user service_group service_home service_path environment_path project_path manager_path service_runtime path_value
+  service_user="${SUDO_USER:-$(id -un)}"
+  id "$service_user" >/dev/null 2>&1 || die "部署账号不存在：$service_user"
+  service_group="$(id -gn "$service_user")"
+  service_home="$(getent passwd "$service_user" | cut -d: -f6)"
+  [[ -n "$service_home" ]] || service_home="$project_root"
+  service_path="$(systemd_escape "$PATH")"
+  environment_path="$(systemd_escape "$environment_file")"
+  project_path="$(systemd_escape "$project_root")"
+  manager_path="$(systemd_escape "$deploy_root/manage.sh")"
+  service_runtime="$runtime_root/$systemd_service_name"
+
+  {
+    printf '%s\n' '[Unit]'
+    printf '%s\n' 'Description=AI Training Platform'
+    printf '%s\n' 'Wants=network-online.target'
+    printf '%s\n' 'After=network-online.target postgresql.service'
+    printf '\n%s\n' '[Service]'
+    printf '%s\n' 'Type=oneshot'
+    printf 'User=%s\n' "$service_user"
+    printf 'Group=%s\n' "$service_group"
+    printf 'WorkingDirectory="%s"\n' "$project_path"
+    printf 'Environment="HOME=%s"\n' "$(systemd_escape "$service_home")"
+    printf 'Environment="PATH=%s"\n' "$service_path"
+    printf 'ExecStart="%s" Start --environment "%s"\n' "$manager_path" "$environment_path"
+    printf 'ExecStop="%s" Stop --environment "%s"\n' "$manager_path" "$environment_path"
+    printf '%s\n' 'RemainAfterExit=yes'
+    printf '%s\n' 'TimeoutStartSec=180'
+    printf '%s\n' 'TimeoutStopSec=60'
+    printf '\n%s\n' '[Install]'
+    printf '%s\n' 'WantedBy=multi-user.target'
+  } >"$service_runtime"
+  run_privileged chown -R "$service_user:$service_group" "$data_root" "$runtime_root" "$backup_root"
+  run_privileged chown "$service_user:$service_group" "$environment_file"
+  run_privileged install -m 0644 "$service_runtime" "$systemd_service_file"
+  run_privileged systemctl daemon-reload
+  run_privileged systemctl enable "$systemd_service_name"
+  if ! run_privileged systemctl restart "$systemd_service_name"; then
+    run_privileged systemctl disable --now "$systemd_service_name" >/dev/null 2>&1 || true
+    die '平台服务启动失败，请执行 systemctl status ai-training-platform.service 查看原因'
+  fi
+}
+
+unregister_system_service() {
+  if command -v systemctl >/dev/null 2>&1; then
+    run_privileged systemctl disable --now "$systemd_service_name" >/dev/null 2>&1 || true
+    run_privileged rm -f -- "$systemd_service_file"
+    run_privileged systemctl daemon-reload
+    run_privileged systemctl reset-failed "$systemd_service_name" >/dev/null 2>&1 || true
+  fi
+}
+
+install_platform() {
+  ensure_layout
+  assert_preflight
+  stop_all
+  deploy_database
+  new_nginx_config
+  register_system_service
+  printf '安装完成，已启用开机自启：http://127.0.0.1:%s/\n' "$listen_port"
+}
+
+uninstall_platform() {
+  unregister_system_service
+  stop_all
+  printf '%s\n' '平台服务已卸载；配置、数据库、交付件和备份均已保留。'
 }
 
 safe_remove_runtime() {
@@ -571,6 +693,8 @@ doctor() {
 }
 
 case "$action" in
+  Install) install_platform ;;
+  Uninstall) uninstall_platform ;;
   Prepare) ensure_layout; assert_preflight; deploy_database; new_nginx_config; printf '%s\n' '单服务器部署检查通过' ;;
   Start) start_all ;;
   Stop) stop_all ;;

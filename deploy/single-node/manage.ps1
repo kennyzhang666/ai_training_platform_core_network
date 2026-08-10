@@ -1,10 +1,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet('Prepare', 'Start', 'Stop', 'Status', 'Backup', 'Restore', 'Doctor')]
+    [ValidateSet('Install', 'Uninstall', 'Prepare', 'Start', 'Stop', 'Status', 'Backup', 'Restore', 'Doctor')]
     [string]$Action,
     [string]$Archive,
-    [string]$EnvironmentFile
+    [string]$EnvironmentFile,
+    [string]$ServicePath,
+    [string]$ServiceUserProfile,
+    [string]$ServiceAppData,
+    [string]$ServiceLocalAppData
 )
 
 Set-StrictMode -Version Latest
@@ -13,17 +17,70 @@ $deployRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $deployRoot '..\..'))
 if (-not $EnvironmentFile) { $EnvironmentFile = Join-Path $deployRoot '.env' }
 $EnvironmentFile = [System.IO.Path]::GetFullPath($EnvironmentFile)
+$startupTaskName = 'AITrainingPlatform'
+
+function Test-Administrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+if ($Action -in @('Install', 'Uninstall') -and -not (Test-Administrator)) {
+    $powerShell = Join-Path $PSHOME 'pwsh.exe'
+    $quotedScript = '"' + $MyInvocation.MyCommand.Path.Replace('"', '\"') + '"'
+    $quotedEnvironment = '"' + $EnvironmentFile.Replace('"', '\"') + '"'
+    $relaunchArguments = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $quotedScript, $Action, '-EnvironmentFile', $quotedEnvironment)
+    if ($Archive) { $relaunchArguments += @('-Archive', ('"' + $Archive.Replace('"', '\"') + '"')) }
+    $process = Start-Process -FilePath $powerShell -ArgumentList $relaunchArguments -Verb RunAs -Wait -PassThru
+    exit $process.ExitCode
+}
+
+foreach ($serviceEnvironment in @(
+    @('PATH', $ServicePath),
+    @('USERPROFILE', $ServiceUserProfile),
+    @('HOME', $ServiceUserProfile),
+    @('APPDATA', $ServiceAppData),
+    @('LOCALAPPDATA', $ServiceLocalAppData)
+)) {
+    if (-not [string]::IsNullOrWhiteSpace($serviceEnvironment[1])) {
+        [Environment]::SetEnvironmentVariable($serviceEnvironment[0], $serviceEnvironment[1], 'Process')
+    }
+}
+
+function Resolve-BootstrapNode {
+    $bundled = Join-Path $projectRoot 'runtime\node\node.exe'
+    if (Test-Path -LiteralPath $bundled -PathType Leaf) { return $bundled }
+    $command = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $command) { throw '无法生成配置：发布包缺少 Node.js 运行时' }
+    return $command.Source
+}
+
+function New-EnvironmentFile([string]$Path) {
+    $template = Join-Path $deployRoot '.env.example'
+    $generator = Join-Path $projectRoot 'scripts\prepare-single-node-environment.mjs'
+    if (-not (Test-Path -LiteralPath $template -PathType Leaf)) { throw "配置模板不存在：$template" }
+    if (-not (Test-Path -LiteralPath $generator -PathType Leaf)) { throw "配置生成器不存在：$generator" }
+    & (Resolve-BootstrapNode) $generator '--template' $template '--output' $Path
+    if ($LASTEXITCODE -ne 0) { throw '生成配置文件失败' }
+}
+
+function Edit-EnvironmentFile([string]$Path) {
+    Write-Host '请填写 PostgreSQL、LDAP、首位管理员、Worker 和 Code Agent 配置；保存并关闭记事本后将继续安装。'
+    Start-Process -FilePath 'notepad.exe' -ArgumentList @($Path) -Wait
+}
 
 function Import-DotEnv([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        $example = Join-Path $deployRoot '.env.example'
-        if ($Action -eq 'Prepare') {
-            Copy-Item -LiteralPath $example -Destination $Path
-            Write-Host "已生成配置文件：$Path"
-            Write-Host '请填写 SSO、LDAP、管理员和 Nginx 配置后重新执行 Prepare。'
-            exit 0
+        if ($Action -in @('Prepare', 'Install')) {
+            New-EnvironmentFile $Path
+            if ($Action -eq 'Prepare') {
+                Write-Host '请填写 PostgreSQL、LDAP、首位管理员、Worker 和 Code Agent 配置后重新执行 Prepare。'
+                exit 0
+            }
+            Edit-EnvironmentFile $Path
+        } else {
+            throw "配置文件不存在：$Path。请先执行 Install 或 Prepare。"
         }
-        throw "配置文件不存在：$Path。请先执行 Prepare。"
     }
     foreach ($rawLine in Get-Content -LiteralPath $Path -Encoding UTF8) {
         $line = $rawLine.Trim()
@@ -436,6 +493,65 @@ function Show-Status {
         [pscustomobject]@{ Service = $name; Status = if ($process) { '运行中' } else { '已停止' }; PID = if ($process) { $process.Id } else { '' } }
     }
     $rows | Format-Table -AutoSize
+    try {
+        $task = Get-ScheduledTask -TaskName $startupTaskName -ErrorAction Stop
+        Write-Host "开机自启：$($task.State)"
+    } catch {
+        Write-Host '开机自启：未安装'
+    }
+}
+
+function Assert-Administrator {
+    if (-not (Test-Administrator)) {
+        throw '安装或卸载开机自启需要使用管理员身份运行。'
+    }
+}
+
+function Register-StartupTask {
+    Assert-Administrator
+    $powerShell = Join-Path $projectRoot 'runtime\powershell\pwsh.exe'
+    if (-not (Test-Path -LiteralPath $powerShell -PathType Leaf)) { throw "发布包缺少 PowerShell 运行时：$powerShell" }
+    $manager = Join-Path $deployRoot 'manage.ps1'
+    $arguments = @(
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', (Quote-Argument $manager), 'Start', '-EnvironmentFile', (Quote-Argument $EnvironmentFile),
+        '-ServicePath', (Quote-Argument $env:PATH),
+        '-ServiceUserProfile', (Quote-Argument $env:USERPROFILE),
+        '-ServiceAppData', (Quote-Argument $env:APPDATA),
+        '-ServiceLocalAppData', (Quote-Argument $env:LOCALAPPDATA)
+    ) -join ' '
+    $taskAction = New-ScheduledTaskAction -Execute $powerShell -Argument $arguments -WorkingDirectory $projectRoot
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+    Register-ScheduledTask -TaskName $startupTaskName -Action $taskAction -Trigger $trigger -Principal $principal -Settings $settings -Description 'AI 能力训战平台开机启动' -Force | Out-Null
+}
+
+function Unregister-StartupTask {
+    Assert-Administrator
+    if (Get-ScheduledTask -TaskName $startupTaskName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $startupTaskName -Confirm:$false
+    }
+}
+
+function Install-Platform {
+    Assert-Administrator
+    Stop-All
+    Start-All
+    try {
+        Register-StartupTask
+    } catch {
+        Stop-All
+        throw
+    }
+    Write-Host "安装完成，已启用开机自启：http://127.0.0.1:${listenPort}/"
+}
+
+function Uninstall-Platform {
+    Assert-Administrator
+    Unregister-StartupTask
+    Stop-All
+    Write-Host '平台服务已卸载；配置、数据库、交付件和备份均已保留。'
 }
 
 function Get-PlatformVersion {
@@ -521,6 +637,8 @@ function Restore-Backup {
 }
 
 switch ($Action) {
+    'Install' { Install-Platform }
+    'Uninstall' { Uninstall-Platform }
     'Prepare' {
         Ensure-Layout
         $runtime = Assert-Preflight

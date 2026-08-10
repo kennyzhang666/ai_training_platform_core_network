@@ -45,9 +45,54 @@ test('Windows release launcher uses the bundled PowerShell runtime', () => {
   assert.match(launcher, /manage\.ps1/i);
 });
 
+test('release root provides one-command installers for Windows and Linux', () => {
+  const windows = readFileSync(join(root, 'install.cmd'), 'utf8');
+  const linux = readFileSync(join(root, 'install.sh'), 'utf8');
+
+  assert.match(windows, /deploy\\single-node\\manage\.cmd" Install/i);
+  assert.match(linux, /deploy\/single-node\/manage\.sh" Install/);
+});
+
+test('environment bootstrap generates independent secrets without overwriting business configuration', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'ai-training-environment-'));
+  try {
+    const template = join(workspace, '.env.example');
+    const environment = join(workspace, '.env');
+    writeFileSync(template, [
+      'DATABASE_URL=postgresql://ai_training:change-me@127.0.0.1:5432/ai_training',
+      'TRUSTED_GATEWAY_HMAC_SECRET=<至少32字符的随机密钥>',
+      'LDAP_GATEWAY_SESSION_SECRET=<另一条至少32字符的随机密钥>',
+      'EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET=<与TRUSTED_GATEWAY_HMAC_SECRET相同>',
+    ].join('\n'));
+
+    execFileSync(process.execPath, [
+      join(root, 'scripts', 'prepare-single-node-environment.mjs'),
+      '--template', template,
+      '--output', environment,
+    ], { cwd: root, windowsHide: true, stdio: 'pipe' });
+
+    const generated = readFileSync(environment, 'utf8');
+    const values = Object.fromEntries(generated.trim().split(/\r?\n/).map((line) => line.split('=', 2)));
+    assert.match(values.TRUSTED_GATEWAY_HMAC_SECRET, /^[A-Za-z0-9_-]{64}$/);
+    assert.match(values.LDAP_GATEWAY_SESSION_SECRET, /^[A-Za-z0-9_-]{64}$/);
+    assert.notEqual(values.TRUSTED_GATEWAY_HMAC_SECRET, values.LDAP_GATEWAY_SESSION_SECRET);
+    assert.equal(values.EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET, values.TRUSTED_GATEWAY_HMAC_SECRET);
+    assert.equal(values.DATABASE_URL, 'postgresql://ai_training:change-me@127.0.0.1:5432/ai_training');
+
+    assert.throws(() => execFileSync(process.execPath, [
+      join(root, 'scripts', 'prepare-single-node-environment.mjs'),
+      '--template', template,
+      '--output', environment,
+    ], { cwd: root, windowsHide: true, stdio: 'pipe' }), /Command failed/);
+    assert.equal(readFileSync(environment, 'utf8'), generated);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('Linux single-node manager provides the same lifecycle and bundled runtime boundary', () => {
   const manager = readFileSync(join(deploy, 'manage.sh'), 'utf8');
-  for (const action of ['Prepare', 'Start', 'Stop', 'Status', 'Backup', 'Restore', 'Doctor']) {
+  for (const action of ['Install', 'Uninstall', 'Prepare', 'Start', 'Stop', 'Status', 'Backup', 'Restore', 'Doctor']) {
     assert.match(manager, new RegExp(`\\b${action}\\b`));
   }
   assert.match(manager, /PLATFORM_RUNTIME_MODE/);
@@ -58,6 +103,27 @@ test('Linux single-node manager provides the same lifecycle and bundled runtime 
   assert.match(manager, /migrate status/);
   assert.match(manager, /VERSION/);
   assert.doesNotMatch(manager, /docker|redis|kafka|minio/i);
+});
+
+test('one-command installation registers startup without deleting persistent data', () => {
+  const windows = readFileSync(join(deploy, 'manage.ps1'), 'utf8');
+  const linux = readFileSync(join(deploy, 'manage.sh'), 'utf8');
+
+  assert.match(windows, /ValidateSet\('Install', 'Uninstall'/);
+  assert.match(windows, /Register-ScheduledTask/);
+  assert.match(windows, /Unregister-ScheduledTask/);
+  assert.match(windows, /Start-Process[\s\S]*-Verb RunAs/);
+  assert.match(windows, /ServicePath/);
+  assert.match(linux, /ai-training-platform\.service/);
+  assert.match(linux, /systemctl enable "\$systemd_service_name"/);
+  assert.match(linux, /systemctl restart "\$systemd_service_name"/);
+  assert.match(linux, /systemctl disable --now/);
+  const windowsInstall = windows.slice(windows.indexOf('function Install-Platform'), windows.indexOf('function Uninstall-Platform'));
+  const linuxInstall = linux.slice(linux.indexOf('install_platform()'), linux.indexOf('uninstall_platform()'));
+  assert.ok(windowsInstall.indexOf('Stop-All') < windowsInstall.indexOf('Start-All'));
+  assert.ok(linuxInstall.indexOf('stop_all') < linuxInstall.indexOf('deploy_database'));
+  assert.doesNotMatch(windows, /Remove-Item[^\n]*(?:\$dataRoot|\$backupRoot|\$EnvironmentFile)/);
+  assert.doesNotMatch(linux, /rm\s+-rf[^\n]*(?:\$data_root|\$backup_root|\$environment_file)/);
 });
 
 test('single-node Nginx stays attached to the platform process manager', () => {
@@ -73,6 +139,10 @@ test('single-node operator guide targets a fifty-to-one-hundred-person training 
   assert.match(guide, /Windows Server/);
   assert.match(guide, /Linux Server/);
   assert.match(guide, /一页纸傻瓜部署/);
+  assert.match(guide, /install\.cmd/);
+  assert.match(guide, /install\.sh/);
+  assert.match(guide, /开机自启/);
+  assert.doesNotMatch(guide, /服务器重启后需要再次执行\s*<code>Start<\/code>/);
   assert.doesNotMatch(guide, /PLATFORM_REPOSITORY=file|不需要 PostgreSQL/);
 });
 
