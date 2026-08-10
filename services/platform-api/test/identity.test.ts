@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { generateKeyPairSync, createSign, sign as signBuffer } from 'node:crypto';
 import { authenticateHeaders, loadIdentityConfig, resetIdentityKeyCache, trustedGatewaySignature, IdentityConfig } from '../src/identity';
+import { listenNodeServerOnFetchSafePort } from './test-server';
 
 test('production identity configuration cannot silently fall back to local headers', () => {
   assert.throws(() => loadIdentityConfig({ NODE_ENV: 'production' }), /must be explicitly configured/);
@@ -67,12 +68,10 @@ test('OIDC mode verifies issuer, audience, expiry, key id and signature', async 
     response.setHeader('content-type', 'application/json');
     response.end(JSON.stringify({ keys: [jwk] }));
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  assert.ok(address && typeof address === 'object');
+  const port = await listenNodeServerOnFetchSafePort(server);
   const config: IdentityConfig = {
     mode: 'OIDC', allowAnonymousLocal: false, oidcIssuer: 'https://issuer.test', oidcAudience: 'platform-api',
-    oidcJwksUrl: `http://127.0.0.1:${address.port}/jwks`, oidcEmployeeClaim: 'employeeNo', oidcNameClaim: 'name', oidcDepartmentClaim: 'department',
+    oidcJwksUrl: `http://127.0.0.1:${port}/jwks`, oidcEmployeeClaim: 'employeeNo', oidcNameClaim: 'name', oidcDepartmentClaim: 'department',
     gatewayMaxAgeSeconds: 90, clockSkewSeconds: 30,
   };
   const header = base64Url(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: 'test-key' }));
@@ -110,12 +109,10 @@ test('OIDC mode accepts an ES256 token signed by the published JWKS key', async 
     response.setHeader('content-type', 'application/json');
     response.end(JSON.stringify({ keys: [jwk] }));
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  assert.ok(address && typeof address === 'object');
+  const port = await listenNodeServerOnFetchSafePort(server);
   const config: IdentityConfig = {
     mode: 'OIDC', allowAnonymousLocal: false, oidcIssuer: 'https://issuer.test', oidcAudience: 'platform-api',
-    oidcJwksUrl: `http://127.0.0.1:${address.port}/jwks`, oidcEmployeeClaim: 'employeeNo', oidcNameClaim: 'name', oidcDepartmentClaim: 'department',
+    oidcJwksUrl: `http://127.0.0.1:${port}/jwks`, oidcEmployeeClaim: 'employeeNo', oidcNameClaim: 'name', oidcDepartmentClaim: 'department',
     gatewayMaxAgeSeconds: 90, clockSkewSeconds: 30,
   };
   const header = base64Url(JSON.stringify({ alg: 'ES256', typ: 'JWT', kid: 'ec-key' }));
@@ -155,12 +152,10 @@ test('an unknown key id refreshes the cached JWKS instead of failing until it ex
     response.setHeader('content-type', 'application/json');
     response.end(JSON.stringify({ keys: rotatedYet ? [rotatedJwk] : [firstJwk] }));
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  assert.ok(address && typeof address === 'object');
+  const port = await listenNodeServerOnFetchSafePort(server);
   const config: IdentityConfig = {
     mode: 'OIDC', allowAnonymousLocal: false, oidcIssuer: 'https://issuer.test', oidcAudience: 'platform-api',
-    oidcJwksUrl: `http://127.0.0.1:${address.port}/jwks`, oidcEmployeeClaim: 'employeeNo', oidcNameClaim: 'name', oidcDepartmentClaim: 'department',
+    oidcJwksUrl: `http://127.0.0.1:${port}/jwks`, oidcEmployeeClaim: 'employeeNo', oidcNameClaim: 'name', oidcDepartmentClaim: 'department',
     gatewayMaxAgeSeconds: 90, clockSkewSeconds: 30,
   };
   const tokenFor = (kid: string, key: import('node:crypto').KeyObject): string => {

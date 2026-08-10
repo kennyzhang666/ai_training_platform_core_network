@@ -4,6 +4,18 @@
 
 暂无未发布变更。
 
+## 0.9.6 - 2026-08-10
+
+本轮针对“全新内网电脑首次部署”完成第二次全量审计，修复以下部署阻断问题：
+
+- Windows/Linux 管理脚本统一从 `HOST`、`PORT`、`LDAP_GATEWAY_HOST`、`LDAP_GATEWAY_PORT` 生成反向代理和健康检查，不再出现配置已修改但 Nginx 仍访问固定 `3000/8081` 的情况；预检会拒绝重复端口、非本机后端地址、与 API 端口不一致的 Worker 地址及已被其他程序占用的端口；
+- Windows Worker 可在不启用命令行 shell 的前提下，把 npm 生成的 OpenCode `.cmd` 包装器解析到原生 `opencode.exe`；`Doctor` 会验证 Code Agent 可执行文件、固定参数和允许列表。默认兜底参数改为 `--prompt {{prompt}}`，可直接把强制批次指令交给 OpenCode；
+- 启动任一子进程或健康检查失败时，只回滚本次新启动的 API、LDAP 网关、Worker 和 Nginx，避免首次启动失败后残留半套服务；Windows PID 文件增加进程归属校验，避免复用陈旧 PID；
+- 离线发布组装器自动读取内置执行器的 `platformDependencies` 并携带依赖，修复发布包漏带 `grader` 后执行器列表或评测失败的问题；运行时门禁新增 Node.js 20+、Python 3.11+、目标系统/x64、PowerShell 7+ 以及 `ldap3/jsonschema/PyYAML` 固定依赖检查；
+- 内置 `drill-grader` 升级到 `0.3.1`，把黄/蓝区 profile 作为冻结依赖参与内容哈希，并在 API 直接执行和外部 Worker 批次中显式传入，避免 Worker 静默使用默认阈值造成同题不同分；
+- 新增 Windows 隔离发布目录 `Doctor` 实跑用例，真实渲染自定义端口；部署门禁同时覆盖 Windows npm 命令解析、发布依赖完整性、运行时版本和部分启动回滚契约；
+- 修复测试服务随机取得 Fetch 禁止端口时全量门禁偶发失败的问题，所有本地 HTTP 测试服务器现在会丢弃不可访问端口并重新分配。
+
 ## 0.9.5 - 2026-08-10
 
 本版本将此前未单独推送的单服务器生产档、双平台离线发布能力和真实训战闭环统一收口为首个 `0.9.x` 可发布基线：

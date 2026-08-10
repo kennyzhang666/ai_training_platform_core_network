@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-GRADER_VERSION = "drill-grader@0.3.0"
+GRADER_VERSION = "drill-grader@0.3.1"
 
 
 def _grader_root() -> Path:
@@ -53,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     workspace = Path(payload["workspace"])
     assets = payload["engine"].get("assets", {})
     grader_source = Path(assets["graderSource"]).parent if assets.get("graderSource") else _grader_root()
+    if assets.get("graderProfiles"):
+        os.environ["DRILL_GRADER_PROFILE_ROOT"] = str(Path(assets["graderProfiles"]))
     sys.path.insert(0, str(grader_source))
     from drill_grader.cli import _heuristic_criteria, _load_profile  # noqa: E402
     from drill_grader.scoring import score_criteria  # noqa: E402

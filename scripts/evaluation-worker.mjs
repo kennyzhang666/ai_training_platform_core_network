@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { executableIsAllowed, resolveSpawnExecutable } from './code-agent-executable.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const options = new Map();
@@ -177,9 +178,32 @@ let codeAgentArgs;
 try {
   codeAgentArgs = JSON.parse(options.get('agent-args-json') ?? process.env.CODE_AGENT_ARGS_JSON ?? '[]');
   if (!Array.isArray(codeAgentArgs) || codeAgentArgs.some((value) => typeof value !== 'string')) throw new Error('must be a JSON string array');
+  const unknownPlaceholders = codeAgentArgs.flatMap((value) => value.match(/\{\{[^{}]+\}\}/g) ?? [])
+    .filter((value) => !['{{prompt}}', '{{manifestPath}}', '{{batchDir}}'].includes(value));
+  if (unknownPlaceholders.length) throw new Error(`不支持的参数占位符: ${[...new Set(unknownPlaceholders)].join('、')}`);
 } catch (error) {
   writeWorkerLog('worker.config_error', { reason: redactLogText(error instanceof Error ? error.message : String(error), 1000) });
   throw new Error(`CODE_AGENT_ARGS_JSON 配置错误: ${error.message}`);
+}
+
+function allowedCodeAgentExecutables() {
+  return (process.env.CODE_AGENT_ALLOWED_EXECUTABLES ?? '')
+    .split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
+}
+
+function checkedCodeAgentExecutable(executable, enforceAllowlist = true) {
+  const allowed = allowedCodeAgentExecutables();
+  if (enforceAllowlist && !executableIsAllowed(executable, allowed)) {
+    throw new Error(`Code Agent 可执行文件不在 Worker 允许列表中: ${basename(executable)}`);
+  }
+  return resolveSpawnExecutable(executable, { cwd: root });
+}
+
+if (options.has('check-config')) {
+  if (!environmentCodeAgentCommand) throw new Error('未配置 CODE_AGENT_COMMAND');
+  const executable = checkedCodeAgentExecutable(environmentCodeAgentCommand);
+  console.log(`Code Agent 配置可用：${basename(executable)} · ${codeAgentArgs.length} 个固定参数`);
+  process.exit(0);
 }
 
 async function call(path, init = {}) {
@@ -564,22 +588,13 @@ function platformInvocation(runtime, manifestPath, cwd) {
   // flag. A direct agent command receives the path inside the mandatory prompt.
   if (!promptInjected && !manifestInjected) args.push('--manifest', manifestPath);
 
-  const allowed = (process.env.CODE_AGENT_ALLOWED_EXECUTABLES ?? '')
-    .split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
-  if (allowed.length) {
-    const executable = runtime.executable.toLowerCase();
-    const executableName = basename(runtime.executable).toLowerCase();
-    if (!allowed.includes(executable) && !allowed.includes(executableName)) {
-      throw new Error(`平台配置的 Code Agent 可执行文件不在 Worker 允许列表中: ${basename(runtime.executable)}`);
-    }
-  }
-  return { command: runtime.executable, args };
+  return { command: checkedCodeAgentExecutable(runtime.executable), args };
 }
 
 function resolveCodeAgentInvocation(task, manifestPath, cwd) {
-  if (commandLineOverride) return { command: commandLineOverride, args: [...codeAgentArgs, '--manifest', manifestPath] };
+  if (commandLineOverride) return { command: checkedCodeAgentExecutable(commandLineOverride, false), args: [...codeAgentArgs, '--manifest', manifestPath] };
   if (task.codeAgentRuntime?.executable) return platformInvocation(task.codeAgentRuntime, manifestPath, cwd);
-  if (environmentCodeAgentCommand) return { command: environmentCodeAgentCommand, args: [...codeAgentArgs, '--manifest', manifestPath] };
+  if (environmentCodeAgentCommand) return platformInvocation({ executable: environmentCodeAgentCommand, args: codeAgentArgs, prompt: '' }, manifestPath, cwd);
   return null;
 }
 

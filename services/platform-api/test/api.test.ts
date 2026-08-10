@@ -9,6 +9,7 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from '../src/app.module';
 import { createCorsOptions } from '../src/cors-config';
+import { createFetchSafeApplication } from './test-server';
 
 // API tests must never delete or mutate the developer's persistent local data
 // file, especially when a dev server is running alongside the test process.
@@ -55,11 +56,13 @@ const ZIP_FIXTURES = {
 } as const;
 
 async function withApp(run: (baseUrl: string) => Promise<void>): Promise<void> {
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter());
-  app.enableCors(createCorsOptions(['http://127.0.0.1:5173']));
-  await app.listen(0, '127.0.0.1');
+  const { app, baseUrl } = await createFetchSafeApplication(async () => {
+    const candidate = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter());
+    candidate.enableCors(createCorsOptions(['http://127.0.0.1:5173']));
+    return candidate;
+  });
   try {
-    await run(await app.getUrl());
+    await run(baseUrl);
   } finally {
     await app.close();
   }

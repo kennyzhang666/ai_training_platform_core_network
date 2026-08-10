@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from '../src/app.module';
+import { createFetchSafeApplication } from './test-server';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = resolve(__dirname, '..', '..', '..');
@@ -56,10 +57,10 @@ test('Worker materialises a frozen batch, invokes the Code Agent bridge and impo
   process.env.ARTIFACT_ROOT = join(sandbox, 'artifacts');
   process.env.EVALUATION_LOG_ROOT = join(sandbox, 'logs');
   process.env.ENGINE_PACKAGE_ROOT = join(sandbox, 'packages');
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), { logger: false });
-  await app.listen(0, '127.0.0.1');
+  const { app, baseUrl } = await createFetchSafeApplication(
+    () => NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), { logger: false }),
+  );
   try {
-    const baseUrl = await app.getUrl();
     const admin = { 'content-type': 'application/json', 'x-employee-id': 'w00123' };
     const quoteCommandArgument = (value: string) => `"${value.replace(/"/g, '\\"')}"`;
     const bridgeMarker = join(sandbox, 'packaged-engine-python.txt');
@@ -192,6 +193,9 @@ test('Worker materialises a frozen batch, invokes the Code Agent bridge and impo
       assert.equal(body.gradingStatus, 'COMPLETED', JSON.stringify({ body, stdout: worker.stdout, stderr: worker.stderr }));
       assert.ok(body.resultId);
     }
+    const profiledReport = await fetch(`${baseUrl}/api/v1/reports/${selected[0].id}`, { headers: admin });
+    assert.equal(profiledReport.status, 200);
+    assert.match(JSON.stringify(await profiledReport.json()), /0、1、-1、2/);
     const untouched = await fetch(`${baseUrl}/api/v1/submissions/${excluded.id}`, { headers: { 'x-employee-id': 'w00126' } });
     const untouchedBody = await untouched.json() as { gradingStatus?: string; resultId?: string };
     assert.equal(untouchedBody.gradingStatus, 'PENDING');

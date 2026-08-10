@@ -33,7 +33,7 @@ linux-x64/
 └─ nginx/conf/mime.types
 ```
 
-目录中必须保留各运行时正常工作所需的其余文件。Python 运行时必须支持 `venv`、pip 的 `--python` 参数，并已安装 `ldap3`；Linux 目录内的符号链接不得指向目录外。发布任务会实际启动 Node、Python、Nginx，并在 Windows 上启动 PowerShell 做版本检查。
+目录中必须保留各运行时正常工作所需的其余文件。Node.js 必须为 20+；Python 必须为 3.11+、支持 `venv` 和 pip 的 `--python` 参数，并已安装 `ldap3`、`jsonschema`、`PyYAML`；Windows PowerShell 必须为 7+。Linux 目录内的符号链接不得指向目录外。发布任务会实际启动 Node、Python、Nginx，在 Windows 上启动 PowerShell，并核对系统与 x64 架构。
 
 每个平台还要准备独立 wheelhouse。除平台固定依赖外，应覆盖所有已发布赛题引擎的 `requirements.txt`；目标机不会回退到公网下载。
 
@@ -45,7 +45,7 @@ Windows x64：
 pnpm release:build -- --target win32-x64 `
   --runtime-root D:\release-inputs\win32-x64 `
   --wheelhouse D:\release-inputs\wheelhouse-win32-x64 `
-  --version 0.9.5 `
+  --version 0.9.6 `
   --source-date-epoch 1786320000
 ```
 
@@ -55,7 +55,7 @@ Linux x64：
 pnpm release:build -- --target linux-x64 \
   --runtime-root /opt/release-inputs/linux-x64 \
   --wheelhouse /opt/release-inputs/wheelhouse-linux-x64 \
-  --version 0.9.5 \
+  --version 0.9.6 \
   --source-date-epoch 1786320000
 ```
 
@@ -65,7 +65,7 @@ pnpm release:build -- --target linux-x64 \
 - Linux：`release/ai-training-platform-<版本>-linux-x64.tar.gz`；
 - 两个平台都会生成同名 `.sha256` 文件和包内 `release-manifest.json`。
 
-`SOURCE_DATE_EPOCH`、源码、依赖和运行时输入相同时，归档字节应保持一致。构建会拒绝旧输出目录、错误平台、缺失运行时、空 wheelhouse、越界符号链接、平台源码/测试和真实 `.env`。
+`SOURCE_DATE_EPOCH`、源码、依赖和运行时输入相同时，归档字节应保持一致。构建会拒绝旧输出目录、错误平台或架构、过旧运行时、缺失固定 Python 模块、空 wheelhouse、越界符号链接、平台源码/测试和真实 `.env`。内置执行器在 `engine.json` 声明的 `platformDependencies` 会自动复制到发布包，避免执行器在源码工作区可用、离线包中缺依赖。
 
 Windows 生产依赖采用实体化目录，不要求目标服务器开启开发者模式或符号链接权限。为兼容 Windows 路径限制，发布包应解压到短路径，例如 `C:\AITraining`。
 

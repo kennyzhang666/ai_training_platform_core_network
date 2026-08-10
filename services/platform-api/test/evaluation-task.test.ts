@@ -31,12 +31,20 @@ test('the repository ships a built-in executor catalogue the challenge editor ca
     const executors = registry.list();
     const drillGrader = executors.find((item) => item.id === 'drill-grader');
     assert.ok(drillGrader, 'drill-grader should ship with the platform');
+    assert.equal(drillGrader!.version, '0.3.1');
     assert.ok(drillGrader!.title.length > 0);
     // The manifest carries the parameter schema the editor renders as a form.
     assert.deepEqual((drillGrader!.params as { required?: string[] }).required, ['contractPath', 'entry', 'function']);
     // Editing a built-in executor changes its content hash, which is part of
     // the grading identity.
     assert.match(drillGrader!.contentHash, /^[a-f0-9]{64}$/);
+    const resolved = registry.resolve({
+      id: 'drill-grader-test', version: '0.3.1', mode: 'PLATFORM_LOCAL',
+      executor: { id: 'drill-grader', params: { contractPath: 'challenges/parking-fee-v1/submission-contract.json', entry: 'src/parking.py', function: 'calculate_fee' } },
+      input: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-input.schema.json' },
+      output: { format: 'JSON', schemaVersion: '1.0', contractPath: 'contracts/evaluation-result.schema.json' },
+    });
+    assert.deepEqual(resolved.platformDependencies.map((item) => item.name).sort(), ['graderProfiles', 'graderSource']);
 
     registry.assertExecutorConfiguration('drill-grader', {
       contractPath: 'challenges/parking-fee-v1/submission-contract.json',

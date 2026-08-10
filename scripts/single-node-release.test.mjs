@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import {
   RELEASE_TARGETS,
   assembleReleaseLayout,
+  assertNodeRuntimeIdentity,
+  assertPythonRuntimeIdentity,
   createReleaseArchive,
   verifyReleaseLayout,
 } from './build-single-node-release.mjs';
@@ -28,9 +30,12 @@ async function fixture(root) {
     'apps/web/dist/index.html',
     'contracts/evaluation-result.schema.json',
     'docs/evaluation-contract-authoring.md',
-    'executors/drill-grader/engine.json',
+    'grader/src/drill_grader/__init__.py',
+    'grader/profiles/yellow.yaml',
+    'grader/profiles/blue.yaml',
     'sandbox/launch.py',
     'scripts/evaluation-worker.mjs',
+    'scripts/code-agent-executable.mjs',
     'services/ldap3-gateway/ldap3_gateway.py',
     'services/ldap3-gateway/requirements.txt',
     'services/ldap3-gateway/static/login.html',
@@ -42,6 +47,17 @@ async function fixture(root) {
     'deploy/release/linux.env.example',
     'deploy/release/README.md',
   ]) await put(sourceRoot, path);
+  await put(sourceRoot, 'executors/drill-grader/engine.json', JSON.stringify({
+    schemaVersion: '1.0',
+    id: 'drill-grader',
+    version: '0.3.1',
+    runtime: { type: 'python', entrypoint: 'judge.py' },
+    platformDependencies: {
+      graderSource: 'grader/src/drill_grader',
+      graderProfiles: 'grader/profiles',
+    },
+  }));
+  await put(sourceRoot, 'executors/drill-grader/judge.py');
   await put(sourceRoot, '.env', 'DATABASE_URL=do-not-package');
 
   for (const path of [
@@ -78,9 +94,19 @@ test('release contract supports Windows x64 and Linux x64 with platform runtimes
   assert.equal(RELEASE_TARGETS['linux-x64'].archiveExtension, '.tar.gz');
 });
 
+test('release runtime gate rejects unsupported versions and the wrong target architecture', () => {
+  assert.doesNotThrow(() => assertNodeRuntimeIdentity({ version: '20.19.0', platform: 'win32', arch: 'x64' }, 'win32-x64'));
+  assert.throws(() => assertNodeRuntimeIdentity({ version: '18.20.0', platform: 'win32', arch: 'x64' }, 'win32-x64'), /Node\.js 20/);
+  assert.throws(() => assertNodeRuntimeIdentity({ version: '22.1.0', platform: 'linux', arch: 'arm64' }, 'linux-x64'), /linux\/x64/);
+  assert.doesNotThrow(() => assertPythonRuntimeIdentity({ version: '3.11.9', system: 'Linux', machine: 'x86_64' }, 'linux-x64'));
+  assert.throws(() => assertPythonRuntimeIdentity({ version: '3.10.14', system: 'Linux', machine: 'x86_64' }, 'linux-x64'), /Python 3\.11/);
+  assert.throws(() => assertPythonRuntimeIdentity({ version: '3.12.1', system: 'Windows', machine: 'AMD64' }, 'linux-x64'), /Linux x64/);
+});
+
 test('release builder creates a portable production dependency tree with pnpm 11', async () => {
   const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), 'build-single-node-release.mjs'), 'utf8');
   assert.match(source, /'--config\.node-linker=hoisted', 'deploy', '--prod', '--legacy', apiDeployRoot/);
+  assert.match(source, /import ldap3, jsonschema, yaml/);
 });
 
 for (const target of ['win32-x64', 'linux-x64']) {
@@ -105,6 +131,9 @@ for (const target of ['win32-x64', 'linux-x64']) {
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/dist/main.js'));
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/prisma/build/index.js'));
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/runtime-dependency/src/index.js'));
+      assert.ok(manifest.files.some((file) => file.path === 'grader/src/drill_grader/__init__.py'));
+      assert.ok(manifest.files.some((file) => file.path === 'grader/profiles/yellow.yaml'));
+      assert.ok(manifest.files.some((file) => file.path === 'scripts/code-agent-executable.mjs'));
       assert.ok(manifest.files.some((file) => file.path === RELEASE_TARGETS[target].runtimeFiles[0].replace(/^/, 'runtime/')));
       assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', RELEASE_TARGETS[target].manager)));
       if (target === 'win32-x64') assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', 'manage.cmd')));

@@ -87,6 +87,9 @@ export class EngineRunner implements GradingExecutor {
       const params = engine.params as { contractPath?: string; testsDir?: string };
       if (params.contractPath) assets.submissionContract = resolve(this.repositoryRoot(), params.contractPath);
       if (params.testsDir) assets.testsDir = resolve(this.repositoryRoot(), params.testsDir);
+      for (const dependency of engine.platformDependencies) {
+        assets[dependency.name] = resolve(this.repositoryRoot(), dependency.repositoryPath);
+      }
     }
     return assets;
   }

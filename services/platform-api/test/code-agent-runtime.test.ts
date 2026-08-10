@@ -70,6 +70,16 @@ test('runtime diagnostics reads the Worker fallback executable and fixed args', 
   assert.equal(diagnostics.worker.canResolveExecutable, true);
 });
 
+test('runtime diagnostics treats the Windows native extension as the configured portable command', () => {
+  const diagnostics = codeAgentRuntimeDiagnostics(defaultCodeAgentRuntimeConfig(), {
+    CODE_AGENT_COMMAND: 'C:\\tools\\opencode.exe',
+    CODE_AGENT_ALLOWED_EXECUTABLES: 'opencode',
+    EMBEDDED_EVALUATION_WORKER: 'false',
+  });
+  assert.equal(diagnostics.worker.source, 'ENVIRONMENT');
+  assert.equal(diagnostics.worker.canResolveExecutable, true);
+});
+
 test('an evaluation batch freezes the Code Agent runtime selected at creation', () => {
   const store = new PlatformStore(':memory:');
   const original = store.updateCodeAgentRuntimeConfig({ enabled: true, commandLine: 'opencode -m model-a --prompt "{{prompt}}"', prompt: '执行评测。', timeoutSeconds: 3600 }, 'w00123');

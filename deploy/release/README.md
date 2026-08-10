@@ -11,6 +11,8 @@
 
 日常操作在两个平台上均为 `Start`、`Stop`、`Status`、`Backup`、`Restore`、`Doctor`。Windows 通过 `manage.cmd` 使用包内 PowerShell，Linux 通过 `manage.sh` 使用包内 Node、Python 和 Nginx；不要改用系统 Node 或手工启动子进程。
 
+默认 Code Agent 配置直接以 `--prompt` 调用 OpenCode；使用公司自有批次 bridge 时，将 `CODE_AGENT_ARGS_JSON` 改为 `["--manifest","{{manifestPath}}"]`。`Doctor` 会在迁移前检查运行时版本、固定 Python 模块、端口、Code Agent 可执行文件与允许列表。
+
 发布包不包含数据库密码、LDAP 凭据、真实员工数据、证书或 Code Agent 令牌。`release-manifest.json` 记录包内每个文件的 SHA-256；同目录的压缩包 `.sha256` 文件用于传输后校验。
 
 PostgreSQL、Code Agent 和企业 LDAP 必须由目标环境提供。Node、Python、Nginx、LDAP Python 依赖、评测 wheelhouse 随对应平台包提供；Windows 包另含 PowerShell 和后续服务化使用的包装器。

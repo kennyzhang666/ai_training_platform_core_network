@@ -1,9 +1,9 @@
 # AI 能力训战平台开发总览
 
-> 当前版本：`v0.9.5`
+> 当前版本：`v0.9.6`
 > 更新日期：2026-08-10
-> 当前阶段：`v0.9.5` 已发布；单服务器业务闭环、Windows x64 / Linux x64 离线发布契约和 SDD 综合训战端到端验收已完成，尚待两类真实断网服务器 UAT
-> 发布范围：收口两阶段上传、不可变快照、评测批次、引擎 Skills/Python 依赖、首位管理员与 SSO 部门匹配；新增 `0016_upload_session_subject_binding`、SDD 日志脱敏综合赛题，以及同机 PostgreSQL、本地交付件、独立 Worker 且不依赖 MinIO、Redis、Kafka 或 Docker 的单服务器部署档。
+> 当前阶段：`v0.9.6` 已发布；第二轮首次部署审计和本地回归已完成，单服务器业务闭环、Windows x64 / Linux x64 离线发布契约和 SDD 综合训战端到端验收已完成，尚待两类真实断网服务器 UAT
+> 发布范围：修复首次部署的端口、进程回滚、Windows OpenCode 启动、离线执行器依赖和评分 profile 一致性问题；强化运行时门禁与隔离 `Doctor`，继续保持同机 PostgreSQL、本地交付件、独立 Worker 且不依赖 MinIO、Redis、Kafka 或 Docker 的单服务器部署档。
 > 下一优先级：在 Windows Server x64 与 Linux x64 目标机验证离线包、真实 PostgreSQL/SSO/Code Agent 后，继续一次安装、系统服务、自动备份、离线升级和脱敏诊断。
 > 文档职责：项目架构、整体设计、版本沿革、当前边界、后续路线和 Codex 交接入口
 
@@ -202,7 +202,7 @@ Platform API 校验、重算、幂等保存
 
 员工只能看到按训战揭晓策略开放的结果；管理员在权限范围内可进行运营和复核。
 
-## 5. 当前实现状态（v0.9.5）
+## 5. 当前实现状态（v0.9.6）
 
 ### 5.1 已可本地验收
 
@@ -454,6 +454,19 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 
 本地证据：`pnpm test` 144 项（143 通过、1 项 PostgreSQL 集成按配置跳过），契约 7/7、Python grader 18/18、SDD 专项 3/3、评测资料包 2/2、发布 5/5；`pnpm deployment:test` 在 Windows 为 8 项通过、Linux Bash 项按平台跳过；100 人集中提交和有界队列通过。Windows 实际生产 Node 依赖曾完成 13,530 文件、零符号链接的布局与 ZIP/SHA-256 验证；本机当前未提供正式双平台运行时输入，因此不把测试归档冒充目标服务器发布包。Linux 原生生产依赖、真实运行时、断网启动、真实 LDAP/PostgreSQL/Code Agent 仍必须在目标机复验。
 
+### 5.16 v0.9.6 发布状态：首次部署二次审计（2026-08-10）
+
+本轮不改变单服务器架构、不增加外部服务，专门修复干净内网电脑首次部署会遇到的确定性问题：
+
+- 后端端口由同一份环境配置驱动 API、LDAP 网关、Nginx 和健康检查；`Doctor` 校验端口范围、重复、占用、回环地址及 Worker API 地址一致性；
+- Windows npm 命令包装器会解析到原生 Code Agent 可执行文件，仍保持 `shell: false`；环境兜底和管理后台配置都支持 `{{prompt}}`、`{{manifestPath}}`、`{{batchDir}}`，默认 OpenCode 兜底收到完整强制批次指令；
+- 首次启动中途失败会回滚本次新启动的进程，Windows 状态检查会拒绝陈旧或不属于当前发布目录的 PID；
+- 发布组装器按执行器清单携带平台依赖，并校验 Node.js 20+、Python 3.11+、系统/架构、PowerShell 7+ 和固定 Python 模块；内置 `drill-grader@0.3.1` 将评分 profile 冻结进依赖哈希，API 与 Worker 使用相同阈值；
+- Windows 已在自动创建的隔离发布目录中实际执行 `Doctor`，验证运行时、Code Agent、迁移入口和自定义 Nginx 端口渲染；Linux 当前由发布布局和 Bash 契约覆盖，仍需 Linux x64 Runner 与断网目标机完成原生执行；
+- 本地 HTTP 测试服务统一过滤 Fetch 禁止端口，消除操作系统随机端口恰好落入浏览器禁用清单时的门禁偶发失败。
+
+本轮本地门禁：工作区 146 项（145 通过、1 项 PostgreSQL 集成按配置跳过），契约 7/7、Python grader 18/18、LDAP 网关 20/20、评测资料包 2/2、离线发布 6/6；Windows 部署门禁 15 项通过，Linux Bash 原生语法项按当前平台跳过；100 人集中提交与有界评测队列独立验收通过。构建、类型检查和 `git diff --check` 均通过。
+
 ## 6. 版本沿革
 
 详细变更和修复见 `CHANGELOG.md`，这里仅保留交接所需的架构演进。
@@ -481,14 +494,15 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 | `v0.9.0` | 2026-08-07 | 收口本地生产模式与内网部署：LDAP3 Mock/中文身份传输、纯 HTTP 开关、Worker 服务身份、并发建档重试、反向代理同源 API、退出登录和空目录初始化。 |
 | `v0.9.1` | 2026-08-09 | 修复首次管理员、上传快照、Skills/依赖和 SSO 匹配；新增同机 PostgreSQL 单服务器生产档、离线 Worker 环境、统一运维脚本及 100 人集中提交验收。 |
 | `v0.9.5` | 2026-08-10 | 收口单服务器闭环、Windows/Linux 可复现离线发布契约和 SDD 日志脱敏综合赛题真实端到端验收；真实目标机 UAT 与无人值守运维继续推进。 |
+| `v0.9.6` | 2026-08-10 | 修复首次部署端口漂移、Windows OpenCode 启动、半启动残留、发布包执行器依赖缺失和评分 profile 不一致；强化双平台运行时门禁与 Windows 隔离 Doctor。 |
 
 ## 7. 后续开发路线
 
 路线以“先完成可部署的核心平台，再接最后的 GitLab 自动评测接口”为原则。每次只实现一个有契约、有测试、可演示的纵切面。
 
-### 7.1 v0.9.6：目标机验收与极简运维（下一阶段）
+### 7.1 v0.9.7：目标机验收与极简运维（下一阶段）
 
-目标：在一台干净的内网服务器上，不访问互联网、不拉源码、不执行前端构建，运维人员使用 `v0.9.5` 对应平台的离线发布包和一份配置，在 30 分钟内完成安装并获得可自动恢复的长期运行服务。
+目标：在一台干净的内网服务器上，不访问互联网、不拉源码、不执行前端构建，运维人员使用 `v0.9.6` 对应平台的离线发布包和一份配置，在 30 分钟内完成安装并获得可自动恢复的长期运行服务。
 
 保持以下架构约束：
 
@@ -501,7 +515,7 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 按以下纵切面依次实现，每一项独立补测试和验收：
 
 1. **离线发布包（代码完成，目标机 UAT 待完成）**：已新增可复现的 Windows x64 ZIP 与 Linux x64 tar.gz 发布任务，包含已构建 Web/API、实体生产 Node 依赖、数据库迁移、平台 Python 运行时、固定依赖、wheelhouse、Nginx、Windows PowerShell/服务包装器、Worker、契约、双平台运维脚本、版本清单和 SHA-256 校验；目标机不再运行 `pnpm install`、`pnpm build` 或 `git pull`。PostgreSQL 与 Code Agent 使用公司统一软件包，不由平台联网下载。
-2. **一次安装与自检**：将 `manage.ps1` 扩展为 `Install`、`Doctor` 和 `Uninstall`；安装时生成内部随机密钥，校验并保存一份正式配置，执行数据库迁移，检查端口、目录权限、剩余磁盘、PostgreSQL、LDAP、Nginx、Worker 身份和 Code Agent 命令。`Doctor` 只输出检查结论和脱敏原因。
+2. **一次安装与自检**：现有 `Doctor` 已检查运行时、固定 Python 依赖、端口、迁移状态、Nginx 和 Code Agent 命令；后续增加 `Install`、`Uninstall`、随机密钥生成、目录权限/剩余磁盘、真实 LDAP 登录探测和 Worker 服务身份联通。`Doctor` 只输出检查结论和脱敏原因。
 3. **系统服务**：随发布包携带单个服务包装器，把 API、LDAP 网关、Worker 和 Nginx 注册为自动启动、异常重启的 Windows 服务；Linux 继续生成等价 systemd 单元。运维仍只使用 `Start`、`Stop`、`Restart`、`Status`，不直接管理各子进程。
 4. **自动备份与保留**：增加 `Schedule-Backup`、`Verify-Backup` 和 `Prune-Backups`，复用 Windows 任务计划或 systemd timer，不新增常驻服务；默认每日备份、保留最近 7 份，备份前检查空间，备份后校验 manifest、数据库图谱和 ZIP 可读性。
 5. **离线升级与失败回退**：增加 `Upgrade -Package`，校验版本和哈希后自动停止服务、生成恢复点、部署新版本、执行迁移并做健康检查；失败时恢复旧程序、数据库和 `data/`。已发布迁移不反向修改，数据库回退始终使用升级前恢复点。
@@ -512,7 +526,7 @@ JSON 导入 dry-run 现在会在数据库连接前校验关系引用、唯一键
 
 ### 7.2 生产数据与身份底座（长期演进）
 
-目标：为生产运行提供 PostgreSQL 事实来源，并为需要多 API 实例和独立存储服务的标准生产档提供 S3 能力。v0.9.5 的单服务器档固定使用同机 PostgreSQL、真实 SSO、一个 API 进程、独立 Worker 和本地交付件目录，不引入 MinIO、Redis、Kafka 或 Docker；多 API 实例再切换独立 PostgreSQL 与 S3-compatible 对象存储。
+目标：为生产运行提供 PostgreSQL 事实来源，并为需要多 API 实例和独立存储服务的标准生产档提供 S3 能力。v0.9.6 的单服务器档固定使用同机 PostgreSQL、真实 SSO、一个 API 进程、独立 Worker 和本地交付件目录，不引入 MinIO、Redis、Kafka 或 Docker；多 API 实例再切换独立 PostgreSQL 与 S3-compatible 对象存储。
 
 - 实现 `PlatformRepository` 边界，将 `PlatformStore` 的持久化职责迁移到 Prisma/PostgreSQL（W1 组织/人员/审计已完成，其他高频领域继续迁移）；
 - 为提交、评测运行、批次租约、结果导入和审计增加数据库事务与唯一约束；
@@ -538,7 +552,7 @@ v0.8.x 已完成运行配置、Worker 诊断、受控配置测试、日志目录
 
 ### 7.4 v0.9.x：业务完整性与可运营性（单服务器基础档已完成，业务扩展继续排期）
 
-v0.9.5 已完成单服务器基础档、真实 SSO 边界、独立 Worker、离线引擎依赖、100 人集中提交验收、20 人外部 Worker 协议验收和 SDD 综合赛题单人真实端到端验收；以下业务完整性工作仍是后续迭代目标，目标环境仍需使用真实 LDAP、PostgreSQL 与 Code Agent 复验。
+v0.9.6 已完成单服务器基础档、真实 SSO 边界、独立 Worker、离线引擎依赖、100 人集中提交验收、20 人外部 Worker 协议验收、SDD 综合赛题单人真实端到端验收和首次部署二次审计；以下业务完整性工作仍是后续迭代目标，目标环境仍需使用真实 LDAP、PostgreSQL 与 Code Agent 复验。
 
 目标：满足真实部门试点的日常配置、复核和复盘需求。
 

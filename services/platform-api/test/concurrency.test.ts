@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from '../src/app.module';
+import { createFetchSafeApplication } from './test-server';
 
 // Keep the acceptance test isolated from a developer's persistent data and make
 // the queue limit explicit so the test exercises back-pressure deterministically.
@@ -12,10 +13,11 @@ process.env.ALLOW_ANONYMOUS_LOCAL = 'true';
 process.env.EMBEDDED_EVALUATION_WORKER = 'true';
 
 async function withApp(run: (baseUrl: string) => Promise<void>): Promise<void> {
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter());
-  await app.listen(0, '127.0.0.1');
+  const { app, baseUrl } = await createFetchSafeApplication(
+    () => NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter()),
+  );
   try {
-    await run(await app.getUrl());
+    await run(baseUrl);
   } finally {
     await app.close();
   }

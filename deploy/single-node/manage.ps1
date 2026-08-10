@@ -73,6 +73,19 @@ function Assert-Configured([string]$Name, [int]$MinimumLength = 1) {
     }
 }
 
+function Assert-TcpPort([string]$Name, [string]$Value) {
+    $parsed = 0
+    if (-not [int]::TryParse($Value, [ref]$parsed) -or $parsed -lt 1 -or $parsed -gt 65535) {
+        throw "$Name 必须是 1–65535 之间的端口"
+    }
+    return $parsed
+}
+
+function Assert-LoopbackHost([string]$Name, [string]$Value) {
+    if ($Value -ne '127.0.0.1') { throw "$Name 在单服务器模式下必须是 127.0.0.1" }
+    return $Value
+}
+
 function Resolve-Executable([string]$Configured, [string]$Label) {
     if ([System.IO.Path]::IsPathRooted($Configured) -or $Configured.Contains('/') -or $Configured.Contains('\')) {
         $candidate = if ([System.IO.Path]::IsPathRooted($Configured)) { [System.IO.Path]::GetFullPath($Configured) } else { Resolve-ProjectPath $Configured }
@@ -102,6 +115,13 @@ $evaluationLogRoot = Set-AbsolutePathEnvironment 'EVALUATION_LOG_ROOT' 'deploy/s
 $engineCacheRoot = Set-AbsolutePathEnvironment 'ENGINE_CACHE_ROOT' 'deploy/single-node/data/worker-engines'
 $pipCacheRoot = Set-AbsolutePathEnvironment 'PIP_CACHE_DIR' 'deploy/single-node/data/pip-cache'
 $wheelhouse = Set-AbsolutePathEnvironment 'ENGINE_PIP_FIND_LINKS' 'deploy/single-node/wheelhouse'
+$apiHost = Env 'HOST' '127.0.0.1'
+$apiPort = Env 'PORT' '3000'
+$ldapHost = Env 'LDAP_GATEWAY_HOST' '127.0.0.1'
+$ldapPort = Env 'LDAP_GATEWAY_PORT' '8081'
+$listenPort = Env 'SINGLE_NODE_LISTEN_PORT' '8080'
+$apiHealthUri = "http://${apiHost}:${apiPort}/api/v1/health"
+$ldapHealthUri = "http://${ldapHost}:${ldapPort}/healthz"
 
 foreach ($statePath in @($artifactRoot, $enginePackageRoot, $engineCacheRoot, $pipCacheRoot)) {
     $relative = [System.IO.Path]::GetRelativePath($dataRoot, $statePath)
@@ -153,6 +173,18 @@ function Assert-Preflight {
     if ((Env 'EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET') -ne (Env 'TRUSTED_GATEWAY_HMAC_SECRET')) {
         throw 'EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET 必须与 TRUSTED_GATEWAY_HMAC_SECRET 相同'
     }
+    $null = Assert-LoopbackHost 'HOST' $apiHost
+    $null = Assert-LoopbackHost 'LDAP_GATEWAY_HOST' $ldapHost
+    $validatedApiPort = Assert-TcpPort 'PORT' $apiPort
+    $validatedLdapPort = Assert-TcpPort 'LDAP_GATEWAY_PORT' $ldapPort
+    $validatedListenPort = Assert-TcpPort 'SINGLE_NODE_LISTEN_PORT' $listenPort
+    if (@($validatedApiPort, $validatedLdapPort, $validatedListenPort) | Group-Object | Where-Object Count -gt 1) {
+        throw 'PORT、LDAP_GATEWAY_PORT 和 SINGLE_NODE_LISTEN_PORT 不能重复'
+    }
+    $expectedPlatformApi = "http://${apiHost}:${apiPort}/api/v1"
+    if ((Env 'PLATFORM_API' $expectedPlatformApi).TrimEnd('/') -ne $expectedPlatformApi) {
+        throw "PLATFORM_API 必须与本机 API 端口一致：$expectedPlatformApi"
+    }
     if (-not (Test-Path -LiteralPath (Join-Path $projectRoot 'apps\web\dist\index.html') -PathType Leaf)) {
         throw 'Web 构建产物不存在，发布目录不完整'
     }
@@ -172,11 +204,17 @@ function Assert-Preflight {
     if ($LASTEXITCODE -ne 0 -or -not $pipHelp.Contains('--python')) {
         throw '平台 Python 的 pip 不支持 --python，无法为赛题创建隔离依赖环境'
     }
+    & $python -c 'import jsonschema, yaml' 2>$null
+    if ($LASTEXITCODE -ne 0) { throw '平台 Python 缺少 jsonschema 或 PyYAML，请使用离线 wheelhouse 安装 grader/requirements.txt' }
     $gatewayPython = Resolve-Executable (Env 'LDAP_GATEWAY_PYTHON' 'services/ldap3-gateway/.venv/Scripts/python.exe') 'LDAP 网关 Python'
     & $gatewayPython -c 'import ldap3' 2>$null
-    if ($LASTEXITCODE -ne 0) { throw 'LDAP 网关 Python 未安装 ldap3，请使用离线 wheelhouse 安装 requirements.txt' }
-    $null = Resolve-Executable (Env 'CODE_AGENT_COMMAND') 'Code Agent'
+    if ($LASTEXITCODE -ne 0) { throw 'LDAP 网关 Python 缺少 ldap3，请使用离线 wheelhouse 安装 services/ldap3-gateway/requirements.txt' }
+    $workerCheck = & $node (Join-Path $projectRoot 'scripts\evaluation-worker.mjs') --check-config 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "Code Agent 配置检查失败：$($workerCheck.Trim())" }
     $nginx = Resolve-Executable (Env 'NGINX_EXE') 'Nginx'
+    Assert-PortAvailable '平台 API' $apiPort 'api'
+    Assert-PortAvailable 'LDAP 网关' $ldapPort 'ldap3'
+    Assert-PortAvailable '平台入口' $listenPort 'nginx'
     return @{ Node = $node; Python = $python; GatewayPython = $gatewayPython; Nginx = $nginx; Pnpm = $pnpm; RuntimeMode = $runtimeMode }
 }
 
@@ -248,10 +286,14 @@ function New-NginxConfig([string]$NginxExecutable) {
         '__LISTEN_PORT__' = (Env 'SINGLE_NODE_LISTEN_PORT' '8080')
         '__SERVER_NAME__' = (Env 'SINGLE_NODE_SERVER_NAME' '_')
         '__WEB_ROOT__' = (Join-Path $projectRoot 'apps\web\dist')
+        '__API_HOST__' = $apiHost
+        '__API_PORT__' = $apiPort
+        '__LDAP_GATEWAY_HOST__' = $ldapHost
+        '__LDAP_GATEWAY_PORT__' = $ldapPort
     }
     foreach ($item in $values.GetEnumerator()) {
         $replacement = [string]$item.Value
-        if ($item.Key -ne '__LISTEN_PORT__' -and $item.Key -ne '__SERVER_NAME__') {
+        if ($item.Key -notin @('__LISTEN_PORT__', '__SERVER_NAME__', '__API_HOST__', '__API_PORT__', '__LDAP_GATEWAY_HOST__', '__LDAP_GATEWAY_PORT__')) {
             $replacement = $replacement.Replace('\', '/')
         }
         $template = $template.Replace($item.Key, $replacement)
@@ -268,13 +310,38 @@ function Get-ManagedProcess([string]$Name) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
     $pidText = (Get-Content -LiteralPath $path -Raw).Trim()
     if ($pidText -notmatch '^\d+$') { return $null }
-    return Get-Process -Id ([int]$pidText) -ErrorAction SilentlyContinue
+    $process = Get-Process -Id ([int]$pidText) -ErrorAction SilentlyContinue
+    if (-not $process) { return $null }
+    $record = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)" -ErrorAction SilentlyContinue
+    $owned = $false
+    if ($record -and $Name -eq 'nginx') {
+        try {
+            $expected = [System.IO.Path]::GetFullPath((Resolve-Executable (Env 'NGINX_EXE') 'Nginx'))
+            $actual = if ($record.ExecutablePath) { [System.IO.Path]::GetFullPath($record.ExecutablePath) } else { '' }
+            $owned = [bool]($actual -and $actual -eq $expected)
+        } catch { $owned = $false }
+    } elseif ($record -and $record.CommandLine) {
+        $owned = $record.CommandLine.IndexOf($projectRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    }
+    if (-not $owned) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        return $null
+    }
+    return $process
+}
+
+function Assert-PortAvailable([string]$Label, [string]$Port, [string]$ManagedName) {
+    if (Get-ManagedProcess $ManagedName) { return }
+    $occupied = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() |
+        Where-Object { $_.Port -eq [int]$Port } |
+        Select-Object -First 1
+    if ($occupied) { throw "$Label 端口已被其他程序占用：127.0.0.1:$Port" }
 }
 
 function Start-ManagedProcess([string]$Name, [string]$Executable, [string[]]$Arguments, [string]$WorkingDirectory) {
     if (Get-ManagedProcess $Name) {
         Write-Host "$Name 已在运行"
-        return
+        return $false
     }
     $stdout = Join-Path $logRoot "$Name.stdout.log"
     $stderr = Join-Path $logRoot "$Name.stderr.log"
@@ -284,6 +351,7 @@ function Start-ManagedProcess([string]$Name, [string]$Executable, [string[]]$Arg
     if (-not (Get-Process -Id $process.Id -ErrorAction SilentlyContinue)) {
         throw "$Name 启动失败，请查看 $stderr"
     }
+    return $true
 }
 
 function Stop-ManagedProcess([string]$Name) {
@@ -322,21 +390,29 @@ function Start-All {
     Deploy-Database
     New-NginxConfig $runtime.Nginx
     $node = $runtime.Node
-    Start-ManagedProcess 'api' $node @((Quote-Argument (Join-Path $projectRoot 'services\platform-api\dist\main.js'))) $projectRoot
-    Start-ManagedProcess 'ldap3' $runtime.GatewayPython @((Quote-Argument (Join-Path $projectRoot 'services\ldap3-gateway\ldap3_gateway.py'))) (Join-Path $projectRoot 'services\ldap3-gateway')
-    Wait-Health '平台 API' 'http://127.0.0.1:3000/api/v1/health'
-    Wait-Health 'LDAP 网关' 'http://127.0.0.1:8081/healthz'
-    Start-ManagedProcess 'worker' $node @(
-        (Quote-Argument (Join-Path $projectRoot 'scripts\evaluation-worker.mjs')),
-        '--api', (Env 'PLATFORM_API' 'http://127.0.0.1:3000/api/v1'),
-        '--employee', (Env 'EVALUATION_WORKER_EMPLOYEE_NO'),
-        '--worker', (Env 'EVALUATION_WORKER_ID' 'single-node-worker'),
-        '--batch-root', (Quote-Argument $batchRoot),
-        '--cache', (Quote-Argument $engineCacheRoot)
-    ) $projectRoot
-    $nginxPrefix = (Split-Path -Parent $runtime.Nginx) + [System.IO.Path]::DirectorySeparatorChar
-    Start-ManagedProcess 'nginx' $runtime.Nginx @('-p', (Quote-Argument $nginxPrefix), '-c', (Quote-Argument $nginxRuntimeConfig)) (Split-Path -Parent $runtime.Nginx)
-    Write-Host "单服务器平台已启动：http://127.0.0.1:$(Env 'SINGLE_NODE_LISTEN_PORT' '8080')/"
+    $started = [System.Collections.Generic.List[string]]::new()
+    try {
+        if (Start-ManagedProcess 'api' $node @((Quote-Argument (Join-Path $projectRoot 'services\platform-api\dist\main.js'))) $projectRoot) { $started.Add('api') }
+        if (Start-ManagedProcess 'ldap3' $runtime.GatewayPython @((Quote-Argument (Join-Path $projectRoot 'services\ldap3-gateway\ldap3_gateway.py'))) (Join-Path $projectRoot 'services\ldap3-gateway')) { $started.Add('ldap3') }
+        Wait-Health '平台 API' $apiHealthUri
+        Wait-Health 'LDAP 网关' $ldapHealthUri
+        if (Start-ManagedProcess 'worker' $node @(
+            (Quote-Argument (Join-Path $projectRoot 'scripts\evaluation-worker.mjs')),
+            '--api', (Env 'PLATFORM_API' "http://${apiHost}:${apiPort}/api/v1"),
+            '--employee', (Env 'EVALUATION_WORKER_EMPLOYEE_NO'),
+            '--worker', (Env 'EVALUATION_WORKER_ID' 'single-node-worker'),
+            '--batch-root', (Quote-Argument $batchRoot),
+            '--cache', (Quote-Argument $engineCacheRoot)
+        ) $projectRoot) { $started.Add('worker') }
+        $nginxPrefix = (Split-Path -Parent $runtime.Nginx) + [System.IO.Path]::DirectorySeparatorChar
+        if (Start-ManagedProcess 'nginx' $runtime.Nginx @('-p', (Quote-Argument $nginxPrefix), '-c', (Quote-Argument $nginxRuntimeConfig)) (Split-Path -Parent $runtime.Nginx)) { $started.Add('nginx') }
+        Write-Host "单服务器平台已启动：http://127.0.0.1:${listenPort}/"
+    } catch {
+        for ($index = $started.Count - 1; $index -ge 0; $index--) {
+            Stop-ManagedProcess $started[$index]
+        }
+        throw
+    }
 }
 
 function Stop-All {

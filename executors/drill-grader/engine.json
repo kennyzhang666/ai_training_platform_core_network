@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "id": "drill-grader",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "title": "内置通用判题器（隐藏测试 + 代码度量）",
   "description": "平台自带的确定性判题器：按提交契约校验交付件，分四档执行隐藏测试得到 Verify，用 AST 度量得到 Code，并逐条产出扣分证据。适用于「有隐藏测试可跑」的赛题。",
   "runtime": {
@@ -52,6 +52,7 @@
     "outputBytes": 4194304
   },
   "platformDependencies": {
-    "graderSource": "grader/src/drill_grader"
+    "graderSource": "grader/src/drill_grader",
+    "graderProfiles": "grader/profiles"
   }
 }

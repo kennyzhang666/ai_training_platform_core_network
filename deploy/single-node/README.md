@@ -10,6 +10,8 @@
 
 离线发布包已携带 Node、Python、Nginx、LDAP Python 依赖、生产 Node 依赖和评测 wheelhouse；Windows 包同时携带 PowerShell。目标机不执行 `git pull`、`pnpm install` 或 `pnpm build`，部署脚本也不会联网下载或自动安装 PostgreSQL。
 
+发布运行时必须是 Node.js 20+、Python 3.11+ 和 x64，并包含 `ldap3`、`jsonschema`、`PyYAML`、`venv` 及支持 `--python` 的 pip。发布任务和 `Doctor` 都会检查这些条件。
+
 ## 创建数据库
 
 使用 PostgreSQL 自带的 pgAdmin 或 `psql` 创建独立用户和数据库。用户名、数据库名可以调整，但必须与 `.env` 中的 `DATABASE_URL` 一致：
@@ -44,6 +46,10 @@ cp deploy/single-node/.env.example deploy/single-node/.env
 ~~~
 
 `Prepare` 会连接同机 PostgreSQL 并执行全部版本化迁移；`Doctor` 会检查运行时、配置、Nginx 和数据库迁移状态。数据库无法连接、配置仍有占位值或迁移失败时不会继续。
+
+`HOST` 与 `LDAP_GATEWAY_HOST` 在单服务器档固定为 `127.0.0.1`。如需避开端口冲突，可同时修改 `PORT`、`PLATFORM_API`、`LDAP_GATEWAY_PORT` 和 `SINGLE_NODE_LISTEN_PORT`；`Doctor` 会检查三项端口不重复且未被其他程序占用，并把同一组端口写入 Nginx。
+
+默认 `CODE_AGENT_COMMAND=opencode`，`CODE_AGENT_ARGS_JSON=["--prompt","{{prompt}}"]`，可直接向 OpenCode 发送平台生成的批次指令。若公司使用自有 bridge，可将参数改为 `["--manifest","{{manifestPath}}"]`。Windows npm 安装产生的 `.cmd` 会被解析到原生 `.exe`；普通批处理和 PowerShell 脚本不会由 Worker 通过 shell 执行。
 
 两套发布包的生成、运行时输入和 SHA-256 门禁见 [`docs/deployment/offline-dual-platform-release.md`](../../docs/deployment/offline-dual-platform-release.md)。
 

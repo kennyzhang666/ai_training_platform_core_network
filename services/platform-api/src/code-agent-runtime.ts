@@ -128,7 +128,13 @@ function executableIsAllowed(executable: string, allowed: string[]): boolean {
   if (!allowed.length) return true;
   const normalized = executable.trim().toLowerCase();
   const name = normalized.split(/[\\/]/).pop() ?? normalized;
-  return allowed.includes(normalized) || allowed.includes(name);
+  const portableName = name.replace(/\.(?:exe|com|cmd|bat|ps1)$/i, '');
+  return allowed.some((entry) => {
+    const configured = entry.trim().toLowerCase();
+    const configuredName = configured.split(/[\\/]/).pop() ?? configured;
+    const portableConfigured = configuredName.replace(/\.(?:exe|com|cmd|bat|ps1)$/i, '');
+    return configured === normalized || configuredName === name || portableConfigured === portableName;
+  });
 }
 
 function redactWorkerArgument(value: string, previous: string | undefined): string {

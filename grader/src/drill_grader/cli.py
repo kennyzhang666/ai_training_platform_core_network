@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,11 +18,13 @@ from .submission import validate_submission
 from .verify import DEFAULT_VERIFY_WEIGHTS, verify_submission
 
 
-GRADER_VERSION = "0.3.0"
+GRADER_VERSION = "0.3.1"
 
 
 def _load_profile(zone: str) -> dict[str, Any]:
-    profile_path = Path(__file__).resolve().parents[2] / "profiles" / f"{zone.lower()}.yaml"
+    configured_root = os.environ.get("DRILL_GRADER_PROFILE_ROOT", "").strip()
+    profile_root = Path(configured_root) if configured_root else Path(__file__).resolve().parents[2] / "profiles"
+    profile_path = profile_root / f"{zone.lower()}.yaml"
     defaults = {
         "version": "1.0",
         "levelRatios": {"A": 1.0, "B": 0.75, "C": 0.5, "D": 0.0},

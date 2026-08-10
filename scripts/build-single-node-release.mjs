@@ -55,6 +55,34 @@ export const RELEASE_TARGETS = Object.freeze({
   }),
 });
 
+function versionTuple(value) {
+  const match = /^(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(value ?? '').trim());
+  if (!match) throw new Error(`runtime returned an invalid version: ${value}`);
+  return match.slice(1).map((part) => Number(part ?? 0));
+}
+
+export function assertNodeRuntimeIdentity(identity, target) {
+  const descriptor = RELEASE_TARGETS[target];
+  if (!descriptor) throw new Error(`unsupported release target: ${target}`);
+  const [major] = versionTuple(identity?.version);
+  if (major < 20) throw new Error(`${target} runtime requires Node.js 20 or newer; received ${identity?.version ?? 'unknown'}`);
+  if (identity?.platform !== descriptor.platform || identity?.arch !== descriptor.arch) {
+    throw new Error(`${target} Node.js runtime must report ${descriptor.platform}/${descriptor.arch}; received ${identity?.platform ?? 'unknown'}/${identity?.arch ?? 'unknown'}`);
+  }
+}
+
+export function assertPythonRuntimeIdentity(identity, target) {
+  const descriptor = RELEASE_TARGETS[target];
+  if (!descriptor) throw new Error(`unsupported release target: ${target}`);
+  const [major, minor] = versionTuple(identity?.version);
+  if (major < 3 || (major === 3 && minor < 11)) throw new Error(`${target} runtime requires Python 3.11 or newer; received ${identity?.version ?? 'unknown'}`);
+  const expectedSystem = descriptor.platform === 'win32' ? 'windows' : 'linux';
+  const machine = String(identity?.machine ?? '').toLowerCase();
+  if (String(identity?.system ?? '').toLowerCase() !== expectedSystem || !['x86_64', 'amd64', 'x64'].includes(machine)) {
+    throw new Error(`${target} Python runtime must be ${descriptor.platform === 'win32' ? 'Windows' : 'Linux'} x64; received ${identity?.system ?? 'unknown'} ${identity?.machine ?? 'unknown'}`);
+  }
+}
+
 function slash(value) {
   return value.split(sep).join('/');
 }
@@ -76,10 +104,10 @@ async function requireDirectory(path, label) {
   if (!info.isDirectory()) throw new Error(`${label} must be a directory: ${path}`);
 }
 
-async function copyDirectory(source, destination, label) {
+async function copyDirectory(source, destination, label, filter = undefined) {
   await requireDirectory(source, label);
   await mkdir(dirname(destination), { recursive: true });
-  await cp(source, destination, { recursive: true, force: false, errorOnExist: true, dereference: false });
+  await cp(source, destination, { recursive: true, force: false, errorOnExist: true, dereference: false, ...(filter ? { filter } : {}) });
 }
 
 async function copyFile(source, destination, label) {
@@ -91,6 +119,38 @@ async function copyFile(source, destination, label) {
 async function wheelFiles(root) {
   const entries = await readdir(root, { withFileTypes: true });
   return entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.whl'));
+}
+
+function portablePythonSource(path) {
+  const name = basename(path).toLowerCase();
+  return name !== '__pycache__' && !name.endsWith('.pyc') && !name.endsWith('.pyo');
+}
+
+async function copyExecutorDependencies(sourceRoot, outputRoot) {
+  const executorsRoot = join(sourceRoot, 'executors');
+  const entries = await readdir(executorsRoot, { withFileTypes: true });
+  const dependencies = new Set();
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const manifestPath = join(executorsRoot, entry.name, 'engine.json');
+    if (!existsSync(manifestPath)) continue;
+    let manifest;
+    try { manifest = JSON.parse(await readFile(manifestPath, 'utf8')); } catch { throw new Error(`executor manifest is not valid JSON: ${manifestPath}`); }
+    for (const repositoryPath of Object.values(manifest.platformDependencies ?? {})) {
+      if (typeof repositoryPath !== 'string' || !repositoryPath.trim()) throw new Error(`executor dependency path is invalid: ${manifestPath}`);
+      const source = resolve(sourceRoot, repositoryPath);
+      if (!inside(sourceRoot, source)) throw new Error(`executor dependency escapes the source root: ${repositoryPath}`);
+      dependencies.add(slash(relative(sourceRoot, source)));
+    }
+  }
+  for (const repositoryPath of [...dependencies].sort()) {
+    await copyDirectory(
+      join(sourceRoot, ...repositoryPath.split('/')),
+      join(outputRoot, ...repositoryPath.split('/')),
+      `executor dependency ${repositoryPath}`,
+      portablePythonSource,
+    );
+  }
 }
 
 async function describeEntry(root, path) {
@@ -161,7 +221,9 @@ export async function assembleReleaseLayout(options) {
     for (const path of ['apps/web/dist', 'contracts', 'docs', 'executors', 'sandbox']) {
       await copyDirectory(join(sourceRoot, ...path.split('/')), join(outputRoot, ...path.split('/')), path);
     }
+    await copyExecutorDependencies(sourceRoot, outputRoot);
     await copyFile(join(sourceRoot, 'scripts', 'evaluation-worker.mjs'), join(outputRoot, 'scripts', 'evaluation-worker.mjs'), 'evaluation Worker');
+    await copyFile(join(sourceRoot, 'scripts', 'code-agent-executable.mjs'), join(outputRoot, 'scripts', 'code-agent-executable.mjs'), 'Code Agent executable resolver');
     await copyFile(join(sourceRoot, 'services', 'ldap3-gateway', 'ldap3_gateway.py'), join(outputRoot, 'services', 'ldap3-gateway', 'ldap3_gateway.py'), 'LDAP3 gateway');
     await copyFile(join(sourceRoot, 'services', 'ldap3-gateway', 'requirements.txt'), join(outputRoot, 'services', 'ldap3-gateway', 'requirements.txt'), 'LDAP3 requirements');
     await copyDirectory(join(sourceRoot, 'services', 'ldap3-gateway', 'static'), join(outputRoot, 'services', 'ldap3-gateway', 'static'), 'LDAP3 static assets');
@@ -275,15 +337,19 @@ async function verifyRuntimeExecutables(runtimeRoot, target) {
   const nodePath = executable(descriptor.runtimeFiles.find((path) => /node(?:\.exe)?$/.test(path)));
   const pythonPath = executable(descriptor.runtimeFiles.find((path) => /python(?:3|\.exe)$/.test(path)));
   const nginxPath = executable(descriptor.runtimeFiles.find((path) => /nginx(?:\.exe)?$/.test(path)));
-  await execFileAsync(nodePath, ['--version'], { windowsHide: true });
-  await execFileAsync(pythonPath, ['-c', 'import ldap3'], { windowsHide: true });
+  const nodeIdentity = await execFileAsync(nodePath, ['-p', 'JSON.stringify({version:process.versions.node,platform:process.platform,arch:process.arch})'], { windowsHide: true });
+  assertNodeRuntimeIdentity(JSON.parse(nodeIdentity.stdout), target);
+  const pythonIdentity = await execFileAsync(pythonPath, ['-c', 'import json, platform, sys; print(json.dumps({"version": platform.python_version(), "system": platform.system(), "machine": platform.machine()}))'], { windowsHide: true });
+  assertPythonRuntimeIdentity(JSON.parse(pythonIdentity.stdout), target);
+  await execFileAsync(pythonPath, ['-c', 'import ldap3, jsonschema, yaml'], { windowsHide: true });
   const pip = await execFileAsync(pythonPath, ['-m', 'pip', '--help'], { windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
   if (!pip.stdout.includes('--python')) throw new Error(`${target} Python pip does not support --python`);
   await execFileAsync(pythonPath, ['-m', 'venv', '--help'], { windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
   await execFileAsync(nginxPath, ['-v'], { windowsHide: true });
   if (descriptor.platform === 'win32') {
     const pwshPath = executable('powershell/pwsh.exe');
-    await execFileAsync(pwshPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], { windowsHide: true });
+    const powershell = await execFileAsync(pwshPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], { windowsHide: true });
+    if (versionTuple(powershell.stdout)[0] < 7) throw new Error(`win32-x64 runtime requires PowerShell 7 or newer; received ${powershell.stdout.trim()}`);
   }
 }
 

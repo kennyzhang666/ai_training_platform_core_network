@@ -85,6 +85,18 @@ assert_configured() {
   fi
 }
 
+assert_tcp_port() {
+  local name="$1" value="$2"
+  [[ "$value" =~ ^[0-9]+$ ]] && ((10#$value >= 1 && 10#$value <= 65535)) || die "$name 必须是 1–65535 之间的端口"
+  printf '%s' "$((10#$value))"
+}
+
+assert_loopback_host() {
+  local name="$1" value="$2"
+  [[ "$value" == '127.0.0.1' ]] || die "$name 在单服务器模式下必须是 127.0.0.1"
+  printf '%s' "$value"
+}
+
 resolve_executable() {
   local configured="$1" label="$2" candidate
   if [[ "$configured" == */* ]]; then
@@ -123,6 +135,13 @@ evaluation_log_root="$EVALUATION_LOG_ROOT"
 engine_cache_root="$ENGINE_CACHE_ROOT"
 pip_cache_root="$PIP_CACHE_DIR"
 wheelhouse="$ENGINE_PIP_FIND_LINKS"
+api_host="$(env_value HOST 127.0.0.1)"
+api_port="$(env_value PORT 3000)"
+ldap_host="$(env_value LDAP_GATEWAY_HOST 127.0.0.1)"
+ldap_port="$(env_value LDAP_GATEWAY_PORT 8081)"
+listen_port="$(env_value SINGLE_NODE_LISTEN_PORT 8080)"
+api_health_uri="http://$api_host:$api_port/api/v1/health"
+ldap_health_uri="http://$ldap_host:$ldap_port/healthz"
 
 for state_path in "$artifact_root" "$engine_package_root" "$engine_cache_root" "$pip_cache_root"; do
   inside_path "$data_root" "$state_path" || die "持久数据路径必须位于 SINGLE_NODE_DATA_ROOT 内：$state_path"
@@ -145,7 +164,7 @@ ensure_layout() {
 }
 
 assert_preflight() {
-  local pair name expected actual pip_help
+  local pair name expected actual pip_help validated_api_port validated_ldap_port validated_listen_port expected_platform_api
   for pair in \
     'NODE_ENV=production' \
     'PLATFORM_DEPLOYMENT_PROFILE=single-node' \
@@ -171,6 +190,16 @@ assert_preflight() {
   assert_configured NGINX_EXE
   [[ "$(env_value EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET)" == "$(env_value TRUSTED_GATEWAY_HMAC_SECRET)" ]] || \
     die 'EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET 必须与 TRUSTED_GATEWAY_HMAC_SECRET 相同'
+  assert_loopback_host HOST "$api_host" >/dev/null
+  assert_loopback_host LDAP_GATEWAY_HOST "$ldap_host" >/dev/null
+  validated_api_port="$(assert_tcp_port PORT "$api_port")"
+  validated_ldap_port="$(assert_tcp_port LDAP_GATEWAY_PORT "$ldap_port")"
+  validated_listen_port="$(assert_tcp_port SINGLE_NODE_LISTEN_PORT "$listen_port")"
+  [[ "$validated_api_port" != "$validated_ldap_port" && "$validated_api_port" != "$validated_listen_port" && "$validated_ldap_port" != "$validated_listen_port" ]] || \
+    die 'PORT、LDAP_GATEWAY_PORT 和 SINGLE_NODE_LISTEN_PORT 不能重复'
+  expected_platform_api="http://$api_host:$api_port/api/v1"
+  [[ "${PLATFORM_API:-$expected_platform_api}" == "$expected_platform_api" || "${PLATFORM_API:-}" == "$expected_platform_api/" ]] || \
+    die "PLATFORM_API 必须与本机 API 端口一致：$expected_platform_api"
 
   [[ -f "$project_root/apps/web/dist/index.html" ]] || die 'Web 构建产物不存在'
   [[ -f "$project_root/services/platform-api/dist/main.js" ]] || die 'API 构建产物不存在'
@@ -190,8 +219,12 @@ assert_preflight() {
   fi
   pip_help="$($runtime_python -m pip --help 2>&1 || true)"
   [[ "$pip_help" == *'--python'* ]] || die '平台 Python 的 pip 不支持 --python，无法创建隔离依赖环境'
+  "$runtime_python" -c 'import jsonschema, yaml' >/dev/null 2>&1 || die '平台 Python 缺少 jsonschema 或 PyYAML'
   "$runtime_gateway_python" -c 'import ldap3' >/dev/null 2>&1 || die 'LDAP 网关 Python 缺少 ldap3'
-  resolve_executable "$(env_value CODE_AGENT_COMMAND)" 'Code Agent' >/dev/null
+  "$runtime_node" "$project_root/scripts/evaluation-worker.mjs" --check-config >/dev/null
+  assert_port_available '平台 API' "$api_port" api
+  assert_port_available 'LDAP 网关' "$ldap_port" ldap3
+  assert_port_available '平台入口' "$listen_port" nginx
   command -v tar >/dev/null 2>&1 || die '找不到 tar'
 }
 
@@ -255,11 +288,12 @@ new_nginx_config() {
   template="$deploy_root/nginx-http.conf.template"
   "$runtime_python" - "$template" "$nginx_runtime_config" \
     "$runtime_root/nginx.pid" "$log_root/nginx-error.log" "$log_root/nginx-access.log" "$mime_types" \
-    "$(env_value SINGLE_NODE_LISTEN_PORT 8080)" "$(env_value SINGLE_NODE_SERVER_NAME _)" "$project_root/apps/web/dist" <<'PY'
+    "$listen_port" "$(env_value SINGLE_NODE_SERVER_NAME _)" "$project_root/apps/web/dist" \
+    "$api_host" "$api_port" "$ldap_host" "$ldap_port" <<'PY'
 from pathlib import Path
 import sys
 
-template, target, pid, error_log, access_log, mime_types, port, server_name, web_root = sys.argv[1:]
+template, target, pid, error_log, access_log, mime_types, port, server_name, web_root, api_host, api_port, ldap_host, ldap_port = sys.argv[1:]
 text = Path(template).read_text(encoding="utf-8")
 values = {
     "__NGINX_PID__": pid,
@@ -269,6 +303,10 @@ values = {
     "__LISTEN_PORT__": port,
     "__SERVER_NAME__": server_name,
     "__WEB_ROOT__": web_root,
+    "__API_HOST__": api_host,
+    "__API_PORT__": api_port,
+    "__LDAP_GATEWAY_HOST__": ldap_host,
+    "__LDAP_GATEWAY_PORT__": ldap_port,
 }
 for key, value in values.items():
     text = text.replace(key, value)
@@ -293,9 +331,22 @@ managed_pid() {
   printf '%s' "$pid"
 }
 
+assert_port_available() {
+  local label="$1" port="$2" managed_name="$3"
+  managed_pid "$managed_name" >/dev/null 2>&1 && return
+  "$runtime_python" - "$port" <<'PY' >/dev/null 2>&1 || die "$label 端口已被其他程序占用：127.0.0.1:$port"
+import socket
+import sys
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+    handle.bind(("127.0.0.1", int(sys.argv[1])))
+PY
+}
+
 start_managed() {
   local name="$1" working_directory="$2" executable="$3" stdout stderr pid
   shift 3
+  started_process='false'
   if pid="$(managed_pid "$name")"; then
     printf '%s 已在运行（PID %s）\n' "$name" "$pid"
     return
@@ -310,6 +361,7 @@ start_managed() {
   sleep 0.5
   pid="$(managed_pid "$name" || true)"
   [[ -n "$pid" ]] || die "$name 启动失败，请查看 $stderr"
+  started_process='true'
 }
 
 stop_managed() {
@@ -344,20 +396,35 @@ start_all() {
   assert_preflight
   deploy_database
   new_nginx_config
+  local -a started=()
+  local start_complete='false' index
+  rollback_start() {
+    if [[ "$start_complete" == 'false' ]]; then
+      set +e
+      for ((index=${#started[@]}-1; index>=0; index--)); do stop_managed "${started[$index]}"; done
+    fi
+  }
+  trap rollback_start EXIT
   start_managed api "$project_root" "$runtime_node" "$project_root/services/platform-api/dist/main.js"
+  [[ "$started_process" == 'false' ]] || started+=(api)
   start_managed ldap3 "$project_root/services/ldap3-gateway" "$runtime_gateway_python" \
     "$project_root/services/ldap3-gateway/ldap3_gateway.py"
-  wait_health '平台 API' 'http://127.0.0.1:3000/api/v1/health'
-  wait_health 'LDAP 网关' 'http://127.0.0.1:8081/healthz'
+  [[ "$started_process" == 'false' ]] || started+=(ldap3)
+  wait_health '平台 API' "$api_health_uri"
+  wait_health 'LDAP 网关' "$ldap_health_uri"
   start_managed worker "$project_root" "$runtime_node" "$project_root/scripts/evaluation-worker.mjs" \
-    --api "$(env_value PLATFORM_API http://127.0.0.1:3000/api/v1)" \
+    --api "$(env_value PLATFORM_API "http://$api_host:$api_port/api/v1")" \
     --employee "$(env_value EVALUATION_WORKER_EMPLOYEE_NO)" \
     --worker "$(env_value EVALUATION_WORKER_ID single-node-worker)" \
     --batch-root "$batch_root" --cache "$engine_cache_root"
+  [[ "$started_process" == 'false' ]] || started+=(worker)
   local nginx_home
   nginx_home="$(cd "$(dirname "$runtime_nginx")/.." && pwd -P)"
   start_managed nginx "$nginx_home" "$runtime_nginx" -p "$nginx_home/" -c "$nginx_runtime_config"
-  printf '单服务器平台已启动：http://127.0.0.1:%s/\n' "$(env_value SINGLE_NODE_LISTEN_PORT 8080)"
+  [[ "$started_process" == 'false' ]] || started+=(nginx)
+  start_complete='true'
+  trap - EXIT
+  printf '单服务器平台已启动：http://127.0.0.1:%s/\n' "$listen_port"
 }
 
 stop_all() {
