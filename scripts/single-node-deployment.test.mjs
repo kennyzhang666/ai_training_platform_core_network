@@ -66,10 +66,13 @@ test('single-node Nginx stays attached to the platform process manager', () => {
 });
 
 test('single-node operator guide targets a fifty-to-one-hundred-person training session', () => {
-  const guide = readFileSync(join(deploy, 'README.md'), 'utf8');
+  const guide = readFileSync(join(root, 'DEPLOYMENT.html'), 'utf8');
   assert.match(guide, /PostgreSQL/);
   assert.match(guide, /50[–-]100\s*人/);
   assert.match(guide, /数据库.*交付件|交付件.*数据库/s);
+  assert.match(guide, /Windows Server/);
+  assert.match(guide, /Linux Server/);
+  assert.match(guide, /一页纸傻瓜部署/);
   assert.doesNotMatch(guide, /PLATFORM_REPOSITORY=file|不需要 PostgreSQL/);
 });
 

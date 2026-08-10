@@ -45,7 +45,7 @@ async function fixture(root) {
     'deploy/single-node/nginx-http.conf.template',
     'deploy/release/windows.env.example',
     'deploy/release/linux.env.example',
-    'deploy/release/README.md',
+    'DEPLOYMENT.html',
   ]) await put(sourceRoot, path);
   await put(sourceRoot, 'executors/drill-grader/engine.json', JSON.stringify({
     schemaVersion: '1.0',
@@ -135,6 +135,7 @@ for (const target of ['win32-x64', 'linux-x64']) {
       assert.ok(manifest.files.some((file) => file.path === 'grader/profiles/yellow.yaml'));
       assert.ok(manifest.files.some((file) => file.path === 'scripts/code-agent-executable.mjs'));
       assert.ok(manifest.files.some((file) => file.path === RELEASE_TARGETS[target].runtimeFiles[0].replace(/^/, 'runtime/')));
+      assert.ok(manifest.files.some((file) => file.path === 'DEPLOYMENT.html'));
       assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', RELEASE_TARGETS[target].manager)));
       if (target === 'win32-x64') assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', 'manage.cmd')));
       if (target === 'linux-x64' && process.platform !== 'win32') {

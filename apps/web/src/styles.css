@@ -5545,6 +5545,13 @@ textarea:disabled,
   cursor: not-allowed !important;
 }
 
+.segmented button:disabled {
+  color: var(--ui-muted);
+  background: transparent;
+  box-shadow: none;
+  opacity: .42;
+}
+
 /* --------------------------------------------------------------------------
    Micro-interactions: restrained motion for an enterprise workspace
    -------------------------------------------------------------------------- */

@@ -2,7 +2,7 @@
 
 ## 开发入口
 
-- 先阅读 `DEVELOPMENT_PLAN.md` 和本文件，再修改代码。
+- 先阅读根目录 `README.md`（开发手册）和本文件；涉及产品或部署时再阅读 `DESIGN.md` 或 `DEPLOYMENT.html`。
 - 根目录使用 pnpm workspace；Python grader 使用 `grader/requirements.txt`。
 - 契约文件位于 `contracts/`，是 TypeScript、Python 和 API 的事实来源。
 - 本地验证优先使用 `pnpm contract:test`、`pnpm grader:test` 和受影响模块的测试。
@@ -28,5 +28,5 @@
 - 先补测试和契约样例，再实现逻辑。
 - 不通过删除测试、放宽校验或吞异常来“修复”失败。
 - API 改动同步 OpenAPI；Schema 改动同步 TypeScript/Python 契约测试。
-- 发布版本必须同步 `DEVELOPMENT_PLAN.md` 的当前状态、版本沿革和后续计划，并在 `CHANGELOG.md` 记录事实变更。
+- 发布版本必须同步 `README.md` 的当前状态、版本沿革和后续计划；产品规则变化同步 `DESIGN.md`，部署变化同步 `DEPLOYMENT.html`。
 - 完成后报告改动文件、验证命令、结果和未解决风险。

@@ -114,7 +114,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 Code Agent 应读取 instruction.md、Skills、batch-manifest.json 和只读提交快照，并将结果写到 manifest.resultIndexPath。命令优先级是 Worker --agent-command > 新批次冻结的平台配置 > CODE_AGENT_COMMAND/CODE_AGENT_ARGS_JSON。可执行文件必须存在于 Worker 主机并通过白名单。超时必须受批次、Worker、引擎三层上限约束。
 
-生产内网的独立 Worker 不应借用浏览器身份。启用 EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET 后，Worker 会使用工号、姓名和部门生成受 HMAC 保护的身份头；该密钥只注入 Worker 和 Platform API，不写入批次清单、日志或前端。完整 LDAP3/TRUSTED_GATEWAY 与 Nginx 配置见 docs/deployment/ldap3-trusted-gateway.md、docs/deployment/ldap3-nginx-intranet-deployment.md 和 docs/deployment/intranet-http-only.md。
+生产内网的独立 Worker 不应借用浏览器身份。启用 EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET 后，Worker 会使用工号、姓名和部门生成受 HMAC 保护的身份头；该密钥只注入 Worker 和 Platform API，不写入批次清单、日志或前端。完整 LDAP3/TRUSTED_GATEWAY、Nginx 与双平台部署配置见根目录 DEPLOYMENT.html。
 
 ## 6. 输出契约、幂等与失败
 
@@ -179,11 +179,11 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 ## 10. 推荐实现顺序
 
-1. 阅读 DEVELOPMENT_PLAN.md、AGENTS.md、contracts/ 和 docs/evaluation-engine-protocol.md。
+1. 阅读 README.md、AGENTS.md、contracts/ 和 docs/evaluation-engine-protocol.md。
 2. 新增或升级 engine.json、输入输出样例、rubric 映射和契约测试，发布版本号而不是修改旧 Schema。
 3. 实现只读快照读取、测试执行、证据收集、结果索引和幂等写回。
 4. 用本地 bridge 验证目录与契约，再用真实 OpenCode Worker 做一次端到端测试；日志不提交 Git。
-5. 同步 OpenAPI、CHANGELOG.md、DEVELOPMENT_PLAN.md，并记录验证命令和剩余风险。
+5. 同步 OpenAPI 与 README.md；产品或部署行为变化时同步 DESIGN.md 或 DEPLOYMENT.html，并记录验证命令和剩余风险。
 
 ## 11. 可直接交给其他 AI 的提示词
 
@@ -192,7 +192,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 ~~~text
 你是本项目的评测引擎开发者。请先阅读：
 - AGENTS.md
-- DEVELOPMENT_PLAN.md
+- README.md
 - docs/evaluation-engine-protocol.md
 - docs/submission-contract.md
 - contracts/evaluation-input.schema.json
@@ -225,5 +225,5 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 - [ ] 结果包含 runId、幂等键、rubricVersion、证据和明确状态。
 - [ ] 失败、超时、取消都有可审计 reason，日志已脱敏。
 - [ ] 已执行 pnpm contract:test、pnpm grader:test 和受影响模块测试。
-- [ ] 已更新 CHANGELOG.md、DEVELOPMENT_PLAN.md，并记录剩余风险。
+- [ ] 已更新 README.md；产品或部署行为变化时已同步 DESIGN.md 或 DEPLOYMENT.html，并记录剩余风险。
 `;

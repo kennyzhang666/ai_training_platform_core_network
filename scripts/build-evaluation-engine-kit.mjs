@@ -22,20 +22,12 @@ const kitVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).
 const explicitFiles = [
   'AGENTS.md',
   'README.md',
-  'DEVELOPMENT_PLAN.md',
+  'DESIGN.md',
   'package.json',
   'pnpm-workspace.yaml',
   'docs/evaluation-engine-protocol.md',
   'docs/evaluation-contract-authoring.md',
   'docs/submission-contract.md',
-  'docs/v0.7-development-manual.md',
-  'docs/v0.8-development-manual.md',
-  'docs/deployment/trusted-gateway-sso.md',
-  'docs/deployment/ldap3-trusted-gateway.md',
-  'docs/deployment/ldap3-nginx-intranet-deployment.md',
-  'docs/deployment/intranet-http-only.md',
-  'docs/deployment/windows-production-smoke-test.md',
-  'services/ldap3-gateway/README.md',
   'services/ldap3-gateway/ldap3_gateway.py',
   'services/ldap3-gateway/requirements.txt',
   'services/ldap3-gateway/test_ldap3_gateway.py',
@@ -114,7 +106,7 @@ const zipEntries = [
   ...files
     .filter((path) => {
       const normalized = path.replaceAll('\\', '/');
-      return normalized === 'AGENTS.md' || normalized === 'README.md' || normalized === 'DEVELOPMENT_PLAN.md' || normalized === 'package.json' || normalized === 'pnpm-workspace.yaml' || normalized.startsWith('contracts/') || normalized.startsWith('docs/') || normalized.startsWith('scripts/') || normalized.startsWith('executors/') || normalized.startsWith('grader/') || normalized.startsWith('services/ldap3-gateway/');
+      return normalized === 'AGENTS.md' || normalized === 'README.md' || normalized === 'DESIGN.md' || normalized === 'package.json' || normalized === 'pnpm-workspace.yaml' || normalized.startsWith('contracts/') || normalized.startsWith('docs/') || normalized.startsWith('scripts/') || normalized.startsWith('executors/') || normalized.startsWith('grader/') || normalized.startsWith('services/ldap3-gateway/');
     })
     .map((path) => {
       const normalized = path.replaceAll('\\', '/');
