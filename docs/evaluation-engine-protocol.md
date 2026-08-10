@@ -90,23 +90,23 @@ Worker 对每个批次创建独立目录，并验证所有不可变内容的 SHA
 
 ## Code Agent 启动配置
 
-全局管理员在「管理后台 → 评测环境」配置 Code Agent；部门管理员无权查看或修改。可直接使用一条带引号参数的单行命令，例如：
+全局管理员在「管理后台 → 评测环境」配置 Code Agent；部门管理员无权查看或修改。公司内网默认可执行文件为 `codeagent`，模型由公司环境内置，不需要填写 `-m`。默认命令为：
 
 ```text
-opencode -m deepseek/deepseek-v4-pro --prompt "请根据约束使用skills和cli评测submission并返回结果"
+codeagent --prompt "{{prompt}}"
 ```
 
-Worker 会解析为可执行文件和参数，并以 `spawn(..., { shell: false })` 启动。上述写法可以直接使用：Worker 会在原 `--prompt` 内容后追加不可省略的批次清单、指令、Skills、提交范围、结果路径和结果契约要求。更推荐把可变任务指令放在单独的「任务指令」字段，并使用占位符：
+Worker 会解析为可执行文件和参数，并以 `spawn(..., { shell: false })` 启动。`{{prompt}}` 不由管理员逐题填写：Worker 会自动组合平台任务要求、赛题版本、题目说明、评测引擎 `instruction.md`、Skills、选中的提交、输入输出契约和结果路径。管理页的「任务指令」只用于补充全局约束，可以保持默认值。
 
 ```text
-opencode -m deepseek/deepseek-v4-pro --prompt "{{prompt}}"
+codeagent --prompt "{{prompt}}"
 ```
 
 可用占位符只有：
 
 | 占位符 | Worker 替换内容 |
 |---|---|
-| `{{prompt}}` | 管理员任务指令 + 平台强制评测协议 |
+| `{{prompt}}` | 可选的管理员补充指令 + 平台按赛题自动组合的强制评测协议 |
 | `{{manifestPath}}` | `batch-manifest.json` 的绝对路径 |
 | `{{batchDir}}` | 本批次工作目录的绝对路径 |
 
@@ -122,13 +122,13 @@ Worker --agent-command 显式覆盖
 
 批次超时的覆盖顺序为 `--agent-timeout-seconds`、`CODE_AGENT_BATCH_TIMEOUT_SECONDS`、批次冻结值、引擎时限自动计算值。
 
-命令不会经过系统 Shell，因此管道、重定向、命令拼接和环境变量赋值不会被解释。模型令牌等凭据只能由 Worker 运行环境注入。生产主机可设置 `CODE_AGENT_ALLOWED_EXECUTABLES=opencode,...`，限制平台配置允许启动的程序。
+命令不会经过系统 Shell，因此管道、重定向、命令拼接和环境变量赋值不会被解释。凭据只能由 Worker 运行环境注入。生产主机默认设置 `CODE_AGENT_ALLOWED_EXECUTABLES=codeagent`，限制平台配置允许启动的程序。
 
 ## 管理端配置诊断与连通性测试
 
 全局管理员可以在“管理后台 → 评测环境”查看三组信息：
 
-- **默认配置**：平台内置为关闭平台配置、OpenCode 默认启动命令 `opencode --prompt "{{prompt}}"`、默认任务指令“请读取批次清单、instruction.md 和 Skills，逐份评测 submissions，并将符合结果契约的结果写入 manifest.resultIndexPath。”和 3600 秒超时；“恢复 OpenCode 默认”只会把表单恢复为这组值，点击保存后才会写入平台。默认模板不会自动启用，需先确认 Worker 已安装并允许启动 `opencode`。
+- **默认配置**：平台内置公司 Code Agent 启动命令 `codeagent --prompt "{{prompt}}"`、自动评测任务基线和 3600 秒超时。`{{prompt}}` 由 Worker 根据当前赛题自动生成，不需要指定模型；启用前确认 Worker 主机可以直接运行 `codeagent`。
 - **平台配置**：启用后由 API 在创建评测批次时解析并冻结 `executable` 与 `args`；页面显示当前可执行文件、配置校验值和允许列表。
 - **Worker 本地配置**：读取 API 进程可见的 `CODE_AGENT_COMMAND`、`CODE_AGENT_ARGS_JSON`、`EMBEDDED_EVALUATION_WORKER` 和 `EVALUATION_WORKER_ID`。Worker 启动参数 `--agent-command` 只存在于 Worker 进程，API 无法读取，因此诊断会明确标注为“命令行覆盖（API 不可见）”，不能把它误认为未配置。
 

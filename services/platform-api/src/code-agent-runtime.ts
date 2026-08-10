@@ -11,12 +11,12 @@ const MAX_TIMEOUT_SECONDS = 21_600;
 const DEFAULT_TEST_MAX_TIMEOUT_SECONDS = 120;
 
 /**
- * The administrator form starts with a safe, reusable OpenCode template.
+ * The administrator form starts with the company Code Agent template.
  * The template is deliberately disabled by default; an administrator must
- * enable and save it after installing/configuring OpenCode on the Worker.
+ * enable and save it after confirming `codeagent` is available on the Worker.
  */
-export const DEFAULT_CODE_AGENT_COMMAND = 'opencode --prompt "{{prompt}}"';
-export const DEFAULT_CODE_AGENT_PROMPT = '请读取批次清单、instruction.md 和 Skills，逐份评测 submissions，并将符合结果契约的结果写入 manifest.resultIndexPath。';
+export const DEFAULT_CODE_AGENT_COMMAND = 'codeagent --prompt "{{prompt}}"';
+export const DEFAULT_CODE_AGENT_PROMPT = '';
 
 /**
  * Parse the administrator-facing command line into an executable plus argv.

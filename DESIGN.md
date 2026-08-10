@@ -1,7 +1,7 @@
 # AI 能力训战平台设计文档
 
-> 设计基线：`v0.9.8`
-> 更新日期：2026-08-10
+> 设计基线：`v1.0.0`
+> 更新日期：2026-08-11
 > 文档职责：产品、业务、权限、评测、报告、能力画像、页面、交互、视觉与文案的唯一标准
 
 ## 1. 产品定位
@@ -336,14 +336,14 @@ submission/
 
 Code Agent 命令由全局管理员配置，Worker 以参数数组和 `shell: false` 启动。允许的占位符：
 
-- `{{prompt}}`：平台生成的强制批次指令；
+- `{{prompt}}`：平台根据赛题、引擎、instruction、Skills、提交范围和结果契约自动组合的强制批次指令；
 - `{{manifestPath}}`：批次清单绝对路径；
 - `{{batchDir}}`：批次隔离目录。
 
-OpenCode 示例：
+公司内网默认配置：
 
 ```text
-CODE_AGENT_COMMAND=opencode
+CODE_AGENT_COMMAND=codeagent
 CODE_AGENT_ARGS_JSON=["--prompt","{{prompt}}"]
 ```
 
@@ -354,7 +354,7 @@ CODE_AGENT_COMMAND=company-evaluation-bridge
 CODE_AGENT_ARGS_JSON=["--manifest","{{manifestPath}}"]
 ```
 
-平台配置只是运行入口；赛题专属 instruction、Skills 和引擎决定如何评分。
+模型由公司 Code Agent 环境内置，不配置 `-m`。平台配置只是运行入口；赛题专属 instruction、Skills 和引擎决定如何评分，管理员只需按需补充全局约束，不逐题手写 Prompt。
 
 ### 6.6 平台发起评测
 

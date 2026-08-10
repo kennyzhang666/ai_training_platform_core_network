@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to package, for example v0.9.9
+        description: Existing version tag to package, for example v1.0.0
         required: true
-        default: v0.9.9
+        default: v1.0.0
         type: string
       publish:
         description: Create or update the GitHub Release assets

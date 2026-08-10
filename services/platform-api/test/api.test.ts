@@ -245,8 +245,8 @@ test('global administrators can inspect runtime diagnostics and receive a safe t
     assert.equal(diagnosticsResponse.status, 200);
     const diagnostics = await diagnosticsResponse.json() as { defaults: { enabled: boolean; commandLine: string; prompt: string; timeoutSeconds: number }; worker: { cliOverrideVisible: boolean }; test: { canExecute: boolean } };
     assert.equal(diagnostics.defaults.enabled, false);
-    assert.equal(diagnostics.defaults.commandLine, 'opencode --prompt "{{prompt}}"');
-    assert.match(diagnostics.defaults.prompt, /instruction\.md/);
+    assert.equal(diagnostics.defaults.commandLine, 'codeagent --prompt "{{prompt}}"');
+    assert.equal(diagnostics.defaults.prompt, '');
     assert.equal(diagnostics.defaults.timeoutSeconds, 3600);
     assert.equal(diagnostics.worker.cliOverrideVisible, false);
     assert.equal(typeof diagnostics.test.canExecute, 'boolean');

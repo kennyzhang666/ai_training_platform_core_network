@@ -35,6 +35,8 @@ const explicitFiles = [
   'services/ldap3-gateway/Dockerfile',
   'services/ldap3-gateway/static/login.html',
   'scripts/evaluation-worker.mjs',
+  'scripts/log-redaction.mjs',
+  'scripts/safe-archive-extract.py',
   'scripts/code-agent-local-bridge.mjs',
   'scripts/build-engine-package.mjs',
   'executors/drill-grader/engine.json',

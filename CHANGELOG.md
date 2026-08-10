@@ -4,6 +4,18 @@
 
 ## 未发布
 
+## v1.0.0 · 2026-08-11
+
+- 完成契约、API、Web、Worker、Python grader、LDAP 网关、部署脚本和发布流水线的全量代码审查及回归。
+- Worker 改用独立安全解压组件，原子物化 ZIP，并限制文件项数、单文件大小和解压后总量；继续拒绝路径穿越、符号链接、特殊文件、重复路径和加密条目。
+- Worker 在引擎与交付件物化阶段即开始批次续租，回传完成接口失败时也会清理临时批次目录。
+- Worker 的失败回传、控制台和日志统一脱敏，新增 URL 凭据遮蔽和 UTF-8 安全截断，避免凭据或半个字符进入诊断信息。
+- 修复 Node.js 24 在 Windows 上无法通过 `execFile` 启动 `pnpm.cmd` 导致原生发布构建失败的问题，改为使用 Node 直接运行 pnpm JavaScript 入口。
+- 将公司内网 `codeagent` 设为默认 Code Agent，可执行文件无需模型参数；Worker 根据赛题、评测引擎、`instruction.md`、Skills、选中提交和结果契约自动组合 Prompt。
+- 更新 Windows/Linux 单服务器模板与一键安装提示，LDAP 和 Code Agent 使用内网默认值，管理员只需填写 PostgreSQL、首位管理员和 Worker 身份。
+- 升级受影响的 `fast-uri` 与 `nanoid` 传递依赖，生产依赖审计结果为 0 个已知漏洞。
+- 更新开发、设计和单页部署文档至 `v1.0.0`，并扩展部署、发布、安全解压和日志脱敏回归门禁。
+
 ## v0.9.9 · 2026-08-11
 
 - 原生 Windows/Linux 离线包新增根目录一键入口：`install.cmd` 与 `install.sh`。

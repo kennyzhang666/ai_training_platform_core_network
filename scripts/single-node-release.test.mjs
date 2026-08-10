@@ -13,6 +13,7 @@ import {
   assertPythonRuntimeIdentity,
   createReleaseArchive,
   parseReleaseArguments,
+  resolvePnpmInvocation,
   verifyReleaseLayout,
 } from './build-single-node-release.mjs';
 
@@ -36,6 +37,8 @@ async function fixture(root) {
     'grader/profiles/blue.yaml',
     'sandbox/launch.py',
     'scripts/evaluation-worker.mjs',
+    'scripts/log-redaction.mjs',
+    'scripts/safe-archive-extract.py',
     'scripts/code-agent-executable.mjs',
     'scripts/prepare-single-node-environment.mjs',
     'services/ldap3-gateway/ldap3_gateway.py',
@@ -114,6 +117,19 @@ test('release builder creates a portable production dependency tree with pnpm 11
   assert.match(source, /verbatimSymlinks: true/);
 });
 
+test('release builder launches pnpm through Node on Windows instead of spawning a command shim', () => {
+  const invocation = resolvePnpmInvocation({
+    platform: 'win32',
+    nodeExecutable: 'C:\\runtime\\node.exe',
+    environment: { npm_execpath: 'C:\\tools\\pnpm\\bin\\pnpm.cjs' },
+    fileExists: () => true,
+  });
+  assert.deepEqual(invocation, {
+    executable: 'C:\\runtime\\node.exe',
+    args: ['C:\\tools\\pnpm\\bin\\pnpm.cjs'],
+  });
+});
+
 test('release CLI accepts pnpm arguments with or without a separator', () => {
   assert.deepEqual(
     [...parseReleaseArguments(['--target', 'linux-x64'])],
@@ -170,6 +186,8 @@ for (const target of ['win32-x64', 'linux-x64']) {
       assert.ok(manifest.files.some((file) => file.path === 'grader/src/drill_grader/__init__.py'));
       assert.ok(manifest.files.some((file) => file.path === 'grader/profiles/yellow.yaml'));
       assert.ok(manifest.files.some((file) => file.path === 'scripts/code-agent-executable.mjs'));
+      assert.ok(manifest.files.some((file) => file.path === 'scripts/log-redaction.mjs'));
+      assert.ok(manifest.files.some((file) => file.path === 'scripts/safe-archive-extract.py'));
       assert.ok(manifest.files.some((file) => file.path === 'scripts/prepare-single-node-environment.mjs'));
       assert.ok(manifest.files.some((file) => file.path === RELEASE_TARGETS[target].runtimeFiles[0].replace(/^/, 'runtime/')));
       assert.ok(manifest.files.some((file) => file.path === 'DEPLOYMENT.html'));

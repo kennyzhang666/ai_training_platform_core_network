@@ -39,6 +39,23 @@ test('trusted-gateway Worker requires the existing employee display name', async
   );
 });
 
+test('Worker rejects invalid polling configuration before contacting the platform', async () => {
+  await assert.rejects(
+    execFileAsync(process.execPath, [
+      join(projectRoot, 'scripts', 'evaluation-worker.mjs'),
+      '--interval', 'not-a-number',
+      '--once',
+    ], { cwd: projectRoot, timeout: 5_000, windowsHide: true }),
+    (error: unknown) => {
+      const details = error && typeof error === 'object'
+        ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`
+        : String(error);
+      assert.match(details, /--interval/);
+      return true;
+    },
+  );
+});
+
 test('Worker materialises a frozen batch, invokes the Code Agent bridge and imports the result', async () => {
   const sandbox = mkdtempSync(join(tmpdir(), 'evaluation-worker-e2e-'));
   const previous = {
@@ -70,21 +87,24 @@ test('Worker materialises a frozen batch, invokes the Code Agent bridge and impo
       "import { existsSync, readFileSync, writeFileSync } from 'node:fs';",
       "import { resolve } from 'node:path';",
       'const args = process.argv.slice(2);',
-      "const index = args.indexOf('--manifest');",
-      "const manifest = JSON.parse(readFileSync(resolve(args[index + 1]), 'utf8'));",
+      "const promptIndex = args.indexOf('--prompt');",
+      "const prompt = promptIndex >= 0 ? args[promptIndex + 1] : '';",
+      "if (!prompt.includes('challenge') || !prompt.includes('instructionPath') || !prompt.includes('skillPaths')) throw new Error('Worker 未按赛题自动组合 Prompt');",
+      "const manifestPath = resolve(process.env.AI_TRAINING_BATCH_MANIFEST ?? '');",
+      "const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));",
       "if (manifest.engine.id === 'parking-fee-packaged') {",
       "  const interpreter = process.env.AI_TRAINING_ENGINE_PYTHON ?? '';",
       "  if (!interpreter || !existsSync(interpreter)) throw new Error('Worker 未准备评测引擎 Python 环境');",
       `  writeFileSync(${JSON.stringify(bridgeMarker)}, interpreter, 'utf8');`,
       '}',
-      `const child = spawnSync(process.execPath, [${JSON.stringify(join(projectRoot, 'scripts', 'code-agent-local-bridge.mjs'))}, ...args], { stdio: 'inherit', env: process.env });`,
+      `const child = spawnSync(process.execPath, [${JSON.stringify(join(projectRoot, 'scripts', 'code-agent-local-bridge.mjs'))}, '--manifest', manifestPath], { stdio: 'inherit', env: process.env });`,
       'process.exit(child.status ?? 1);',
     ].join('\n'), 'utf8');
     const configured = await fetch(`${baseUrl}/api/v1/admin/code-agent-runtime`, {
       method: 'PUT', headers: admin,
       body: JSON.stringify({
         enabled: true,
-        commandLine: `${quoteCommandArgument(process.execPath)} ${quoteCommandArgument(bridgeWrapper)} --manifest "{{manifestPath}}"`,
+        commandLine: `${quoteCommandArgument(process.execPath)} ${quoteCommandArgument(bridgeWrapper)} --prompt "{{prompt}}"`,
         prompt: '',
         timeoutSeconds: 3600,
       }),

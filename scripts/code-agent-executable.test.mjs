@@ -8,13 +8,13 @@ import { executableIsAllowed, resolveSpawnExecutable } from './code-agent-execut
 test('Windows npm command shims resolve to the native executable without a shell', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ai-training-code-agent-'));
   try {
-    const executable = join(root, 'node_modules', 'opencode-ai', 'bin', 'opencode.exe');
-    const shim = join(root, 'opencode.cmd');
-    await mkdir(join(root, 'node_modules', 'opencode-ai', 'bin'), { recursive: true });
+    const executable = join(root, 'node_modules', 'codeagent-cli', 'bin', 'codeagent.exe');
+    const shim = join(root, 'codeagent.cmd');
+    await mkdir(join(root, 'node_modules', 'codeagent-cli', 'bin'), { recursive: true });
     await writeFile(executable, 'fixture');
-    await writeFile(shim, '@ECHO off\r\n"%~dp0\\node_modules\\opencode-ai\\bin\\opencode.exe" %*\r\n');
+    await writeFile(shim, '@ECHO off\r\n"%~dp0\\node_modules\\codeagent-cli\\bin\\codeagent.exe" %*\r\n');
 
-    const resolved = resolveSpawnExecutable('opencode', {
+    const resolved = resolveSpawnExecutable('codeagent', {
       platform: 'win32',
       lookup: () => [shim],
     });
@@ -39,7 +39,7 @@ test('PowerShell-only wrappers are rejected because the Worker never uses a shel
 });
 
 test('the executable allowlist treats a configured command and its native extension as the same tool', () => {
-  assert.equal(executableIsAllowed('C:\\tools\\opencode.exe', ['opencode']), true);
-  assert.equal(executableIsAllowed('/opt/bin/opencode', ['opencode']), true);
-  assert.equal(executableIsAllowed('other-agent.exe', ['opencode']), false);
+  assert.equal(executableIsAllowed('C:\\tools\\codeagent.exe', ['codeagent']), true);
+  assert.equal(executableIsAllowed('/opt/bin/codeagent', ['codeagent']), true);
+  assert.equal(executableIsAllowed('other-agent.exe', ['codeagent']), false);
 });

@@ -24,6 +24,27 @@ const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(import.meta.url);
 const projectRoot = resolve(dirname(scriptPath), '..');
 
+export function resolvePnpmInvocation({
+  platform = process.platform,
+  nodeExecutable = process.execPath,
+  environment = process.env,
+  fileExists = existsSync,
+} = {}) {
+  const configured = environment.npm_execpath?.trim();
+  if (configured && /\.(?:c?js|mjs)$/i.test(configured) && fileExists(configured)) {
+    return { executable: nodeExecutable, args: [configured] };
+  }
+  if (platform !== 'win32') return { executable: 'pnpm', args: [] };
+  const roots = [environment.PNPM_HOME, ...(environment.PATH ?? '').split(';')].filter(Boolean);
+  for (const directory of roots) {
+    for (const relativePath of ['pnpm.cjs', 'pnpm.mjs', 'node_modules/pnpm/bin/pnpm.cjs', 'node_modules/pnpm/bin/pnpm.mjs']) {
+      const candidate = resolve(directory, ...relativePath.split('/'));
+      if (fileExists(candidate)) return { executable: nodeExecutable, args: [candidate] };
+    }
+  }
+  throw new Error('Windows 发布构建未找到 pnpm 的 JavaScript 入口；请通过 pnpm release:build 运行，或配置 PNPM_HOME');
+}
+
 export const RELEASE_TARGETS = Object.freeze({
   'win32-x64': Object.freeze({
     platform: 'win32',
@@ -233,6 +254,8 @@ export async function assembleReleaseLayout(options) {
     await copyExecutorDependencies(sourceRoot, outputRoot);
     await copyFile(join(sourceRoot, 'scripts', 'evaluation-worker.mjs'), join(outputRoot, 'scripts', 'evaluation-worker.mjs'), 'evaluation Worker');
     await copyFile(join(sourceRoot, 'scripts', 'code-agent-executable.mjs'), join(outputRoot, 'scripts', 'code-agent-executable.mjs'), 'Code Agent executable resolver');
+    await copyFile(join(sourceRoot, 'scripts', 'log-redaction.mjs'), join(outputRoot, 'scripts', 'log-redaction.mjs'), 'Worker log redaction');
+    await copyFile(join(sourceRoot, 'scripts', 'safe-archive-extract.py'), join(outputRoot, 'scripts', 'safe-archive-extract.py'), 'safe archive extractor');
     await copyFile(join(sourceRoot, 'scripts', 'prepare-single-node-environment.mjs'), join(outputRoot, 'scripts', 'prepare-single-node-environment.mjs'), 'environment bootstrap');
     await copyFile(join(sourceRoot, 'services', 'ldap3-gateway', 'ldap3_gateway.py'), join(outputRoot, 'services', 'ldap3-gateway', 'ldap3_gateway.py'), 'LDAP3 gateway');
     await copyFile(join(sourceRoot, 'services', 'ldap3-gateway', 'requirements.txt'), join(outputRoot, 'services', 'ldap3-gateway', 'requirements.txt'), 'LDAP3 requirements');
@@ -391,9 +414,9 @@ async function runCli() {
 
   try {
     if (!suppliedApiDeploy) {
-      const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-      await execFileAsync(pnpm, ['build'], { cwd: projectRoot, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
-      await execFileAsync(pnpm, ['--filter', '@ai-training/platform-api', '--config.node-linker=hoisted', 'deploy', '--prod', '--legacy', apiDeployRoot], { cwd: projectRoot, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
+      const pnpm = resolvePnpmInvocation();
+      await execFileAsync(pnpm.executable, [...pnpm.args, 'build'], { cwd: projectRoot, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
+      await execFileAsync(pnpm.executable, [...pnpm.args, '--filter', '@ai-training/platform-api', '--config.node-linker=hoisted', 'deploy', '--prod', '--legacy', apiDeployRoot], { cwd: projectRoot, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
     }
     await assembleReleaseLayout({ sourceRoot: projectRoot, apiDeployRoot, runtimeRoot, wheelhouseRoot, outputRoot: releaseDirectory, target, version, sourceDateEpoch: epoch });
     const archive = await createReleaseArchive({ releaseRoot: releaseDirectory, archivePath, target });

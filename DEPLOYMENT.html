@@ -146,7 +146,7 @@
         <a href="#troubleshooting"><span class="n">10</span>故障排查</a>
         <a href="#boundaries"><span class="n">11</span>当前边界</a>
       </nav>
-      <div class="side-note">v0.9.9<br>Windows x64 / Linux x64<br>原生一键安装</div>
+      <div class="side-note">v1.0.0<br>Windows x64 / Linux x64<br>原生一键安装</div>
     </aside>
 
     <main>
@@ -168,7 +168,7 @@
       </div>
 
       <div class="callout warning">
-        <strong>v0.9.9 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP 默认参数和开机自启；自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
+        <strong>v1.0.0 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP/Code Agent 默认参数、安全解压门禁和开机自启；自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
       </div>
 
       <section id="start">
@@ -207,7 +207,7 @@
 
       <section id="quick">
         <h2>02 · 一页纸傻瓜部署</h2>
-        <p>下面是 v0.9.9 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。PostgreSQL、首位管理员、Worker 和 Code Agent 信息需要填写；公司内网 LDAP 参数已经内置，随机密钥由脚本生成。</p>
+        <p>下面是 v1.0.0 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent</code> 参数已经内置，随机密钥由脚本生成。</p>
 
         <div class="tabs" role="tablist" aria-label="操作系统">
           <button class="tab" role="tab" aria-selected="true" aria-controls="quick-windows" id="tab-windows">Windows Server</button>
@@ -237,7 +237,7 @@ Set-Location C:\AITraining</pre></div>
           <div class="step"><div class="stepno">3</div><div><h4>执行一键安装</h4>
             <div class="codebox"><div class="codehead"><span>PowerShell 或双击</span><button class="copy" data-copy>复制</button></div><pre>Set-Location C:\AITraining
 .\install.cmd</pre></div>
-            <p>脚本会请求管理员权限、生成独立随机密钥并打开配置文件。填写本页“只改这些配置”中的数据库、管理员、Worker 和 Code Agent 信息，保存并关闭记事本后，脚本继续完成预检、数据库迁移、启动和开机自启注册。</p>
+            <p>脚本会请求管理员权限、生成独立随机密钥并打开配置文件。填写本页“只改这些配置”中的数据库、管理员和 Worker 身份，保存并关闭记事本后，脚本继续完成预检、数据库迁移、启动和开机自启注册。</p>
           </div></div>
 
           <div class="step"><div class="stepno">4</div><div><h4>确认安装结果</h4>
@@ -279,7 +279,7 @@ chmod +x install.sh deploy/single-node/manage.sh</pre></div>
           <div class="step"><div class="stepno">3</div><div><h4>执行一键安装</h4>
             <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>cd /opt/ai-training
 EDITOR=vi ./install.sh</pre></div>
-            <p>脚本生成独立随机密钥并打开配置文件。填写数据库、管理员、Worker 和 Code Agent 信息并退出编辑器后，脚本完成预检、数据库迁移、启动和 systemd 开机自启；安装系统服务时会按需请求 sudo。</p>
+            <p>脚本生成独立随机密钥并打开配置文件。填写数据库、管理员和 Worker 身份并退出编辑器后，脚本完成预检、数据库迁移、启动和 systemd 开机自启；安装系统服务时会按需请求 sudo。</p>
           </div></div>
 
           <div class="step"><div class="stepno">4</div><div><h4>确认安装结果</h4>
@@ -314,9 +314,12 @@ curl -I http://127.0.0.1:8080/</pre></div>
             <tr><td><code>EVALUATION_WORKER_EMPLOYEE_NO</code></td><td>已有全局管理员工号</td><td>用于 Worker 领取和回传批次</td></tr>
             <tr><td><code>EVALUATION_WORKER_NAME</code></td><td>该工号在 SSO 中的真实姓名</td><td>必须与首次登记身份一致</td></tr>
             <tr><td><code>EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET</code></td><td>安装器自动同步为网关 HMAC 密钥</td><td>不能使用浏览器 Cookie</td></tr>
-            <tr><td><code>CODE_AGENT_COMMAND</code></td><td>Code Agent 可执行文件或绝对路径</td><td>默认 <code>opencode</code></td></tr>
-            <tr><td><code>CODE_AGENT_ARGS_JSON</code></td><td>参数 JSON 数组</td><td>OpenCode 默认 <code>["--prompt","{{prompt}}"]</code></td></tr>
+            <tr><td><code>CODE_AGENT_COMMAND</code></td><td>Code Agent 可执行文件或绝对路径</td><td>公司内网默认 <code>codeagent</code>，通常无需修改</td></tr>
+            <tr><td><code>CODE_AGENT_ARGS_JSON</code></td><td>参数 JSON 数组</td><td>默认 <code>["--prompt","{{prompt}}"]</code>；Prompt 由平台按赛题自动组合</td></tr>
             <tr><td><code>CODE_AGENT_ALLOWED_EXECUTABLES</code></td><td>允许启动的可执行文件，逗号分隔</td><td>必须包含命令名或绝对路径</td></tr>
+            <tr><td><code>EVALUATION_ARCHIVE_MAX_FILES</code></td><td>单个引擎包或交付 ZIP 文件项上限</td><td>默认 10000</td></tr>
+            <tr><td><code>EVALUATION_ARCHIVE_MAX_UNCOMPRESSED_BYTES</code></td><td>单个 ZIP 解压后总量上限</td><td>默认 536870912（512 MiB）</td></tr>
+            <tr><td><code>EVALUATION_ARCHIVE_MAX_FILE_BYTES</code></td><td>ZIP 内单文件上限</td><td>默认 134217728（128 MiB）</td></tr>
           </tbody>
         </table>
 
@@ -347,11 +350,11 @@ LDAP_START_TLS=false
 LDAP_CA_CERT_FILE=&lt;企业CA证书路径&gt;</pre></div></div>
         </div>
 
-        <h3>Code Agent 两种常用配置</h3>
+        <h3>Code Agent 运行配置</h3>
         <div class="grid g2">
-          <div class="card"><h4>直接调用 OpenCode</h4><div class="codebox"><div class="codehead"><span>.env</span><button class="copy" data-copy>复制</button></div><pre>CODE_AGENT_COMMAND=opencode
+          <div class="card"><h4>公司内网默认</h4><div class="codebox"><div class="codehead"><span>.env</span><button class="copy" data-copy>复制</button></div><pre>CODE_AGENT_COMMAND=codeagent
 CODE_AGENT_ARGS_JSON=["--prompt","{{prompt}}"]
-CODE_AGENT_ALLOWED_EXECUTABLES=opencode</pre></div></div>
+CODE_AGENT_ALLOWED_EXECUTABLES=codeagent</pre><p class="muted">模型由公司环境内置。<code>{{prompt}}</code> 由 Worker 自动组合赛题、instruction、Skills、提交清单和结果契约。</p></div></div>
           <div class="card"><h4>调用公司自有 bridge</h4><div class="codebox"><div class="codehead"><span>.env</span><button class="copy" data-copy>复制</button></div><pre>CODE_AGENT_COMMAND=company-evaluation-bridge
 CODE_AGENT_ARGS_JSON=["--manifest","{{manifestPath}}"]
 CODE_AGENT_ALLOWED_EXECUTABLES=company-evaluation-bridge</pre></div></div>
@@ -449,9 +452,9 @@ EVALUATION_LOG_ROOT=/var/log/ai-training
 ENGINE_CACHE_ROOT=/var/lib/ai-training/worker-engines
 ENGINE_PIP_OFFLINE=true
 ENGINE_PIP_FIND_LINKS=/opt/ai-training/wheelhouse
-CODE_AGENT_COMMAND=opencode
+CODE_AGENT_COMMAND=codeagent
 CODE_AGENT_ARGS_JSON='["--prompt","{{prompt}}"]'
-CODE_AGENT_ALLOWED_EXECUTABLES=opencode</pre></div>
+CODE_AGENT_ALLOWED_EXECUTABLES=codeagent</pre></div>
 
         <h3>标准部署顺序</h3>
         <ol>
@@ -751,7 +754,7 @@ cd /opt/ai-training
         <div class="callout success"><strong>部署完成标准：</strong>用户只访问一个地址；真实 SSO 登录；管理员能建题、建训战、选人评测；员工能提交并查看报告；数据库和交付件能一致备份恢复；日常操作不需要理解 Node、pnpm、Python 虚拟环境或平台源码。</div>
       </section>
 
-      <div class="footer">AI 能力训战平台部署与运维手册 · v0.9.9 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
+      <div class="footer">AI 能力训战平台部署与运维手册 · v1.0.0 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
     </main>
   </div>
   <div id="toast" role="status" aria-live="polite">已复制</div>

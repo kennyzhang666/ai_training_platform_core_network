@@ -30,6 +30,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { executableIsAllowed, resolveSpawnExecutable } from './code-agent-executable.mjs';
+import { redactLogText, truncateUtf8Bytes } from './log-redaction.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const options = new Map();
@@ -40,10 +41,24 @@ for (let index = 2; index < process.argv.length; index += 1) {
   options.set(key.slice(2), next && !next.startsWith('--') ? (index += 1, next) : 'true');
 }
 
+function boundedInteger(value, label, fallback, minimum, maximum) {
+  if (value === undefined || String(value).trim() === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${label} 必须是 ${minimum}–${maximum} 之间的整数`);
+  }
+  return parsed;
+}
+
+function configuredInteger(name, fallback, minimum, maximum) {
+  return boundedInteger(process.env[name], name, fallback, minimum, maximum);
+}
+
 const api = options.get('api') ?? process.env.PLATFORM_API ?? 'http://127.0.0.1:3000/api/v1';
 const employeeId = options.get('employee') ?? process.env.PLATFORM_EMPLOYEE_ID ?? 'w00123';
 const workerId = options.get('worker') ?? process.env.EVALUATION_WORKER_ID ?? `worker-${process.pid}`;
-const intervalSeconds = Math.max(1, Number(options.get('interval') ?? 5));
+const intervalSeconds = boundedInteger(options.get('interval'), '--interval', 5, 1, 3600);
+const leaseBatchLimit = boundedInteger(options.get('batches'), '--batches', 1, 1, 100);
 const once = options.has('once');
 const engineCache = resolve(options.get('cache') ?? join(root, 'tmp', 'worker-engines'));
 const batchRoot = resolve(options.get('batch-root') ?? process.env.EVALUATION_BATCH_ROOT ?? join(root, 'tmp', 'evaluation-batches'));
@@ -66,6 +81,14 @@ const trustedName = configuredTrustedName ?? trustedEmployeeNo;
 const trustedDepartment = process.env.EVALUATION_WORKER_DEPARTMENT ?? '';
 const DEFAULT_AGENT_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
 const DEFAULT_WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024;
+const DEFAULT_ARCHIVE_MAX_FILES = 10_000;
+const DEFAULT_ARCHIVE_MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
+const DEFAULT_ARCHIVE_MAX_FILE_BYTES = 128 * 1024 * 1024;
+
+const archiveMaxFiles = configuredInteger('EVALUATION_ARCHIVE_MAX_FILES', DEFAULT_ARCHIVE_MAX_FILES, 1, 1_000_000);
+const archiveMaxUncompressedBytes = configuredInteger('EVALUATION_ARCHIVE_MAX_UNCOMPRESSED_BYTES', DEFAULT_ARCHIVE_MAX_UNCOMPRESSED_BYTES, 1024, 8 * 1024 * 1024 * 1024);
+const archiveMaxFileBytes = configuredInteger('EVALUATION_ARCHIVE_MAX_FILE_BYTES', Math.min(DEFAULT_ARCHIVE_MAX_FILE_BYTES, archiveMaxUncompressedBytes), 1024, archiveMaxUncompressedBytes);
+const heartbeatSeconds = configuredInteger('EVALUATION_HEARTBEAT_SECONDS', 60, 15, 3600);
 const configuredAgentOutputMaxBytes = Number(process.env.EVALUATION_AGENT_OUTPUT_MAX_BYTES ?? DEFAULT_AGENT_OUTPUT_MAX_BYTES);
 const agentOutputMaxBytes = Number.isFinite(configuredAgentOutputMaxBytes)
   ? Math.max(16 * 1024, Math.min(64 * 1024 * 1024, Math.floor(configuredAgentOutputMaxBytes)))
@@ -78,19 +101,6 @@ const workerLogMaxBytes = Number.isFinite(configuredWorkerLogMaxBytes)
 function safeLogSegment(value, fallback = 'unknown') {
   const normalized = String(value ?? '').trim().replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+|\.+$/g, '').slice(0, 96);
   return normalized || fallback;
-}
-
-function redactLogText(value, maxBytes = 8192) {
-  let text = String(value ?? '');
-  text = text
-    .replace(/((?:authorization|proxy-authorization)\s*[:=]\s*bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
-    .replace(/((?:authorization|proxy-authorization)\s+bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
-    .replace(/((?:"?(?:authorization|proxy-authorization|token|access[_-]?token|api[_-]?key|secret|password|cookie|credential)"?)\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
-    .replace(/((?:token|access[_-]?token|api[_-]?key|secret|password|cookie|credential)\s*[:=]\s*)[^\s,;]+/gi, '$1[REDACTED]')
-    .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{16,}|xox[baprs]-[A-Za-z0-9-]+)\b/g, '[REDACTED]');
-  const bytes = Buffer.byteLength(text, 'utf8');
-  if (bytes <= maxBytes) return text;
-  return `${Buffer.from(text, 'utf8').subarray(0, maxBytes).toString('utf8')}…[TRUNCATED]`;
 }
 
 let loggingUnavailable = false;
@@ -154,7 +164,7 @@ function createBatchLog(task) {
     }
     const truncationMarker = '\n[TRUNCATED]\n';
     const clipLimit = Math.max(0, remaining - Buffer.byteLength(truncationMarker, 'utf8'));
-    const clipped = bytes > remaining ? `${Buffer.from(redacted, 'utf8').subarray(0, clipLimit).toString('utf8')}${truncationMarker}` : redacted;
+    const clipped = bytes > remaining ? `${truncateUtf8Bytes(redacted, clipLimit)}${truncationMarker}` : redacted;
     const path = stream === 'stdout' ? stdoutPath : stderrPath;
     appendLogFile(path, clipped);
     outputBytes[stream] += Buffer.byteLength(clipped, 'utf8');
@@ -278,22 +288,24 @@ function builtInEngineHash(engineHash, dependencies = []) {
 }
 
 function safeExtract(archive, target) {
-  mkdirSync(target, { recursive: true });
-  execFileSync(python, ['-c', [
-    'import pathlib, stat, sys, zipfile',
-    'archive, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]).resolve()',
-    'with zipfile.ZipFile(archive) as z:',
-    '    for info in z.infolist():',
-    '        path = pathlib.PurePosixPath(info.filename.replace("\\\\", "/"))',
-    '        if path.is_absolute() or ".." in path.parts: raise SystemExit("archive path escapes root")',
-    '        mode = (info.external_attr >> 16) & 0xffff',
-    '        if stat.S_ISLNK(mode): raise SystemExit("archive symlink is not allowed")',
-    '        destination = (target / path).resolve()',
-    '        if destination != target and target not in destination.parents: raise SystemExit("archive path escapes root")',
-    '        if info.is_dir(): destination.mkdir(parents=True, exist_ok=True); continue',
-    '        destination.parent.mkdir(parents=True, exist_ok=True)',
-    '        destination.write_bytes(z.read(info))',
-  ].join('\n'), archive, target], { cwd: root, windowsHide: true, stdio: 'pipe' });
+  const extractor = join(root, 'scripts', 'safe-archive-extract.py');
+  if (!existsSync(extractor)) throw new Error('缺少压缩包安全解压组件');
+  try {
+    execFileSync(python, [
+      extractor,
+      archive,
+      target,
+      '--max-files', String(archiveMaxFiles),
+      '--max-total-bytes', String(archiveMaxUncompressedBytes),
+      '--max-file-bytes', String(archiveMaxFileBytes),
+    ], { cwd: root, windowsHide: true, stdio: 'pipe', maxBuffer: 2 * 1024 * 1024 });
+  } catch (error) {
+    const stderr = error && typeof error === 'object' && 'stderr' in error
+      ? Buffer.from(error.stderr ?? '').toString('utf8').trim()
+      : '';
+    const reason = stderr || (error instanceof Error ? error.message : String(error));
+    throw new Error(`压缩包安全检查失败: ${redactLogText(reason, 2000)}`);
+  }
 }
 
 function assertInside(base, target, label) {
@@ -543,7 +555,7 @@ function mandatoryAgentPrompt(configuredPrompt, manifestPath) {
     configuredPrompt?.trim(),
     '执行 AI 训战平台评测批次。',
     `批次清单：${manifestPath}`,
-    '读取清单中的 instructionPath 和全部 skillPaths，只处理 submissions 中列出的交付件。',
+    '读取清单中的 challenge、instructionPath 和全部 skillPaths，只处理 submissions 中列出的交付件。',
     '逐份使用清单指定的评测引擎，将单人结果写入 outputPath，最后将批次索引写入 resultIndexPath。',
     '调用 Python 评测引擎时必须使用环境变量 AI_TRAINING_ENGINE_PYTHON 指定的解释器。',
     '输出必须符合清单中 contracts.output.path 指向的 JSON Schema；不得修改交付快照、评测引擎或契约。',
@@ -677,7 +689,18 @@ async function runBatch(task) {
     logDirectory: redactLogText(batchLog.directory, 2048),
   });
   writeWorkerLog('batch.start', { batchId: task.batchId, leaseId: task.leaseId, submissions: task.submissions.length, engine: `${task.engine.id}@${task.engine.version}` });
-  let heartbeat;
+  const heartbeatMs = heartbeatSeconds * 1000;
+  const heartbeat = setInterval(() => {
+    void call(`/evaluation-batches/${task.batchId}/heartbeat`, {
+      method: 'POST',
+      body: JSON.stringify({ leaseId: task.leaseId }),
+    }).catch((error) => {
+      const reason = redactLogText(error instanceof Error ? error.message : String(error), 2000);
+      console.error(`[${workerId}] 批次心跳失败 ${task.batchId}: ${reason}`);
+      batchLog.writeInteraction('batch.heartbeat_failed', { reason });
+      writeWorkerLog('batch.heartbeat_failed', { batchId: task.batchId, leaseId: task.leaseId, reason });
+    });
+  }, heartbeatMs);
   try {
     const materializedEngine = await materializeEngine(task, join(directory, 'engine'));
     const engineRoot = materializedEngine.root;
@@ -734,18 +757,6 @@ async function runBatch(task) {
       instructionPath: redactLogText(instructionPath, 2048),
       skillCount: skillPaths.length,
     });
-    const heartbeatMs = Math.max(15_000, Number(process.env.EVALUATION_HEARTBEAT_SECONDS ?? 60) * 1000);
-    heartbeat = setInterval(() => {
-      void call(`/evaluation-batches/${task.batchId}/heartbeat`, {
-        method: 'POST',
-        body: JSON.stringify({ leaseId: task.leaseId }),
-      }).catch((error) => {
-        const reason = error instanceof Error ? error.message : String(error);
-        console.error(`[${workerId}] 批次心跳失败 ${task.batchId}: ${reason}`);
-        batchLog.writeInteraction('batch.heartbeat_failed', { reason: redactLogText(reason, 2000) });
-        writeWorkerLog('batch.heartbeat_failed', { batchId: task.batchId, leaseId: task.leaseId, reason: redactLogText(reason, 2000) });
-      });
-    }, heartbeatMs);
     const defaultBatchTimeoutSeconds = Math.max(300, Math.min(
       21_600,
       Number(task.engine.limits?.wallClockSeconds ?? 600) * task.submissions.length + 300,
@@ -806,15 +817,15 @@ async function runBatch(task) {
     if (!keepBatches) rmSync(directory, { recursive: true, force: true });
     throw error;
   } finally {
-    if (heartbeat) clearInterval(heartbeat);
+    clearInterval(heartbeat);
   }
 }
 
 async function pump() {
-  writeWorkerLog('lease.request', { api: redactLogText(api, 1024), limit: Number(options.get('batches') ?? 1) });
+  writeWorkerLog('lease.request', { api: redactLogText(api, 1024), limit: leaseBatchLimit });
   const response = await call('/evaluation-batches:lease', {
     method: 'POST',
-    body: JSON.stringify({ workerId, limit: Number(options.get('batches') ?? 1) }),
+    body: JSON.stringify({ workerId, limit: leaseBatchLimit }),
   });
   const { batches } = await response.json();
   writeWorkerLog('lease.response', { count: batches.length });
@@ -831,15 +842,16 @@ async function pump() {
       const summary = await completed.json();
       console.log(`[${workerId}] 完成批次 ${task.batchId} · 成功 ${summary.accepted?.length ?? 0} · 失败 ${summary.rejected?.length ?? 0}`);
       writeWorkerLog('batch.completed', { batchId: task.batchId, leaseId: task.leaseId, accepted: summary.accepted?.length ?? 0, rejected: summary.rejected?.length ?? 0 });
-      if (!keepBatches) rmSync(output.directory, { recursive: true, force: true });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = redactLogText(error instanceof Error ? error.message : String(error), 2000);
       console.error(`[${workerId}] 批次失败 ${task.batchId}: ${reason}`);
-      writeWorkerLog('batch.failure_reported', { batchId: task.batchId, leaseId: task.leaseId, reason: redactLogText(reason, 2000) });
+      writeWorkerLog('batch.failure_reported', { batchId: task.batchId, leaseId: task.leaseId, reason });
       await call(`/evaluation-batches/${task.batchId}/fail`, {
         method: 'POST',
         body: JSON.stringify({ leaseId: task.leaseId, reason }),
       }).catch(() => undefined);
+    } finally {
+      if (output && !keepBatches) rmSync(output.directory, { recursive: true, force: true });
     }
   }
   return batches.length;
@@ -855,6 +867,9 @@ writeWorkerLog('worker.start', {
   logDirectory: redactLogText(workerLogDirectory, 1024),
   keepBatches,
   agentOutputMaxBytes,
+  archiveMaxFiles,
+  archiveMaxUncompressedBytes,
+  archiveMaxFileBytes,
 });
 do {
   const handled = await pump().catch((error) => {

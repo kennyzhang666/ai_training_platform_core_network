@@ -33,4 +33,4 @@ python -I judge.py --input <invocation.json> --output <result.json>
 
 ## 重要边界
 
-这个开发包能独立完成引擎逻辑、契约检查和合成样例运行，但不能代替平台源码。真实训战、权限、批次租约、结果入库和 OpenCode 端到端测试仍需完整平台仓库和 Worker 环境。
+这个开发包能独立完成引擎逻辑、契约检查和合成样例运行，但不能代替平台源码。真实训战、权限、批次租约、结果入库和 Code Agent 端到端测试仍需完整平台仓库和 Worker 环境。

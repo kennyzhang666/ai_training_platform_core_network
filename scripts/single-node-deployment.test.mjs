@@ -18,6 +18,7 @@ test('single-node bundle uses same-server PostgreSQL, local artifacts and an ind
   assert.match(environment, /^ARTIFACT_UPLOAD_TMP_ROOT=deploy\/single-node\/runtime\/artifact-uploads$/m);
   assert.match(environment, /^EMBEDDED_EVALUATION_WORKER=false$/m);
   assert.match(environment, /^ENGINE_PIP_OFFLINE=true$/m);
+  assert.match(environment, /^CODE_AGENT_COMMAND=codeagent$/m);
   assert.match(environment, /^CODE_AGENT_ARGS_JSON=\["--prompt","\{\{prompt\}\}"\]$/m);
   assert.doesNotMatch(environment, /^PLATFORM_DATA_FILE=/m);
   assert.doesNotMatch(environment, /^OBJECT_STORAGE_BUCKET=/m);
@@ -238,6 +239,8 @@ test('Windows Doctor succeeds in an isolated release layout and renders configur
     copy(join(deploy, 'nginx-http.conf.template'), join(releaseRoot, 'deploy', 'single-node', 'nginx-http.conf.template'));
     copy(join(root, 'scripts', 'evaluation-worker.mjs'), join(releaseRoot, 'scripts', 'evaluation-worker.mjs'));
     copy(join(root, 'scripts', 'code-agent-executable.mjs'), join(releaseRoot, 'scripts', 'code-agent-executable.mjs'));
+    copy(join(root, 'scripts', 'log-redaction.mjs'), join(releaseRoot, 'scripts', 'log-redaction.mjs'));
+    copy(join(root, 'scripts', 'safe-archive-extract.py'), join(releaseRoot, 'scripts', 'safe-archive-extract.py'));
     put(join(releaseRoot, 'apps', 'web', 'dist', 'index.html'), '<!doctype html>');
     put(join(releaseRoot, 'services', 'platform-api', 'dist', 'main.js'), '');
     put(join(releaseRoot, 'services', 'platform-api', 'prisma', 'schema.prisma'), '');

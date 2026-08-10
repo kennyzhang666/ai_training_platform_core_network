@@ -101,7 +101,7 @@ engine.json 是元数据和限制的事实来源；instruction.md 说明 Agent �
 运行配置中的命令只能是“可执行文件 + 参数”，不会经过系统 Shell。Worker 替换占位符并注入批次清单和任务指令。
 
 ~~~text
-opencode --prompt "{{prompt}}"
+codeagent --prompt "{{prompt}}"
 
 占位符：
   {{prompt}}       任务指令
@@ -171,7 +171,7 @@ pnpm build
 
 # 仅在受控开发环境打开 Code Agent 测试
 $env:CODE_AGENT_RUNTIME_TEST_ENABLED = "true"
-$env:CODE_AGENT_COMMAND = "opencode"
+$env:CODE_AGENT_COMMAND = "codeagent"
 node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee w00123 --worker worker-local
 ~~~
 
@@ -182,7 +182,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 1. 阅读 README.md、AGENTS.md、contracts/ 和 docs/evaluation-engine-protocol.md。
 2. 新增或升级 engine.json、输入输出样例、rubric 映射和契约测试，发布版本号而不是修改旧 Schema。
 3. 实现只读快照读取、测试执行、证据收集、结果索引和幂等写回。
-4. 用本地 bridge 验证目录与契约，再用真实 OpenCode Worker 做一次端到端测试；日志不提交 Git。
+4. 用本地 bridge 验证目录与契约，再用公司 Code Agent Worker 做一次端到端测试；日志不提交 Git。
 5. 同步 OpenAPI 与 README.md；产品或部署行为变化时同步 DESIGN.md 或 DEPLOYMENT.html，并记录验证命令和剩余风险。
 
 ## 11. 可直接交给其他 AI 的提示词

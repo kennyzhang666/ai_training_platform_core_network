@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：0.9.9。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：1.0.0。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -113,7 +113,7 @@ engine.json 是元数据和限制的事实来源；instruction.md 说明 Agent �
 运行配置中的命令只能是“可执行文件 + 参数”，不会经过系统 Shell。Worker 替换占位符并注入批次清单和任务指令。
 
 ~~~text
-opencode --prompt "{{prompt}}"
+codeagent --prompt "{{prompt}}"
 
 占位符：
   {{prompt}}       任务指令
@@ -183,7 +183,7 @@ pnpm build
 
 # 仅在受控开发环境打开 Code Agent 测试
 $env:CODE_AGENT_RUNTIME_TEST_ENABLED = "true"
-$env:CODE_AGENT_COMMAND = "opencode"
+$env:CODE_AGENT_COMMAND = "codeagent"
 node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee w00123 --worker worker-local
 ~~~
 
@@ -194,7 +194,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 1. 阅读 README.md、AGENTS.md、contracts/ 和 docs/evaluation-engine-protocol.md。
 2. 新增或升级 engine.json、输入输出样例、rubric 映射和契约测试，发布版本号而不是修改旧 Schema。
 3. 实现只读快照读取、测试执行、证据收集、结果索引和幂等写回。
-4. 用本地 bridge 验证目录与契约，再用真实 OpenCode Worker 做一次端到端测试；日志不提交 Git。
+4. 用本地 bridge 验证目录与契约，再用公司 Code Agent Worker 做一次端到端测试；日志不提交 Git。
 5. 同步 OpenAPI 与 README.md；产品或部署行为变化时同步 DESIGN.md 或 DEPLOYMENT.html，并记录验证命令和剩余风险。
 
 ## 11. 可直接交给其他 AI 的提示词
@@ -241,7 +241,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 ## 嵌入的仓库文件
 
-共 59 个文件，按仓库相对路径嵌入。
+共 61 个文件，按仓库相对路径嵌入。
 
 --- BEGIN FILE: AGENTS.md ---
 
@@ -285,8 +285,8 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台设计文档
 
-> 设计基线：`v0.9.8`
-> 更新日期：2026-08-10
+> 设计基线：`v1.0.0`
+> 更新日期：2026-08-11
 > 文档职责：产品、业务、权限、评测、报告、能力画像、页面、交互、视觉与文案的唯一标准
 
 ## 1. 产品定位
@@ -621,14 +621,14 @@ submission/
 
 Code Agent 命令由全局管理员配置，Worker 以参数数组和 `shell: false` 启动。允许的占位符：
 
-- `{{prompt}}`：平台生成的强制批次指令；
+- `{{prompt}}`：平台根据赛题、引擎、instruction、Skills、提交范围和结果契约自动组合的强制批次指令；
 - `{{manifestPath}}`：批次清单绝对路径；
 - `{{batchDir}}`：批次隔离目录。
 
-OpenCode 示例：
+公司内网默认配置：
 
 ```text
-CODE_AGENT_COMMAND=opencode
+CODE_AGENT_COMMAND=codeagent
 CODE_AGENT_ARGS_JSON=["--prompt","{{prompt}}"]
 ```
 
@@ -639,7 +639,7 @@ CODE_AGENT_COMMAND=company-evaluation-bridge
 CODE_AGENT_ARGS_JSON=["--manifest","{{manifestPath}}"]
 ```
 
-平台配置只是运行入口；赛题专属 instruction、Skills 和引擎决定如何评分。
+模型由公司 Code Agent 环境内置，不配置 `-m`。平台配置只是运行入口；赛题专属 instruction、Skills 和引擎决定如何评分，管理员只需按需补充全局约束，不逐题手写 Prompt。
 
 ### 6.6 平台发起评测
 
@@ -1113,11 +1113,11 @@ AI 能力画像
 
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v0.9.9`
+> 当前发布版本：`v1.0.0`
 > 更新日期：2026-08-11
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前主线已经完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布的本地闭环，并提供双平台一键安装入口与 Ubuntu 22.04 x64 原生 GitHub 发布流水线；Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是下一阶段工作。
+企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.0` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并提供双平台一键安装入口与 Ubuntu 22.04 x64 原生 GitHub 发布流水线。公司 Code Agent 使用 `codeagent` 默认命令，评测 Prompt 由平台按赛题自动组合；Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
 
 平台级文档只保留三个入口：
 
@@ -1496,16 +1496,17 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v0.9.9 已验证基线
+### 12.2 v1.0.0 已验证基线
 
-- Workspace：152 项，151 通过，1 项 PostgreSQL 集成按显式配置跳过；
+- Workspace：153 项，152 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web 交付方式规则：3/3；
 - 契约：7/7；
 - Python grader：18/18；
 - LDAP 网关：21/21；
 - 评测资料包：2/2；
-- 离线发布：10/10；
-- 部署门禁：20 项中 19 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并已使用 Git Bash 补充验证脚本语法和 Linux 环境模板解析；
+- 离线发布：11/11；
+- 部署门禁：27 项中 26 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并由 Ubuntu 22.04 发布流水线执行；
+- 依赖审计：生产依赖 0 个已知漏洞；
 - 100 人集中提交与有界评测队列：通过；
 - 构建、类型检查和 `git diff --check`：通过。
 
@@ -1563,6 +1564,8 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 提交页面按训战配置锁定上传或 Git 交付方式，未开放选项不可交互；
 - 管理员按训战和员工精确选择提交并创建评测批次；
 - Worker 租约、心跳、恢复、引擎缓存、交付件下载和 Agent 资产物化；
+- Worker 在物化期间持续续租，ZIP 安全解压限制文件项数、单文件和解压总量，失败回传与日志统一脱敏；
+- 公司内网 `codeagent` 默认配置、赛题级 Prompt 自动组合和无需模型参数的 Worker 启动；
 - 在线回传与线下导入共用 Schema、重算、归属和幂等边界；
 - 单场详细报告、四维/16 点/八能力域个人与组织聚合画像；
 - SSO 首次建档、组织编辑和安全删除、角色、名单、公告与审计；
@@ -1584,11 +1587,10 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 真实 Agent 沙箱、凭据、网络和资源限制由部署环境提供，当前本地 bridge 不是生产沙箱；
 - Web 管理端和部分领域仍集中在大文件中，需要按领域渐进拆分；
 - 画像聚合、日志、指标、数据保留和真实评测耗时仍需目标环境容量验证；
-- Worker 解压还应继续强化独立的文件数和解压后体积门禁。
 
 ## 16. 后续路线
 
-### 16.1 v0.9.10：目标机验收与极简运维
+### 16.1 v1.0.1：目标机验收与极简运维
 
 目标：运维人员在全新断网服务器上使用离线包和一份配置，在 30 分钟内完成部署，并能长期运行。
 
@@ -1604,7 +1606,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 保持单服务器边界：同机 PostgreSQL、本地交付件、一个 API、独立 Worker；不引入 Docker、Kubernetes、Redis、Kafka、MinIO 或额外配置中心。
 
-### 16.2 v0.9.x：业务完整性
+### 16.2 v1.x：业务完整性
 
 - 拆分前端路由、领域模块和通用表格/表单组件；
 - 完成导师工作台、出题人权限、报告复核和申诉；
@@ -1614,13 +1616,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 建立组织调整与管理员权限回收的历史快照规则；
 - 增加员工端与管理端关键路径浏览器 E2E。
 
-### 16.3 v1.0.0：试点发布
-
-- 目标环境容量、依赖、安全、备份恢复和故障应急验收；
-- 灰度、回滚、SLA/SLO、告警阈值和发布清单；
-- 用真实但脱敏的训战完成从建题到能力画像的生产闭环。
-
-### 16.4 后置：GitLab CI 自动评测
+### 16.3 后置：GitLab CI 自动评测
 
 GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输出同一评测结果契约，必须经过平台的 Schema、归属、幂等和重算校验；不能复制一套评分或结果入库逻辑。
 
@@ -1644,6 +1640,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v0.9.7` | 2026-08-10 | 将平台说明收口为开发、设计、部署三份核心文档，并补齐交付方式禁用规则与前端回归测试。 |
 | `v0.9.8` | 2026-08-10 | 发布 SDD 日志脱敏 v2 进阶赛题，以 24 项评测方隐藏用例强化 HMAC、失败关闭、复杂载荷和流式批处理验收，并稳定 Windows 本地验收端口分配。 |
 | `v0.9.9` | 2026-08-11 | 发布 Windows/Linux 原生一键安装、开机自启、幂等卸载、Ubuntu 22.04 原生发布流水线，并内置已验证的公司内网 LDAP 默认参数。 |
+| `v1.0.0` | 2026-08-11 | 完成全仓审查，修复 Windows 发布构建、Worker 安全解压、续租、清理和日志脱敏问题，清零生产依赖已知漏洞，并将公司 `codeagent` 与赛题级自动 Prompt 设为默认。 |
 
 ## 18. 交接检查表
 
@@ -6054,23 +6051,23 @@ Worker 对每个批次创建独立目录，并验证所有不可变内容的 SHA
 
 ## Code Agent 启动配置
 
-全局管理员在「管理后台 → 评测环境」配置 Code Agent；部门管理员无权查看或修改。可直接使用一条带引号参数的单行命令，例如：
+全局管理员在「管理后台 → 评测环境」配置 Code Agent；部门管理员无权查看或修改。公司内网默认可执行文件为 `codeagent`，模型由公司环境内置，不需要填写 `-m`。默认命令为：
 
 ```text
-opencode -m deepseek/deepseek-v4-pro --prompt "请根据约束使用skills和cli评测submission并返回结果"
+codeagent --prompt "{{prompt}}"
 ```
 
-Worker 会解析为可执行文件和参数，并以 `spawn(..., { shell: false })` 启动。上述写法可以直接使用：Worker 会在原 `--prompt` 内容后追加不可省略的批次清单、指令、Skills、提交范围、结果路径和结果契约要求。更推荐把可变任务指令放在单独的「任务指令」字段，并使用占位符：
+Worker 会解析为可执行文件和参数，并以 `spawn(..., { shell: false })` 启动。`{{prompt}}` 不由管理员逐题填写：Worker 会自动组合平台任务要求、赛题版本、题目说明、评测引擎 `instruction.md`、Skills、选中的提交、输入输出契约和结果路径。管理页的「任务指令」只用于补充全局约束，可以保持默认值。
 
 ```text
-opencode -m deepseek/deepseek-v4-pro --prompt "{{prompt}}"
+codeagent --prompt "{{prompt}}"
 ```
 
 可用占位符只有：
 
 | 占位符 | Worker 替换内容 |
 |---|---|
-| `{{prompt}}` | 管理员任务指令 + 平台强制评测协议 |
+| `{{prompt}}` | 可选的管理员补充指令 + 平台按赛题自动组合的强制评测协议 |
 | `{{manifestPath}}` | `batch-manifest.json` 的绝对路径 |
 | `{{batchDir}}` | 本批次工作目录的绝对路径 |
 
@@ -6086,13 +6083,13 @@ Worker --agent-command 显式覆盖
 
 批次超时的覆盖顺序为 `--agent-timeout-seconds`、`CODE_AGENT_BATCH_TIMEOUT_SECONDS`、批次冻结值、引擎时限自动计算值。
 
-命令不会经过系统 Shell，因此管道、重定向、命令拼接和环境变量赋值不会被解释。模型令牌等凭据只能由 Worker 运行环境注入。生产主机可设置 `CODE_AGENT_ALLOWED_EXECUTABLES=opencode,...`，限制平台配置允许启动的程序。
+命令不会经过系统 Shell，因此管道、重定向、命令拼接和环境变量赋值不会被解释。凭据只能由 Worker 运行环境注入。生产主机默认设置 `CODE_AGENT_ALLOWED_EXECUTABLES=codeagent`，限制平台配置允许启动的程序。
 
 ## 管理端配置诊断与连通性测试
 
 全局管理员可以在“管理后台 → 评测环境”查看三组信息：
 
-- **默认配置**：平台内置为关闭平台配置、OpenCode 默认启动命令 `opencode --prompt "{{prompt}}"`、默认任务指令“请读取批次清单、instruction.md 和 Skills，逐份评测 submissions，并将符合结果契约的结果写入 manifest.resultIndexPath。”和 3600 秒超时；“恢复 OpenCode 默认”只会把表单恢复为这组值，点击保存后才会写入平台。默认模板不会自动启用，需先确认 Worker 已安装并允许启动 `opencode`。
+- **默认配置**：平台内置公司 Code Agent 启动命令 `codeagent --prompt "{{prompt}}"`、自动评测任务基线和 3600 秒超时。`{{prompt}}` 由 Worker 根据当前赛题自动生成，不需要指定模型；启用前确认 Worker 主机可以直接运行 `codeagent`。
 - **平台配置**：启用后由 API 在创建评测批次时解析并冻结 `executable` 与 `args`；页面显示当前可执行文件、配置校验值和允许列表。
 - **Worker 本地配置**：读取 API 进程可见的 `CODE_AGENT_COMMAND`、`CODE_AGENT_ARGS_JSON`、`EMBEDDED_EVALUATION_WORKER` 和 `EVALUATION_WORKER_ID`。Worker 启动参数 `--agent-command` 只存在于 Worker 进程，API 无法读取，因此诊断会明确标注为“命令行覆盖（API 不可见）”，不能把它误认为未配置。
 
@@ -6593,7 +6590,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "0.9.9",
+  "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {
@@ -6607,7 +6604,7 @@ validates imported results and recomputes score consistency before persistence.
     "test": "pnpm -r test",
     "kit:test": "node --test scripts/evaluation-engine-kit.test.mjs",
     "ldap3:test": "python services/ldap3-gateway/test_ldap3_gateway.py",
-    "deployment:test": "node --test scripts/single-node-deployment.test.mjs scripts/code-agent-executable.test.mjs",
+    "deployment:test": "node --test scripts/single-node-deployment.test.mjs scripts/code-agent-executable.test.mjs scripts/log-redaction.test.mjs scripts/safe-archive-extract.test.mjs",
     "release:test": "node --test scripts/single-node-release.test.mjs scripts/github-linux-release.test.mjs",
     "release:build": "node scripts/build-single-node-release.mjs",
     "contract:test": "pnpm --filter @ai-training/platform-api contract:test",
@@ -6627,6 +6624,9 @@ packages:
   - packages/*
 overrides:
   find-my-way: 9.7.0
+  'fast-uri@>=3.0.0 <4.0.0': 3.1.5
+  'fast-uri@>=4.0.0 <5.0.0': 4.1.2
+  'nanoid@<3.3.17': 3.3.17
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
@@ -6824,6 +6824,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { executableIsAllowed, resolveSpawnExecutable } from './code-agent-executable.mjs';
+import { redactLogText, truncateUtf8Bytes } from './log-redaction.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const options = new Map();
@@ -6834,10 +6835,24 @@ for (let index = 2; index < process.argv.length; index += 1) {
   options.set(key.slice(2), next && !next.startsWith('--') ? (index += 1, next) : 'true');
 }
 
+function boundedInteger(value, label, fallback, minimum, maximum) {
+  if (value === undefined || String(value).trim() === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${label} 必须是 ${minimum}–${maximum} 之间的整数`);
+  }
+  return parsed;
+}
+
+function configuredInteger(name, fallback, minimum, maximum) {
+  return boundedInteger(process.env[name], name, fallback, minimum, maximum);
+}
+
 const api = options.get('api') ?? process.env.PLATFORM_API ?? 'http://127.0.0.1:3000/api/v1';
 const employeeId = options.get('employee') ?? process.env.PLATFORM_EMPLOYEE_ID ?? 'w00123';
 const workerId = options.get('worker') ?? process.env.EVALUATION_WORKER_ID ?? `worker-${process.pid}`;
-const intervalSeconds = Math.max(1, Number(options.get('interval') ?? 5));
+const intervalSeconds = boundedInteger(options.get('interval'), '--interval', 5, 1, 3600);
+const leaseBatchLimit = boundedInteger(options.get('batches'), '--batches', 1, 1, 100);
 const once = options.has('once');
 const engineCache = resolve(options.get('cache') ?? join(root, 'tmp', 'worker-engines'));
 const batchRoot = resolve(options.get('batch-root') ?? process.env.EVALUATION_BATCH_ROOT ?? join(root, 'tmp', 'evaluation-batches'));
@@ -6860,6 +6875,14 @@ const trustedName = configuredTrustedName ?? trustedEmployeeNo;
 const trustedDepartment = process.env.EVALUATION_WORKER_DEPARTMENT ?? '';
 const DEFAULT_AGENT_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
 const DEFAULT_WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024;
+const DEFAULT_ARCHIVE_MAX_FILES = 10_000;
+const DEFAULT_ARCHIVE_MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
+const DEFAULT_ARCHIVE_MAX_FILE_BYTES = 128 * 1024 * 1024;
+
+const archiveMaxFiles = configuredInteger('EVALUATION_ARCHIVE_MAX_FILES', DEFAULT_ARCHIVE_MAX_FILES, 1, 1_000_000);
+const archiveMaxUncompressedBytes = configuredInteger('EVALUATION_ARCHIVE_MAX_UNCOMPRESSED_BYTES', DEFAULT_ARCHIVE_MAX_UNCOMPRESSED_BYTES, 1024, 8 * 1024 * 1024 * 1024);
+const archiveMaxFileBytes = configuredInteger('EVALUATION_ARCHIVE_MAX_FILE_BYTES', Math.min(DEFAULT_ARCHIVE_MAX_FILE_BYTES, archiveMaxUncompressedBytes), 1024, archiveMaxUncompressedBytes);
+const heartbeatSeconds = configuredInteger('EVALUATION_HEARTBEAT_SECONDS', 60, 15, 3600);
 const configuredAgentOutputMaxBytes = Number(process.env.EVALUATION_AGENT_OUTPUT_MAX_BYTES ?? DEFAULT_AGENT_OUTPUT_MAX_BYTES);
 const agentOutputMaxBytes = Number.isFinite(configuredAgentOutputMaxBytes)
   ? Math.max(16 * 1024, Math.min(64 * 1024 * 1024, Math.floor(configuredAgentOutputMaxBytes)))
@@ -6872,19 +6895,6 @@ const workerLogMaxBytes = Number.isFinite(configuredWorkerLogMaxBytes)
 function safeLogSegment(value, fallback = 'unknown') {
   const normalized = String(value ?? '').trim().replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+|\.+$/g, '').slice(0, 96);
   return normalized || fallback;
-}
-
-function redactLogText(value, maxBytes = 8192) {
-  let text = String(value ?? '');
-  text = text
-    .replace(/((?:authorization|proxy-authorization)\s*[:=]\s*bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
-    .replace(/((?:authorization|proxy-authorization)\s+bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
-    .replace(/((?:"?(?:authorization|proxy-authorization|token|access[_-]?token|api[_-]?key|secret|password|cookie|credential)"?)\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
-    .replace(/((?:token|access[_-]?token|api[_-]?key|secret|password|cookie|credential)\s*[:=]\s*)[^\s,;]+/gi, '$1[REDACTED]')
-    .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{16,}|xox[baprs]-[A-Za-z0-9-]+)\b/g, '[REDACTED]');
-  const bytes = Buffer.byteLength(text, 'utf8');
-  if (bytes <= maxBytes) return text;
-  return `${Buffer.from(text, 'utf8').subarray(0, maxBytes).toString('utf8')}…[TRUNCATED]`;
 }
 
 let loggingUnavailable = false;
@@ -6948,7 +6958,7 @@ function createBatchLog(task) {
     }
     const truncationMarker = '\n[TRUNCATED]\n';
     const clipLimit = Math.max(0, remaining - Buffer.byteLength(truncationMarker, 'utf8'));
-    const clipped = bytes > remaining ? `${Buffer.from(redacted, 'utf8').subarray(0, clipLimit).toString('utf8')}${truncationMarker}` : redacted;
+    const clipped = bytes > remaining ? `${truncateUtf8Bytes(redacted, clipLimit)}${truncationMarker}` : redacted;
     const path = stream === 'stdout' ? stdoutPath : stderrPath;
     appendLogFile(path, clipped);
     outputBytes[stream] += Buffer.byteLength(clipped, 'utf8');
@@ -7072,22 +7082,24 @@ function builtInEngineHash(engineHash, dependencies = []) {
 }
 
 function safeExtract(archive, target) {
-  mkdirSync(target, { recursive: true });
-  execFileSync(python, ['-c', [
-    'import pathlib, stat, sys, zipfile',
-    'archive, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]).resolve()',
-    'with zipfile.ZipFile(archive) as z:',
-    '    for info in z.infolist():',
-    '        path = pathlib.PurePosixPath(info.filename.replace("\\\\", "/"))',
-    '        if path.is_absolute() or ".." in path.parts: raise SystemExit("archive path escapes root")',
-    '        mode = (info.external_attr >> 16) & 0xffff',
-    '        if stat.S_ISLNK(mode): raise SystemExit("archive symlink is not allowed")',
-    '        destination = (target / path).resolve()',
-    '        if destination != target and target not in destination.parents: raise SystemExit("archive path escapes root")',
-    '        if info.is_dir(): destination.mkdir(parents=True, exist_ok=True); continue',
-    '        destination.parent.mkdir(parents=True, exist_ok=True)',
-    '        destination.write_bytes(z.read(info))',
-  ].join('\n'), archive, target], { cwd: root, windowsHide: true, stdio: 'pipe' });
+  const extractor = join(root, 'scripts', 'safe-archive-extract.py');
+  if (!existsSync(extractor)) throw new Error('缺少压缩包安全解压组件');
+  try {
+    execFileSync(python, [
+      extractor,
+      archive,
+      target,
+      '--max-files', String(archiveMaxFiles),
+      '--max-total-bytes', String(archiveMaxUncompressedBytes),
+      '--max-file-bytes', String(archiveMaxFileBytes),
+    ], { cwd: root, windowsHide: true, stdio: 'pipe', maxBuffer: 2 * 1024 * 1024 });
+  } catch (error) {
+    const stderr = error && typeof error === 'object' && 'stderr' in error
+      ? Buffer.from(error.stderr ?? '').toString('utf8').trim()
+      : '';
+    const reason = stderr || (error instanceof Error ? error.message : String(error));
+    throw new Error(`压缩包安全检查失败: ${redactLogText(reason, 2000)}`);
+  }
 }
 
 function assertInside(base, target, label) {
@@ -7337,7 +7349,7 @@ function mandatoryAgentPrompt(configuredPrompt, manifestPath) {
     configuredPrompt?.trim(),
     '执行 AI 训战平台评测批次。',
     `批次清单：${manifestPath}`,
-    '读取清单中的 instructionPath 和全部 skillPaths，只处理 submissions 中列出的交付件。',
+    '读取清单中的 challenge、instructionPath 和全部 skillPaths，只处理 submissions 中列出的交付件。',
     '逐份使用清单指定的评测引擎，将单人结果写入 outputPath，最后将批次索引写入 resultIndexPath。',
     '调用 Python 评测引擎时必须使用环境变量 AI_TRAINING_ENGINE_PYTHON 指定的解释器。',
     '输出必须符合清单中 contracts.output.path 指向的 JSON Schema；不得修改交付快照、评测引擎或契约。',
@@ -7471,7 +7483,18 @@ async function runBatch(task) {
     logDirectory: redactLogText(batchLog.directory, 2048),
   });
   writeWorkerLog('batch.start', { batchId: task.batchId, leaseId: task.leaseId, submissions: task.submissions.length, engine: `${task.engine.id}@${task.engine.version}` });
-  let heartbeat;
+  const heartbeatMs = heartbeatSeconds * 1000;
+  const heartbeat = setInterval(() => {
+    void call(`/evaluation-batches/${task.batchId}/heartbeat`, {
+      method: 'POST',
+      body: JSON.stringify({ leaseId: task.leaseId }),
+    }).catch((error) => {
+      const reason = redactLogText(error instanceof Error ? error.message : String(error), 2000);
+      console.error(`[${workerId}] 批次心跳失败 ${task.batchId}: ${reason}`);
+      batchLog.writeInteraction('batch.heartbeat_failed', { reason });
+      writeWorkerLog('batch.heartbeat_failed', { batchId: task.batchId, leaseId: task.leaseId, reason });
+    });
+  }, heartbeatMs);
   try {
     const materializedEngine = await materializeEngine(task, join(directory, 'engine'));
     const engineRoot = materializedEngine.root;
@@ -7528,18 +7551,6 @@ async function runBatch(task) {
       instructionPath: redactLogText(instructionPath, 2048),
       skillCount: skillPaths.length,
     });
-    const heartbeatMs = Math.max(15_000, Number(process.env.EVALUATION_HEARTBEAT_SECONDS ?? 60) * 1000);
-    heartbeat = setInterval(() => {
-      void call(`/evaluation-batches/${task.batchId}/heartbeat`, {
-        method: 'POST',
-        body: JSON.stringify({ leaseId: task.leaseId }),
-      }).catch((error) => {
-        const reason = error instanceof Error ? error.message : String(error);
-        console.error(`[${workerId}] 批次心跳失败 ${task.batchId}: ${reason}`);
-        batchLog.writeInteraction('batch.heartbeat_failed', { reason: redactLogText(reason, 2000) });
-        writeWorkerLog('batch.heartbeat_failed', { batchId: task.batchId, leaseId: task.leaseId, reason: redactLogText(reason, 2000) });
-      });
-    }, heartbeatMs);
     const defaultBatchTimeoutSeconds = Math.max(300, Math.min(
       21_600,
       Number(task.engine.limits?.wallClockSeconds ?? 600) * task.submissions.length + 300,
@@ -7600,15 +7611,15 @@ async function runBatch(task) {
     if (!keepBatches) rmSync(directory, { recursive: true, force: true });
     throw error;
   } finally {
-    if (heartbeat) clearInterval(heartbeat);
+    clearInterval(heartbeat);
   }
 }
 
 async function pump() {
-  writeWorkerLog('lease.request', { api: redactLogText(api, 1024), limit: Number(options.get('batches') ?? 1) });
+  writeWorkerLog('lease.request', { api: redactLogText(api, 1024), limit: leaseBatchLimit });
   const response = await call('/evaluation-batches:lease', {
     method: 'POST',
-    body: JSON.stringify({ workerId, limit: Number(options.get('batches') ?? 1) }),
+    body: JSON.stringify({ workerId, limit: leaseBatchLimit }),
   });
   const { batches } = await response.json();
   writeWorkerLog('lease.response', { count: batches.length });
@@ -7625,15 +7636,16 @@ async function pump() {
       const summary = await completed.json();
       console.log(`[${workerId}] 完成批次 ${task.batchId} · 成功 ${summary.accepted?.length ?? 0} · 失败 ${summary.rejected?.length ?? 0}`);
       writeWorkerLog('batch.completed', { batchId: task.batchId, leaseId: task.leaseId, accepted: summary.accepted?.length ?? 0, rejected: summary.rejected?.length ?? 0 });
-      if (!keepBatches) rmSync(output.directory, { recursive: true, force: true });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = redactLogText(error instanceof Error ? error.message : String(error), 2000);
       console.error(`[${workerId}] 批次失败 ${task.batchId}: ${reason}`);
-      writeWorkerLog('batch.failure_reported', { batchId: task.batchId, leaseId: task.leaseId, reason: redactLogText(reason, 2000) });
+      writeWorkerLog('batch.failure_reported', { batchId: task.batchId, leaseId: task.leaseId, reason });
       await call(`/evaluation-batches/${task.batchId}/fail`, {
         method: 'POST',
         body: JSON.stringify({ leaseId: task.leaseId, reason }),
       }).catch(() => undefined);
+    } finally {
+      if (output && !keepBatches) rmSync(output.directory, { recursive: true, force: true });
     }
   }
   return batches.length;
@@ -7649,6 +7661,9 @@ writeWorkerLog('worker.start', {
   logDirectory: redactLogText(workerLogDirectory, 1024),
   keepBatches,
   agentOutputMaxBytes,
+  archiveMaxFiles,
+  archiveMaxUncompressedBytes,
+  archiveMaxFileBytes,
 });
 do {
   const handled = await pump().catch((error) => {
@@ -7661,6 +7676,191 @@ do {
 } while (true);
 
 --- END FILE: scripts/evaluation-worker.mjs ---
+
+
+--- BEGIN FILE: scripts/log-redaction.mjs ---
+
+export function truncateUtf8Bytes(value, maxBytes) {
+  const encoded = Buffer.from(String(value ?? ''), 'utf8');
+  let end = Math.max(0, Math.min(encoded.length, Math.floor(maxBytes)));
+  while (end > 0) {
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(encoded.subarray(0, end));
+    } catch {
+      end -= 1;
+    }
+  }
+  return '';
+}
+
+/** Redact common credentials before Worker diagnostics leave the process. */
+export function redactLogText(value, maxBytes = 8192) {
+  let text = String(value ?? '');
+  text = text
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+(?::[^\s/@]*)?@/gi, '$1[REDACTED]@')
+    .replace(/((?:authorization|proxy-authorization)\s*[:=]\s*bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
+    .replace(/((?:authorization|proxy-authorization)\s+bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
+    .replace(/((?:"?(?:authorization|proxy-authorization|token|access[_-]?token|api[_-]?key|secret|password|cookie|credential)"?)\s*:\s*")[^"]*(")/gi, '$1[REDACTED]$2')
+    .replace(/((?:token|access[_-]?token|api[_-]?key|secret|password|cookie|credential)\s*[:=]\s*)[^\s,;]+/gi, '$1[REDACTED]')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{16,}|xox[baprs]-[A-Za-z0-9-]+)\b/g, '[REDACTED]');
+  const bytes = Buffer.byteLength(text, 'utf8');
+  if (bytes <= maxBytes) return text;
+  return `${truncateUtf8Bytes(text, maxBytes)}…[TRUNCATED]`;
+}
+
+--- END FILE: scripts/log-redaction.mjs ---
+
+
+--- BEGIN FILE: scripts/safe-archive-extract.py ---
+
+#!/usr/bin/env python3
+"""Extract one ZIP into a fresh directory with strict resource limits."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import pathlib
+import shutil
+import stat
+import sys
+import tempfile
+import zipfile
+
+
+CHUNK_BYTES = 1024 * 1024
+
+
+def positive_integer(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("limit must be a positive integer")
+    return parsed
+
+
+def normalized_parts(name: str) -> tuple[str, ...]:
+    if "\x00" in name:
+        raise ValueError("archive path contains a null byte")
+    path = pathlib.PurePosixPath(name.replace("\\", "/"))
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError("archive path escapes root")
+    parts = tuple(part for part in path.parts if part not in ("", "."))
+    if not parts:
+        raise ValueError("archive contains an empty path")
+    if any(":" in part for part in parts):
+        raise ValueError("archive path contains an unsupported colon")
+    return parts
+
+
+def validate_entries(
+    entries: list[zipfile.ZipInfo],
+    max_files: int,
+    max_total_bytes: int,
+    max_file_bytes: int,
+) -> list[tuple[zipfile.ZipInfo, tuple[str, ...]]]:
+    if len(entries) > max_files:
+        raise ValueError(f"archive file count limit exceeded ({len(entries)} > {max_files})")
+    checked: list[tuple[zipfile.ZipInfo, tuple[str, ...]]] = []
+    seen: set[str] = set()
+    total = 0
+    for info in entries:
+        parts = normalized_parts(info.filename)
+        key = "/".join(parts).casefold()
+        if key in seen:
+            raise ValueError(f"archive contains a duplicate path: {info.filename}")
+        seen.add(key)
+        mode = (info.external_attr >> 16) & 0xFFFF
+        file_type = stat.S_IFMT(mode)
+        if stat.S_ISLNK(mode):
+            raise ValueError("archive symlink is not allowed")
+        if file_type not in (0, stat.S_IFREG, stat.S_IFDIR):
+            raise ValueError("archive special file is not allowed")
+        if info.flag_bits & 0x1:
+            raise ValueError("encrypted archive entries are not allowed")
+        if not info.is_dir():
+            if info.file_size > max_file_bytes:
+                raise ValueError(
+                    f"archive single file size limit exceeded ({info.file_size} > {max_file_bytes})"
+                )
+            total += info.file_size
+            if total > max_total_bytes:
+                raise ValueError(
+                    f"archive total uncompressed size limit exceeded ({total} > {max_total_bytes})"
+                )
+        checked.append((info, parts))
+    return checked
+
+
+def extract_archive(
+    archive: pathlib.Path,
+    target: pathlib.Path,
+    max_files: int,
+    max_total_bytes: int,
+    max_file_bytes: int,
+) -> None:
+    archive = archive.resolve(strict=True)
+    target = target.resolve(strict=False)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        if target.is_symlink() or not target.is_dir() or any(target.iterdir()):
+            raise ValueError("extraction target must be a new or empty directory")
+        target.rmdir()
+    staging = pathlib.Path(tempfile.mkdtemp(prefix=f".{target.name}-extracting-", dir=target.parent))
+    try:
+        with zipfile.ZipFile(archive) as source:
+            checked = validate_entries(source.infolist(), max_files, max_total_bytes, max_file_bytes)
+            total_written = 0
+            for info, parts in checked:
+                destination = staging.joinpath(*parts)
+                if info.is_dir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                    continue
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                file_written = 0
+                with source.open(info, "r") as input_stream, destination.open("xb") as output_stream:
+                    while True:
+                        chunk = input_stream.read(CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        file_written += len(chunk)
+                        total_written += len(chunk)
+                        if file_written > max_file_bytes:
+                            raise ValueError("archive single file size limit exceeded while extracting")
+                        if total_written > max_total_bytes:
+                            raise ValueError("archive total uncompressed size limit exceeded while extracting")
+                        output_stream.write(chunk)
+        os.replace(staging, target)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("archive")
+    parser.add_argument("target")
+    parser.add_argument("--max-files", type=positive_integer, required=True)
+    parser.add_argument("--max-total-bytes", type=positive_integer, required=True)
+    parser.add_argument("--max-file-bytes", type=positive_integer, required=True)
+    args = parser.parse_args()
+    try:
+        extract_archive(
+            pathlib.Path(args.archive),
+            pathlib.Path(args.target),
+            args.max_files,
+            args.max_total_bytes,
+            args.max_file_bytes,
+        )
+    except (OSError, ValueError, zipfile.BadZipFile, zipfile.LargeZipFile) as error:
+        print(f"safe extraction failed: {error}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+--- END FILE: scripts/safe-archive-extract.py ---
 
 
 --- BEGIN FILE: services/ldap3-gateway/.env.example ---
@@ -8964,7 +9164,7 @@ python -I judge.py --input <invocation.json> --output <result.json>
 
 ## 重要边界
 
-这个开发包能独立完成引擎逻辑、契约检查和合成样例运行，但不能代替平台源码。真实训战、权限、批次租约、结果入库和 OpenCode 端到端测试仍需完整平台仓库和 Worker 环境。
+这个开发包能独立完成引擎逻辑、契约检查和合成样例运行，但不能代替平台源码。真实训战、权限、批次租约、结果入库和 Code Agent 端到端测试仍需完整平台仓库和 Worker 环境。
 
 --- END FILE: tools/engine-dev-kit/README.md ---
 

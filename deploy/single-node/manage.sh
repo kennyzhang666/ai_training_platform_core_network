@@ -49,7 +49,7 @@ edit_environment_file() {
   fi
   local editor="${VISUAL:-${EDITOR:-vi}}"
   command -v "$editor" >/dev/null 2>&1 || die "找不到配置编辑器：$editor。请设置 EDITOR 后重试。"
-  printf '%s\n' '请填写 PostgreSQL、首位管理员、Worker 和 Code Agent 配置；保存并退出编辑器后将继续安装。LDAP 已使用公司内网默认参数。'
+  printf '%s\n' '请填写 PostgreSQL、首位管理员和 Worker 身份；保存并退出编辑器后将继续安装。LDAP 与公司 Code Agent 已使用内网默认参数。'
   "$editor" "$environment_file"
 }
 
@@ -58,7 +58,7 @@ import_environment() {
     if [[ "$action" == 'Prepare' || "$action" == 'Install' ]]; then
       new_environment_file
       if [[ "$action" == 'Prepare' ]]; then
-        printf '%s\n' '请填写 PostgreSQL、首位管理员、Worker 和 Code Agent 配置后重新执行 Prepare。LDAP 已使用公司内网默认参数。'
+        printf '%s\n' '请填写 PostgreSQL、首位管理员和 Worker 身份后重新执行 Prepare。LDAP 与公司 Code Agent 已使用内网默认参数。'
         exit 0
       fi
       edit_environment_file
