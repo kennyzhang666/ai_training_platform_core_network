@@ -146,7 +146,7 @@
         <a href="#troubleshooting"><span class="n">10</span>故障排查</a>
         <a href="#boundaries"><span class="n">11</span>当前边界</a>
       </nav>
-      <div class="side-note">版本 v0.9.8<br>Windows x64 / Linux x64<br>离线单服务器优先</div>
+      <div class="side-note">版本 v0.9.8<br>Docker 交付 docker.1<br>Windows x64 / Linux amd64</div>
     </aside>
 
     <main>
@@ -154,21 +154,22 @@
         <div>
           <div class="eyebrow">部署与运维 · 单页离线手册</div>
           <h1>从一台服务器开始，跑通完整训战</h1>
-          <p class="lede">本页同时覆盖 Windows Server、Linux Server、推荐的单服务器离线部署、标准分离部署、企业认证、备份恢复、发布包制作和故障排查。页面不依赖网络，可直接随发布包分发。</p>
+          <p class="lede">本页同时覆盖 Linux Docker、Windows/Linux 原生离线包、标准分离部署、企业认证、备份恢复、发布包制作和故障排查。页面不依赖网络，可直接随发布包分发。</p>
         </div>
         <div class="actions">
           <button class="button" type="button" onclick="window.print()">打印 / 导出 PDF</button>
-          <a class="button" href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases/tag/v0.9.8">下载 v0.9.8</a>
+          <a class="button" href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases/tag/v0.9.8">原生包 v0.9.8</a>
+          <a class="button" href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases/tag/v0.9.8-docker.1">Docker 包</a>
           <a class="button primary" href="#quick">直接部署</a>
         </div>
       </div>
 
       <div class="callout success">
-        <strong>推荐路径：</strong>单场 10–100 人先用一台 Windows Server x64 或 Linux x64。正式数据使用同机 PostgreSQL，交付件保存在本地磁盘，API 与评测 Worker 分进程运行。目标机不需要 Git、pnpm、前端构建或互联网。
+        <strong>推荐路径：</strong>Linux amd64 优先使用 Docker 离线包，Windows 使用原生离线包。单场 10–100 人先用一台服务器；正式数据使用同机 PostgreSQL，交付件保存在持久卷或本地数据目录，API 与评测 Worker 保持独立进程。目标机不需要 Git、pnpm、前端构建或互联网。
       </div>
 
       <div class="callout warning">
-        <strong>v0.9.8 当前事实：</strong><code>Prepare</code>、<code>Doctor</code>、<code>Start</code>、<code>Stop</code>、<code>Status</code>、<code>Backup</code>、<code>Restore</code> 已实现；一键 <code>Install</code>、系统服务、自动备份和离线 <code>Upgrade</code> 尚未实现。服务器重启后需要再次执行 <code>Start</code>。
+        <strong>当前事实：</strong>原生包已实现 <code>Prepare / Doctor / Start / Stop / Status / Backup / Restore</code>；Docker 包已实现 <code>Prepare / Doctor / Start / Stop / Status / Logs</code>，容器随 Docker 服务自动恢复。Docker 自动备份、离线升级和真实内网目标机 UAT 尚未完成。
       </div>
 
       <section id="start">
@@ -177,7 +178,8 @@
         <table>
           <thead><tr><th>场景</th><th>推荐方式</th><th>服务器</th><th>数据</th><th>适用状态</th></tr></thead>
           <tbody>
-            <tr><td>部门试点、10–100 人</td><td><span class="badge green">推荐</span> 单服务器离线包</td><td>Windows Server x64 或 Linux x64</td><td>同机 PostgreSQL + 本地磁盘</td><td>当前已自动化</td></tr>
+            <tr><td>Linux 部门试点、10–100 人</td><td><span class="badge green">推荐</span> Docker 离线包</td><td>Ubuntu 22.04 amd64 等 Linux</td><td>PostgreSQL 卷 + 平台数据卷</td><td>开机恢复、依赖最少</td></tr>
+            <tr><td>Windows 部门试点、10–100 人</td><td>原生单服务器离线包</td><td>Windows Server x64</td><td>同机 PostgreSQL + 本地磁盘</td><td>当前已自动化</td></tr>
             <tr><td>数据库由 DBA 统一管理</td><td>单应用服务器 + 独立 PostgreSQL</td><td>应用机 + 数据库机</td><td>PostgreSQL + 应用机本地交付件</td><td>需手工标准部署</td></tr>
             <tr><td>多应用节点或共享存储</td><td>标准分离部署</td><td>网关、API、数据库、S3、Worker</td><td>独立 PostgreSQL + S3-compatible</td><td>适配器可用，生产 UAT 待补</td></tr>
             <tr><td>开发和功能验收</td><td>源码开发模式</td><td>Windows/Linux 开发机</td><td>文件或临时 PostgreSQL</td><td>仅本地使用</td></tr>
@@ -196,9 +198,9 @@
           <thead><tr><th>端口/方向</th><th>用途</th><th>单服务器规则</th></tr></thead>
           <tbody>
             <tr><td class="mono">8080 / 入站</td><td>用户访问平台</td><td>允许办公网访问；可改为其他端口</td></tr>
-            <tr><td class="mono">3000 / 本机</td><td>Platform API</td><td>只监听 127.0.0.1，不开放入站</td></tr>
-            <tr><td class="mono">8081 / 本机</td><td>LDAP3 网关</td><td>只监听 127.0.0.1，不开放入站</td></tr>
-            <tr><td class="mono">5432 / 本机</td><td>PostgreSQL</td><td>只监听本机；标准分离部署仅向 API 网段开放</td></tr>
+            <tr><td class="mono">3000 / 内部</td><td>Platform API</td><td>原生包只监听本机；Docker 只在内部网络可见</td></tr>
+            <tr><td class="mono">8081 / 内部</td><td>LDAP3 网关</td><td>原生包只监听本机；Docker 只在内部网络可见</td></tr>
+            <tr><td class="mono">5432 / 内部</td><td>PostgreSQL</td><td>不映射到宿主机；标准分离部署仅向 API 网段开放</td></tr>
             <tr><td class="mono">389/636 / 出站</td><td>LDAP StartTLS/LDAPS</td><td>按企业目录要求放通</td></tr>
             <tr><td class="mono">443 / 出站</td><td>OIDC、S3、内部模型或 Agent</td><td>仅按实际集成放通</td></tr>
           </tbody>
@@ -207,11 +209,12 @@
 
       <section id="quick">
         <h2>02 · 一页纸傻瓜部署</h2>
-        <p>下面是目标服务器的最短路径。Ubuntu 22.04 x64 从 <a href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases/tag/v0.9.8">v0.9.8 Release</a> 下载发布包和同名 <code>.sha256</code>；其他系统由发布人员提供对应平台文件。尖括号内容属于企业环境信息，必须替换；其余命令可以照抄。</p>
+        <p>下面是目标服务器的最短路径。Linux Docker 从 <a href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases/tag/v0.9.8-docker.1">v0.9.8-docker.1 Release</a> 下载；原生包从 <a href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases/tag/v0.9.8">v0.9.8 Release</a> 下载。尖括号内容属于企业环境信息，必须替换；其余命令可以照抄。</p>
 
         <div class="tabs" role="tablist" aria-label="操作系统">
           <button class="tab" role="tab" aria-selected="true" aria-controls="quick-windows" id="tab-windows">Windows Server</button>
-          <button class="tab" role="tab" aria-selected="false" aria-controls="quick-linux" id="tab-linux">Linux Server</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="quick-linux" id="tab-linux">Linux Server（原生）</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="quick-docker" id="tab-docker">Linux Docker</button>
         </div>
 
         <div class="tabpanel active" id="quick-windows" role="tabpanel" aria-labelledby="tab-windows">
@@ -308,11 +311,53 @@ curl -I http://127.0.0.1:8080/</pre></div>
             <p>用户访问 <code>http://服务器IP:8080/</code>。</p>
           </div></div>
         </div>
+
+        <div class="tabpanel" id="quick-docker" role="tabpanel" aria-labelledby="tab-docker">
+          <div class="callout success"><strong>适用：</strong>Linux amd64 已安装 Docker Engine 24+ 和 Docker Compose v2。离线包已经包含平台镜像与 PostgreSQL 16 镜像；服务器不需要 Node.js、Python、Nginx、PostgreSQL、Git 或互联网。</div>
+
+          <div class="step"><div class="stepno">1</div><div><h4>校验并解压 Docker 离线包</h4>
+            <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>cd /tmp/release
+sha256sum -c ai-training-platform-0.9.8-docker-linux-amd64.tar.gz.sha256
+sudo mkdir -p /opt/ai-training-docker
+sudo tar -xzf ai-training-platform-0.9.8-docker-linux-amd64.tar.gz -C /opt/ai-training-docker
+sudo chown -R "$USER":"$(id -gn)" /opt/ai-training-docker
+cd /opt/ai-training-docker
+chmod +x manage.sh</pre></div>
+          </div></div>
+
+          <div class="step"><div class="stepno">2</div><div><h4>生成配置并填写企业参数</h4>
+            <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>./manage.sh Prepare
+vi .env</pre></div>
+            <p>至少填写首位全局管理员工号、企业 LDAP 地址与根 DN、Worker 管理员工号与姓名。三条数据库和平台密钥已独立随机生成，不要改回示例值。</p>
+          </div></div>
+
+          <div class="step"><div class="stepno">3</div><div><h4>放入组织批准的 Code Agent</h4>
+            <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>cp -a /path/to/approved-code-agent/. ./code-agent/
+chmod +x ./code-agent/bin/code-agent</pre></div>
+            <p><code>CODE_AGENT_COMMAND</code> 默认为容器内 <code>/opt/code-agent/bin/code-agent</code>。整个 <code>code-agent</code> 目录会只读挂载；如组织包目录不同，同步修改 <code>.env</code>。</p>
+            <p>新赛题引擎如果增加 Python 依赖，把 Linux amd64 对应的 wheel 文件放入 <code>wheelhouse/</code>。Worker 只从镜像内置目录和这个只读目录安装，不会在评测时访问公网。</p>
+          </div></div>
+
+          <div class="step"><div class="stepno">4</div><div><h4>体检并一键启动</h4>
+            <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>./manage.sh Doctor
+./manage.sh Start
+./manage.sh Status
+curl -I http://127.0.0.1:8080/</pre></div>
+            <p>离线包存在时会自动载入镜像；联网部署缺少镜像时会自动拉取。启动会等待 PostgreSQL、API 和登录网关全部健康。</p>
+          </div></div>
+
+          <div class="step"><div class="stepno">5</div><div><h4>开放统一访问端口</h4>
+            <div class="codebox"><div class="codehead"><span>Ubuntu / Debian 使用 UFW 时</span><button class="copy" data-copy>复制</button></div><pre>sudo ufw allow 8080/tcp
+sudo systemctl enable --now docker</pre></div>
+            <p>用户访问 <code>http://服务器IP:8080/</code>。Compose 只映射这一个端口；API、LDAP 网关和 PostgreSQL 不对宿主机开放。</p>
+          </div></div>
+        </div>
       </section>
 
       <section id="config">
         <h2>03 · 只改这些配置</h2>
         <p>离线包已经提供正确的平台路径和运行时配置。首次部署只修改下表，不要删除模板中的其他字段。</p>
+        <div class="callout"><strong>Docker 差异：</strong><code>DATABASE_URL</code> 由 Compose 根据 <code>POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD</code> 自动组成；<code>Prepare</code> 已生成数据库密码和两条平台密钥。企业 CA 放入 <code>certs/</code>，并将 <code>LDAP_CA_CERT_FILE</code> 填为容器内 <code>/opt/ai-training/certs/文件名</code>。</div>
 
         <table>
           <thead><tr><th>配置项</th><th>填写内容</th><th>约束</th></tr></thead>
@@ -372,6 +417,13 @@ Nginx :8080  ── auth_request ──> LDAP3 网关 127.0.0.1:8081 ──> 企
                          |
                          +──> data/artifacts + data/engine-packages
                          `──> 独立 Worker ──> Code Agent ──> 赛题评测引擎</div>
+
+        <div class="callout success"><strong>Docker 进程边界：</strong>平台只构建一个应用镜像，并用它分别启动 Web、API、Worker 和 LDAP 网关；PostgreSQL 使用独立官方镜像。这样仍然只需执行一次 <code>./manage.sh Start</code>，同时避免把数据库、登录和评测塞进同一进程。</div>
+        <div class="flow" aria-label="Docker 单服务器拓扑">办公网浏览器 ──> web :8080
+                       ├─> api :3000 ──> postgres :5432 ──> postgres-data 卷
+                       └─> gateway :8081 ──> 企业 LDAP
+                                      api &lt;── worker ──> 只读 Code Agent 目录
+                                               `───────> platform-data 卷</div>
 
         <h3>目录边界</h3>
         <table>
@@ -528,7 +580,8 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务
 
         <div class="tabs" role="tablist" aria-label="运维命令平台">
           <button class="tab" role="tab" aria-selected="true" aria-controls="ops-windows" id="ops-tab-windows">Windows</button>
-          <button class="tab" role="tab" aria-selected="false" aria-controls="ops-linux" id="ops-tab-linux">Linux</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="ops-linux" id="ops-tab-linux">Linux 原生</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="ops-docker" id="ops-tab-docker">Linux Docker</button>
         </div>
         <div class="tabpanel active" id="ops-windows" role="tabpanel" aria-labelledby="ops-tab-windows">
           <div class="codebox"><div class="codehead"><span>PowerShell / cmd</span><button class="copy" data-copy>复制</button></div><pre>Set-Location C:\AITraining
@@ -556,8 +609,18 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务
 ./deploy/single-node/manage.sh Doctor
 ./deploy/single-node/manage.sh Start</pre></div>
         </div>
+        <div class="tabpanel" id="ops-docker" role="tabpanel" aria-labelledby="ops-tab-docker">
+          <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>cd /opt/ai-training-docker
+./manage.sh Status
+./manage.sh Logs
+./manage.sh Doctor
+./manage.sh Stop
+./manage.sh Start</pre></div>
+          <p><code>Stop</code> 只停止并移除容器和内部网络，不删除 <code>postgres-data</code> 与 <code>platform-data</code> 两个持久卷。禁止使用 <code>docker compose down -v</code>，该命令会删除正式数据卷。</p>
+        </div>
 
         <h3>备份规则</h3>
+        <div class="callout warning"><strong>当前范围：</strong>以下 <code>Backup / Restore</code> 是原生包能力。Docker 包尚未提供一致性备份命令，正式内网试点前必须由运维平台同时备份 PostgreSQL 与平台数据卷，或暂用原生单服务器包。</div>
         <ul>
           <li><code>Backup</code> 会短暂停止平台，导出 PostgreSQL 一致性快照并归档 <code>data/</code>，随后恢复原运行状态；</li>
           <li>备份不包含 <code>.env</code>，密钥和数据库密码必须单独加密保管；</li>
@@ -605,6 +668,16 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务
           <li>把 <code>.tar.gz</code> 和 <code>.tar.gz.sha256</code> 同时上传到对应 GitHub Release。</li>
         </ol>
         <p>GitHub 构建证明发布包在 Ubuntu 22.04 原生环境可组装和启动运行时，不替代公司内网 Ubuntu 22.04.5 服务器上的 PostgreSQL、LDAP、Code Agent、多人提交和断网验收。</p>
+
+        <h3>GitHub 构建 Docker 镜像与断网包</h3>
+        <div class="callout success"><strong>Docker 发布：</strong><code>release-docker-linux-amd64.yml</code> 在 Ubuntu 22.04 Runner 构建 Linux amd64 应用镜像，使用真实 PostgreSQL 容器启动完整 Compose 拓扑，通过健康检查后推送 GHCR，并发布内含两个镜像的断网包。</div>
+        <ol>
+          <li>应用镜像标记为 <code>ghcr.io/kennyzhang666/ai_training_platform_core_network:0.9.8-docker.1</code>，另发布滚动别名 <code>docker-latest</code>；</li>
+          <li>启动 Web、API、Worker、LDAP 网关和 PostgreSQL，验证统一入口、认证跳转、API 与网关健康状态；</li>
+          <li>将应用镜像和固定的 <code>postgres:16-bookworm</code> 一起保存为 <code>docker-images.tar.gz</code>；</li>
+          <li>生成 <code>ai-training-platform-0.9.8-docker-linux-amd64.tar.gz</code> 和 SHA-256，并验证删除、重新载入两个镜像后仍可识别；</li>
+          <li>目标服务器可直接使用断网包；联网服务器也可只复制 <code>deploy/docker</code> 并从 GHCR 拉取。</li>
+        </ol>
 
         <h3>手工准备其他平台运行时</h3>
 
@@ -678,18 +751,22 @@ git diff --check</pre></div>
           <li>Worker 下载交付件和引擎，Code Agent 逐份评分并回传；</li>
           <li>平台显示已完成、详细报告、排名、证据链和个人画像；</li>
           <li>重复回传保持幂等，重新评测产生新运行而不覆盖旧结果；</li>
-          <li>执行一次 <code>Backup</code>，在非生产环境完成 <code>Restore</code>；</li>
-          <li>服务器重启后重新执行 <code>Start</code>，确认平台恢复；</li>
+          <li>原生包执行一次 <code>Backup / Restore</code>；Docker 试点确认数据库卷与平台数据卷进入企业备份并完成恢复演练；</li>
+          <li>服务器重启后确认平台恢复；Docker 还要确认 Docker 服务和全部容器自动恢复；</li>
           <li>日志中没有密码、Cookie、HMAC、Token、SSO 断言或完整源码。</li>
         </ol>
 
         <h3>本机健康检查</h3>
-        <div class="grid g2">
+        <div class="grid g3">
           <div class="card"><h4>Windows</h4><div class="codebox"><div class="codehead"><span>PowerShell</span><button class="copy" data-copy>复制</button></div><pre>Invoke-WebRequest http://127.0.0.1:3000/api/v1/health -UseBasicParsing
 Invoke-WebRequest http://127.0.0.1:8081/healthz -UseBasicParsing
 Invoke-WebRequest http://127.0.0.1:8080/ -UseBasicParsing</pre></div></div>
           <div class="card"><h4>Linux</h4><div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>curl -fsS http://127.0.0.1:3000/api/v1/health
 curl -fsS http://127.0.0.1:8081/healthz
+curl -I http://127.0.0.1:8080/</pre></div></div>
+          <div class="card"><h4>Linux Docker</h4><div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>cd /opt/ai-training-docker
+./manage.sh Status
+curl -fsS http://127.0.0.1:8080/healthz
 curl -I http://127.0.0.1:8080/</pre></div></div>
         </div>
       </section>
@@ -711,6 +788,7 @@ curl -I http://127.0.0.1:8080/</pre></div></div>
             <tr><td>提交一直排队</td><td>Worker 状态、服务身份、API 地址、租约和 Code Agent 允许列表</td><td>在 API 进程打开生产内嵌评测</td></tr>
             <tr><td>Code Agent 找不到</td><td>绝对路径、允许列表、<code>CODE_AGENT_ARGS_JSON</code> 是否是 JSON 数组</td><td>把整条命令交给 shell 字符串执行</td></tr>
             <tr><td>引擎依赖安装失败</td><td>wheelhouse 是否覆盖当前平台和引擎 requirements</td><td>目标机回退公网下载</td></tr>
+            <tr><td>Docker 启动失败</td><td><code>./manage.sh Doctor</code>、<code>./manage.sh Logs</code>、镜像是否载入、数据卷空间</td><td>执行 <code>docker compose down -v</code></td></tr>
             <tr><td>部分启动后残留进程</td><td>再次执行 <code>Stop</code>、<code>Status</code>，查看 runtime-state 日志</td><td>删除未知 PID 文件后直接重启</td></tr>
             <tr><td>第二页人数少导致页面缩短</td><td>这是前端分页布局问题，不是部署问题</td><td>通过增加假数据掩盖</td></tr>
           </tbody>
@@ -734,9 +812,10 @@ cd /opt/ai-training
           <thead><tr><th>能力</th><th>v0.9.8 状态</th><th>后续目标</th></tr></thead>
           <tbody>
             <tr><td>Windows/Linux 离线包</td><td>布局、运行时和归档门禁已完成；真实断网双平台 UAT 待完成</td><td>两台干净服务器形成 UAT 记录</td></tr>
+            <tr><td>Linux Docker</td><td>Ubuntu 22.04 原生构建、完整 Compose 冒烟、GHCR 和断网镜像包</td><td>Ubuntu 22.04.5 内网 LDAP、Code Agent、多人训战与数据恢复 UAT</td></tr>
             <tr><td>首次部署</td><td><code>Prepare + Doctor + Start</code></td><td>增加 <code>Install / Uninstall</code> 和配置生成</td></tr>
-            <tr><td>开机自启</td><td>未自动注册系统服务</td><td>Windows 服务 + Linux systemd</td></tr>
-            <tr><td>备份</td><td>手动一致性备份与恢复</td><td>计划任务、校验、轮转和空间告警</td></tr>
+            <tr><td>开机自启</td><td>Docker 随服务自动恢复；原生包未注册系统服务</td><td>Windows 服务 + Linux 原生 systemd</td></tr>
+            <tr><td>备份</td><td>原生包有手动一致性备份恢复；Docker 需外部卷备份</td><td>Docker 一致性备份命令、计划任务、校验、轮转和空间告警</td></tr>
             <tr><td>升级</td><td>手工新目录升级和备份回退</td><td>离线 Upgrade、恢复点和失败自动回滚</td></tr>
             <tr><td>HTTPS</td><td>单服务器快捷包以隔离内网 HTTP 为主</td><td>企业证书模板和管理器自动配置</td></tr>
             <tr><td>多 API 实例</td><td>标准适配器存在，尚无高可用生产证据</td><td>领域 Repository 拆分、容量和故障演练</td></tr>
@@ -747,7 +826,7 @@ cd /opt/ai-training
         <div class="callout success"><strong>部署完成标准：</strong>用户只访问一个地址；真实 SSO 登录；管理员能建题、建训战、选人评测；员工能提交并查看报告；数据库和交付件能一致备份恢复；日常操作不需要理解 Node、pnpm、Python 虚拟环境或平台源码。</div>
       </section>
 
-      <div class="footer">AI 能力训战平台部署与运维手册 · v0.9.8 · 2026-08-10<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
+      <div class="footer">AI 能力训战平台部署与运维手册 · v0.9.8 / docker.1 · 2026-08-10<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、Docker、LDAP、Nginx、离线包或冒烟测试说明。</div>
     </main>
   </div>
   <div id="toast" role="status" aria-live="polite">已复制</div>

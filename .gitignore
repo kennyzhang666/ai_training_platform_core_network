@@ -20,5 +20,9 @@ deploy/single-node/data.failed-restore-*/
 deploy/single-node/runtime/
 deploy/single-node/backups/
 deploy/single-node/wheelhouse/
+deploy/docker/code-agent/
+deploy/docker/certs/
+deploy/docker/backups/
+deploy/docker/wheelhouse/
 /release/
 services/platform-api/prisma/dev.db
