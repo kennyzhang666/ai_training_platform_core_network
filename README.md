@@ -4,7 +4,7 @@
 > 更新日期：2026-08-10
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本已经完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器闭环，并提供 Windows/Linux 原生离线包以及 Linux amd64 Docker Compose 交付；Windows Server x64 与 Ubuntu 22.04.5 真实内网 UAT、自动备份和离线升级仍是下一阶段工作。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本已经完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布的本地闭环，并提供 Ubuntu 22.04 x64 原生 GitHub 发布流水线；Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、系统服务化、自动备份和离线升级仍是下一阶段工作。
 
 平台级文档只保留三个入口：
 
@@ -171,9 +171,7 @@ pnpm dev:web
 | `scripts/code-agent-local-bridge.mjs` | 仅用于联调的本地 Code Agent 适配器 |
 | `scripts/build-single-node-release.mjs` | Windows/Linux 离线发布包组装器 |
 | `scripts/prepare-linux-release-runtime.sh` | Ubuntu 22.04 x64 固定版本运行时与离线 wheelhouse 准备器 |
-| `.github/workflows/release-linux-ubuntu-22.04.yml` | 从不可变版本标签构建并发布 Linux 原生离线包 |
-| `Dockerfile`、`deploy/docker/` | Linux 单服务器应用镜像、Compose 拓扑和一键管理脚本 |
-| `.github/workflows/release-docker-linux-amd64.yml` | 构建、启动验收并发布 GHCR 镜像和 Docker 离线包 |
+| `.github/workflows/release-linux-ubuntu-22.04.yml` | 从不可变版本标签构建并发布 Linux 离线包 |
 | `deploy/single-node/` | 单服务器运维脚本、配置模板与 Nginx 模板 |
 | `tools/engine-dev-kit/` | 可独立交付给评测引擎开发者的工具包 |
 | `tmp/` | 本地数据、日志和临时工作区，不进入版本库 |
@@ -368,7 +366,7 @@ git diff --check
 | PostgreSQL 集成测试 | 迁移、事务、唯一性、租约 CAS、备份恢复和并发 |
 | Worker 端到端 | 批次领取、物化、Agent 启动、结果回传和部分失败 |
 | 本地验收 | 100 人集中提交、有界队列与完整业务闭环 |
-| 部署/发布测试 | Windows/Linux 脚本、Docker Compose、运行时门禁、可复现归档和清单 |
+| 部署/发布测试 | Windows/Linux 脚本、运行时门禁、可复现归档和清单 |
 | 浏览器验收 | 全局管理员、部门管理员、导师和学员关键路径 |
 
 PostgreSQL 集成测试需要显式数据库，不得因本机没有数据库而伪造通过：
@@ -389,9 +387,8 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - Python grader：18/18；
 - LDAP 网关：20/20；
 - 评测资料包：2/2；
-- 离线发布与 Docker 发布契约：11/11；
+- 离线发布：10/10；
 - Windows 部署门禁：15 项通过；Linux Bash 原生语法项在 Windows 上按平台跳过；
-- Docker 部署门禁：4/4；应用镜像原生构建和完整 Compose 启动由 GitHub Ubuntu 22.04 流水线验收；
 - 100 人集中提交与有界评测队列：通过；
 - 构建、类型检查和 `git diff --check`：通过。
 
@@ -456,12 +453,11 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 难题审核、待揭榜、揭榜成功、解决方案提交和公开控制；
 - Windows x64/Linux x64 离线发布布局、双平台管理命令和一致性备份恢复；
 - Ubuntu 22.04 x64 原生 GitHub Actions 构建、SHA-256 校验、运行时冒烟和 Release 附件发布；
-- Linux amd64 Docker Compose 单服务器交付：应用镜像复用为 Web、API、Worker 和 LDAP 网关，PostgreSQL 独立容器，只有统一入口端口对办公网开放；
 - SDD 运维日志脱敏综合训战的真实角色端到端验收，以及版本化 v2 进阶赛题的 24 项隐藏强度用例。
 
 ### 15.2 当前限制
 
-- Windows Server x64 与 Linux x64 真实断网目标机 UAT 尚未完成；Docker 已有 Ubuntu Runner 自动验收，但仍需公司内网 LDAP、Code Agent 和多人训战 UAT；
+- Windows Server x64 与 Linux x64 真实断网目标机 UAT 尚未完成；
 - 一次 `Install`、系统服务、开机自启、自动备份、离线升级和诊断包尚未实现；
 - 单服务器档固定一个 API 实例；标准模式的多实例容量和故障切换尚未形成生产证据；
 - 真实 GitLab 取件与 GitLab CI 自动评测适配器按产品决策后置；
@@ -478,7 +474,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 按纵切面推进：
 
-1. Windows Server x64 原生发布包、Ubuntu 22.04.5 原生包与 Docker 离线包的断网目标机 UAT；
+1. Windows Server x64 原生发布包，以及 Ubuntu 22.04.5 断网目标机 UAT；
 2. `Install` / `Uninstall`、随机密钥、目录权限、磁盘、LDAP、数据库和 Agent 自检；
 3. Windows 服务与 Linux systemd，开机自启和异常重启；
 4. 定时备份、校验、轮转和低磁盘预警；
@@ -486,7 +482,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 6. 脱敏诊断包和日志轮转；
 7. 50–100 人真实提交、Code Agent 评测、备份恢复与故障演练。
 
-保持单服务器边界：同机 PostgreSQL、本地交付件、一个 API、独立 Worker。Linux 可选 Docker Compose 交付，但不引入 Kubernetes、Redis、Kafka、MinIO 或额外配置中心；容器化只改变部署方式，不改变评分契约和进程边界。
+保持单服务器边界：同机 PostgreSQL、本地交付件、一个 API、独立 Worker；不引入 Docker、Kubernetes、Redis、Kafka、MinIO 或额外配置中心。
 
 ### 16.2 v0.9.x：业务完整性
 
@@ -527,7 +523,6 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v0.9.6` | 2026-08-10 | 修复首次部署端口、进程回滚、Windows OpenCode、离线依赖和评分 profile 一致性。 |
 | `v0.9.7` | 2026-08-10 | 将平台说明收口为开发、设计、部署三份核心文档，并补齐交付方式禁用规则与前端回归测试。 |
 | `v0.9.8` | 2026-08-10 | 发布 SDD 日志脱敏 v2 进阶赛题，以 24 项评测方隐藏用例强化 HMAC、失败关闭、复杂载荷和流式批处理验收，并稳定 Windows 本地验收端口分配。 |
-| `v0.9.8-docker.1` | 2026-08-10 | 新增 Linux amd64 应用镜像、Compose 单服务器拓扑、GHCR 发布和内含 PostgreSQL 镜像的断网部署包。 |
 
 ## 18. 交接检查表
 
