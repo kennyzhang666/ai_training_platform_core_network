@@ -16,6 +16,7 @@ test('GitHub builds, smoke-tests and publishes the Linux amd64 Docker delivery',
   assert.match(workflow, /docker buildx build/);
   assert.match(workflow, /--platform linux\/amd64/);
   assert.match(workflow, /docker compose[^\n]*up -d --wait/);
+  assert.match(workflow, /docker compose[^\n]*logs --no-color --tail 300/);
   assert.match(workflow, /ghcr\.io/);
   assert.match(workflow, /docker save/);
   assert.match(workflow, /docker load/);
@@ -23,4 +24,3 @@ test('GitHub builds, smoke-tests and publishes the Linux amd64 Docker delivery',
   assert.match(workflow, /gh release upload/);
   assert.doesNotMatch(workflow, /actions\/upload-artifact/);
 });
-

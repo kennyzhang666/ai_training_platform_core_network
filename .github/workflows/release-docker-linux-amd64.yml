@@ -107,7 +107,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker compose --project-directory deploy/docker --env-file deploy/docker/.env -f deploy/docker/compose.yaml up -d --wait --wait-timeout 240
+          if ! docker compose --project-directory deploy/docker --env-file deploy/docker/.env -f deploy/docker/compose.yaml up -d --wait --wait-timeout 240; then
+            docker compose --project-directory deploy/docker --env-file deploy/docker/.env -f deploy/docker/compose.yaml ps -a || true
+            docker compose --project-directory deploy/docker --env-file deploy/docker/.env -f deploy/docker/compose.yaml logs --no-color --tail 300 || true
+            exit 1
+          fi
           curl -fsS http://127.0.0.1:8080/healthz
           test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)" = '302'
           docker compose --project-directory deploy/docker --env-file deploy/docker/.env -f deploy/docker/compose.yaml \
