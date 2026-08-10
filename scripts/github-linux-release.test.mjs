@@ -24,6 +24,7 @@ test('GitHub workflow builds tagged releases on native Ubuntu 22.04 and publishe
   assert.doesNotMatch(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /checksum="\$\{archive\}\.sha256"/);
   assert.match(workflow, /gh release (?:create|upload)/);
+  assert.match(workflow, /GH_REPO: \$\{\{ github\.repository \}\}/);
   assert.match(workflow, /--verify-tag/);
 });
 
