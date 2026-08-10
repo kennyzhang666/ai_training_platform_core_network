@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Git branch, tag or commit to build
+        description: Git branch, tag or full commit SHA to build
         required: true
         default: main
         type: string

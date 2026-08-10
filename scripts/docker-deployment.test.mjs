@@ -17,6 +17,7 @@ test('one production application image contains every platform runtime without e
 
   assert.match(dockerfile, /FROM node:22\.23\.2-bookworm-slim AS build/);
   assert.match(dockerfile, /pnpm install --frozen-lockfile/);
+  assert.match(dockerfile, /python-is-python3/);
   assert.match(dockerfile, /--config\.node-linker=hoisted.*deploy.*--prod.*--legacy/s);
   assert.match(dockerfile, /python3-venv/);
   assert.match(dockerfile, /nginx/);

@@ -6,7 +6,11 @@ ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH
 WORKDIR /workspace
 
-RUN corepack enable && corepack prepare pnpm@11.8.0 --activate
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl python3 python-is-python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable \
+    && corepack prepare pnpm@11.8.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json
