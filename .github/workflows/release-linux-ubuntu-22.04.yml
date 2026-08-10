@@ -162,16 +162,6 @@ jobs:
           test -f "$unpacked/runtime/runtime-provenance.json"
           test ! -e "$unpacked/deploy/single-node/.env"
 
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-training-platform-${{ steps.release.outputs.version }}-ubuntu-22.04-x64
-          path: |
-            source/release/ai-training-platform-${{ steps.release.outputs.version }}-linux-x64.tar.gz
-            source/release/ai-training-platform-${{ steps.release.outputs.version }}-linux-x64.tar.gz.sha256
-          if-no-files-found: error
-          retention-days: 30
-
       - name: Publish GitHub Release assets
         if: github.event_name == 'push' || inputs.publish
         shell: bash
