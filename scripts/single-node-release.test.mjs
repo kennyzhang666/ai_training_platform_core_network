@@ -121,6 +121,26 @@ test('release CLI accepts pnpm arguments with or without a separator', () => {
   );
 });
 
+test('release layout creates a missing output parent on a clean checkout', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ai-training-release-parent-test-'));
+  try {
+    const inputs = await fixture(root);
+    const runtimeRoot = await runtimeFixture(root, 'linux-x64');
+    const outputRoot = join(root, 'release', 'ai-training-platform-test-linux-x64');
+    await assembleReleaseLayout({
+      ...inputs,
+      runtimeRoot,
+      outputRoot,
+      target: 'linux-x64',
+      version: '0.9.2-test',
+      sourceDateEpoch: 1_786_320_000,
+    });
+    assert.equal(existsSync(join(outputRoot, 'release-manifest.json')), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 for (const target of ['win32-x64', 'linux-x64']) {
   test(`${target} release contains runtime assets and deployable application only`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'ai-training-release-test-'));

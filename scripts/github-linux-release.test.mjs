@@ -16,6 +16,7 @@ test('GitHub workflow builds tagged releases on native Ubuntu 22.04 and publishe
   assert.doesNotMatch(workflow, /runs-on: ubuntu-latest/);
   assert.match(workflow, /node --test scripts\/single-node-deployment\.test\.mjs/);
   assert.doesNotMatch(workflow, /pnpm deployment:test/);
+  assert.match(workflow, /mkdir -p release/);
   assert.match(workflow, /pnpm release:build \\\n/);
   assert.doesNotMatch(workflow, /pnpm release:build -- \\\n/);
   assert.match(workflow, /actions\/upload-artifact@v4/);

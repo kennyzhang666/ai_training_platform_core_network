@@ -122,6 +122,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
+          mkdir -p release
           pnpm release:build \
             --target linux-x64 \
             --runtime-root "$RUNTIME_ROOT" \

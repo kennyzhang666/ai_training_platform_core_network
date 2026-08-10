@@ -216,6 +216,7 @@ export async function assembleReleaseLayout(options) {
   if (!(await wheelFiles(wheelhouseRoot)).length) throw new Error(`offline wheelhouse contains no .whl files: ${wheelhouseRoot}`);
   for (const path of descriptor.runtimeFiles) await requireFile(join(runtimeRoot, ...path.split('/')), `${target} runtime asset ${path}`);
 
+  await mkdir(dirname(outputRoot), { recursive: true });
   await mkdir(outputRoot, { recursive: false });
   try {
     for (const path of ['apps/web/dist', 'contracts', 'docs', 'executors', 'sandbox']) {
