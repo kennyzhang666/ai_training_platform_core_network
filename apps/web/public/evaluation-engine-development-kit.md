@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：0.9.7。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：0.9.8。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -285,7 +285,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台设计文档
 
-> 设计基线：`v0.9.7`
+> 设计基线：`v0.9.8`
 > 更新日期：2026-08-10
 > 文档职责：产品、业务、权限、评测、报告、能力画像、页面、交互、视觉与文案的唯一标准
 
@@ -1113,7 +1113,7 @@ AI 能力画像
 
 # AI 能力训战平台开发手册
 
-> 当前版本：`v0.9.7`
+> 当前版本：`v0.9.8`
 > 更新日期：2026-08-10
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
@@ -1490,9 +1490,9 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v0.9.7 已验证基线
+### 12.2 v0.9.8 已验证基线
 
-- Workspace：149 项，148 通过，1 项 PostgreSQL 集成按显式配置跳过；
+- Workspace：152 项，151 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web 交付方式规则：3/3；
 - 契约：7/7；
 - Python grader：18/18；
@@ -1544,7 +1544,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 运行完整发布检查，确认构建后工作区没有意外产物；
 - 提交前确认没有 `.env`、密码、员工数据、生产仓库地址、运行日志或 `tmp/` 内容。
 
-历史发布细节以 Git 标签和提交为准。本手册只维护影响当前架构的版本沿革，避免再次生成独立 CHANGELOG。
+历史发布细节以 Git 标签和提交为准；`CHANGELOG.md` 只保留发布事实，不承载架构、开发或部署说明。
 
 ## 15. 当前实现状态
 
@@ -1563,7 +1563,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 全局管理员与部门管理员的组织范围隔离；
 - 难题审核、待揭榜、揭榜成功、解决方案提交和公开控制；
 - Windows x64/Linux x64 离线发布布局、双平台管理命令和一致性备份恢复；
-- SDD 运维日志脱敏综合训战的真实角色端到端验收。
+- SDD 运维日志脱敏综合训战的真实角色端到端验收，以及版本化 v2 进阶赛题的 24 项隐藏强度用例。
 
 ### 15.2 当前限制
 
@@ -1578,7 +1578,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 ## 16. 后续路线
 
-### 16.1 v0.9.8：目标机验收与极简运维
+### 16.1 v0.9.9：目标机验收与极简运维
 
 目标：运维人员在全新断网服务器上使用离线包和一份配置，在 30 分钟内完成部署，并能长期运行。
 
@@ -1632,6 +1632,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v0.9.5` | 2026-08-10 | 完成 Windows/Linux 可复现离线发布契约和 SDD 综合训战端到端验收。 |
 | `v0.9.6` | 2026-08-10 | 修复首次部署端口、进程回滚、Windows OpenCode、离线依赖和评分 profile 一致性。 |
 | `v0.9.7` | 2026-08-10 | 将平台说明收口为开发、设计、部署三份核心文档，并补齐交付方式禁用规则与前端回归测试。 |
+| `v0.9.8` | 2026-08-10 | 发布 SDD 日志脱敏 v2 进阶赛题，以 24 项评测方隐藏用例强化 HMAC、失败关闭、复杂载荷和流式批处理验收，并稳定 Windows 本地验收端口分配。 |
 
 ## 18. 交接检查表
 
@@ -1646,7 +1647,7 @@ pnpm grader:test
 pnpm test
 ```
 
-然后从 OpenAPI、实现和测试三处交叉确认目标功能。不要仅凭本手册断言某功能存在，也不要重新创建阶段性 GAP、PLAN、CHANGELOG 或部署说明；需要长期维护的内容只能更新本手册、`DESIGN.md` 或 `DEPLOYMENT.html`。
+然后从 OpenAPI、实现和测试三处交叉确认目标功能。不要仅凭本手册断言某功能存在，也不要重新创建阶段性 GAP、PLAN 或部署说明；长期说明只更新本手册、`DESIGN.md` 或 `DEPLOYMENT.html`，发布事实只追加到 `CHANGELOG.md`。
 
 --- END FILE: README.md ---
 
@@ -6581,7 +6582,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {

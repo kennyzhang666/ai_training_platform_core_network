@@ -1,0 +1,55 @@
+schemaVersion: "1.0"
+id: sdd-log-redaction
+version: 2
+title: 基于 SDD 的运维日志脱敏工具开发实战演练（进阶）
+description: >-
+  面向生产级日志治理场景，以规格驱动开发完成可配置、可追踪、失败关闭的流式批处理脱敏工具。
+  交付件必须处理嵌套 JSON、普通文本、请求头、URL 查询参数、规则冲突和关联标识，
+  并通过评测方冻结的功能、安全、异常与工程强度用例。
+objectives:
+  - 将数据分类、威胁边界、规则优先级和失败语义固化为可执行规格
+  - 使用 HMAC 确定性别名保留关联分析能力，同时避免标识可逆
+  - 实现逐行流式批处理，覆盖嵌套结构、混合文本、畸形输入和超长输入
+  - 建立需求、策略、实现、公开测试、隐藏验收和变更回滚的追踪闭环
+requirements:
+  - SPEC.md 必须定义敏感字段、关联字段、规则优先级、输入输出契约和错误码
+  - policy/redaction_policy.json 必须声明规则版本、最大行长、密钥环境变量和字段分类
+  - 工具必须支持 JSON 对象与数组、普通文本、Authorization 请求头和 URL 查询参数
+  - 关联标识必须使用 HMAC-SHA256 生成稳定别名，密钥不得写入代码或交付件
+  - 流式批处理不得一次性读取完整输入，错误信息不得包含原始日志
+  - AI_WORKLOG.md 必须记录规格先行、事实核验、失败调整、变更定位和复测证据
+constraints:
+  - 使用 Python 3.11 标准库，不依赖外部网络、在线服务或第三方包
+  - 输出必须确定且幂等；身份证与手机号等重叠规则必须按冻结优先级执行
+  - 畸形结构化输入、超长行、无效策略和密钥缺失必须失败关闭
+  - 评测以不可变快照和引擎 v2 隐藏用例为准，学员自测不能替代平台验收
+deliverables:
+  - SPEC.md
+  - README.md
+  - AI_WORKLOG.md
+  - policy/redaction_policy.json
+  - src/log_redactor.py
+  - tests/test_log_redactor.py
+tags: [SDD, 日志治理, 数据脱敏, 流式处理, HMAC, Python, 规格驱动开发]
+estimatedMinutes: 360
+origin: official
+zone: yellow
+languagePolicy:
+  mode: fixed
+  languages: [python]
+deliveryPolicy:
+  allowedSources: [UPLOAD]
+  upload:
+    formats: [zip]
+    maxBytes: 52428800
+    maxFiles: 200
+    allowResubmit: true
+rubricVersion: "2.0"
+submissionContract: submission-contract.json
+resources:
+  reference: reference
+resourceLimits:
+  timeoutSeconds: 180
+  memoryMb: 512
+  maxOutputBytes: 2097152
+visibility: ORG

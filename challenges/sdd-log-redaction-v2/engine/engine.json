@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "1.1",
+  "id": "sdd-log-redaction-spec-evaluator",
+  "version": "2.0.0",
+  "title": "SDD 日志脱敏进阶评测引擎",
+  "description": "执行 24 个评测方隐藏用例，并结合规格、实现、自测和 AI 协作记录完成 16 点确定性评分。",
+  "runtime": {
+    "type": "python",
+    "entrypoint": "judge.py",
+    "pythonVersion": ">=3.11"
+  },
+  "agent": {
+    "instruction": "instruction.md",
+    "skills": ["skills/evaluation"]
+  },
+  "limits": {
+    "wallClockSeconds": 180,
+    "memoryMB": 512,
+    "outputBytes": 2097152
+  },
+  "assets": {
+    "submissionContract": "assets/submission-contract.json",
+    "testsDir": "assets/hidden-tests",
+    "referenceDir": "assets/reference"
+  },
+  "selfCheck": {
+    "expectMinTotal": 100,
+    "expectStatus": "COMPLETE"
+  },
+  "metadata": {
+    "rubric": "V1-V4/S1-S4/C1-C4/P1-P4",
+    "hiddenTests": 24,
+    "primaryEvidence": "SPEC.md"
+  }
+}

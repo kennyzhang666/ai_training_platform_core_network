@@ -1,0 +1,166 @@
+{
+  "schemaVersion": "2.0",
+  "hiddenTestCount": 24,
+  "criteria": [
+    {
+      "key": "V1", "dim": "verify", "name": "核心场景验收", "max": 10,
+      "rule": "基础数据类型、结构化日志、敏感字段与协议载荷由评测方用例验证。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "hidden_all", "ids": ["HT-01", "HT-02"], "path": "src/log_redactor.py", "description": "基础文本与结构化主流程隐藏用例通过", "fix": "修复基础类型脱敏和 JSON 类型保真。" },
+        { "kind": "hidden_all", "ids": ["HT-03", "HT-04"], "path": "src/log_redactor.py", "description": "嵌套结构和敏感字段隐藏用例通过", "fix": "递归处理对象与数组，并按字段分类覆盖非字符串敏感值。" },
+        { "kind": "hidden_all", "ids": ["HT-05", "HT-06"], "path": "src/log_redactor.py", "description": "协议载荷与策略入口隐藏用例通过", "fix": "补齐请求头、URL 参数和策略加载入口。" },
+        { "kind": "unit_tests", "path": "tests/test_log_redactor.py", "description": "交付件公开测试全部通过", "fix": "修复公开测试并保留可复现命令。" }
+      ]
+    },
+    {
+      "key": "V2", "dim": "verify", "name": "复杂规则与关联验证", "max": 10,
+      "rule": "冲突优先级、幂等、HMAC 关联和 Unicode 由冻结用例验证。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "hidden_all", "ids": ["HT-07", "HT-08"], "path": "src/log_redactor.py", "description": "规则冲突与幂等隐藏用例通过", "fix": "固定重叠规则优先级，并避免重复处理既有掩码。" },
+        { "kind": "hidden_all", "ids": ["HT-09", "HT-10"], "path": "src/log_redactor.py", "description": "HMAC 稳定性与隔离性隐藏用例通过", "fix": "使用 HMAC-SHA256，使同值可关联且不同值、不同密钥相互隔离。" },
+        { "kind": "hidden_all", "ids": ["HT-11", "HT-12"], "path": "src/log_redactor.py", "description": "Unicode 与跨记录关联隐藏用例通过", "fix": "保持 Unicode 语义，并在所有嵌套层使用统一关联别名。" },
+        { "kind": "all", "path": "tests/test_log_redactor.py", "terms": ["test_rule_priority", "test_hmac_correlation", "test_idempotent", "test_unicode"], "description": "公开回归覆盖复杂规则", "fix": "增加优先级、HMAC、幂等和 Unicode 公开测试。" }
+      ]
+    },
+    {
+      "key": "V3", "dim": "verify", "name": "失败关闭与无泄露验证", "max": 10,
+      "rule": "密钥、畸形输入、资源边界、策略失败与诊断信息均采用失败关闭。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "hidden_all", "ids": ["HT-13", "HT-14"], "path": "src/log_redactor.py", "description": "密钥缺失与畸形 JSON 隐藏用例通过", "fix": "缺密钥或结构损坏时返回稳定错误，禁止回退原文。" },
+        { "kind": "hidden_all", "ids": ["HT-15", "HT-16"], "path": "src/log_redactor.py", "description": "超长行与无效策略隐藏用例通过", "fix": "执行策略资源上限并严格校验策略结构。" },
+        { "kind": "hidden_all", "ids": ["HT-17", "HT-18"], "path": "src/log_redactor.py", "description": "混合敏感信息与诊断无泄露隐藏用例通过", "fix": "统一清除混合载荷中的敏感值，错误输出只保留稳定错误码。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["KEY_UNAVAILABLE", "MALFORMED_JSON", "LINE_TOO_LONG", "POLICY_INVALID"], "description": "失败语义在规格中冻结", "fix": "为密钥、畸形输入、资源上限和无效策略定义稳定错误码。" }
+      ]
+    },
+    {
+      "key": "V4", "dim": "verify", "name": "流式批处理与变更回归", "max": 10,
+      "rule": "单次迭代、统计、大批量、命令行和策略变更形成工程闭环。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "hidden_all", "ids": ["HT-19", "HT-20"], "path": "src/log_redactor.py", "description": "真流式读取与统计隐藏用例通过", "fix": "逐行迭代输入，输出稳定的 lines、redacted、errors 统计。" },
+        { "kind": "hidden_all", "ids": ["HT-21", "HT-22"], "path": "src/log_redactor.py", "description": "批量强度与 CLI 成功路径隐藏用例通过", "fix": "控制逐行处理开销并补齐文件命令入口。" },
+        { "kind": "hidden_all", "ids": ["HT-23", "HT-24"], "path": "src/log_redactor.py", "description": "CLI 失败路径与策略变更隐藏用例通过", "fix": "让命令入口安全失败，并在运行时实际应用策略上限。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["变更请求", "影响文件", "变更回归", "复测通过"], "description": "真实变更完成定位和复测", "fix": "记录策略变更、影响文件、回归命令和最终结果。" }
+      ]
+    },
+    {
+      "key": "S1", "dim": "spec", "name": "目标、威胁与需求澄清", "max": 8,
+      "rule": "规格明确目标、非目标、利益相关方、威胁边界、假设和稳定需求编号。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "headings", "path": "SPEC.md", "terms": ["目标与非目标", "范围、约束与威胁边界"], "description": "目标与安全边界可定位", "fix": "补充目标、非目标、约束和威胁边界章节。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["REQ-01", "REQ-08", "REQ-12"], "description": "核心需求使用稳定编号", "fix": "为功能、安全和工程需求分配稳定编号。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["关键假设", "决策记录", "歧义"], "description": "假设、歧义与决策有记录", "fix": "单独记录不明确需求、采用假设和确认结论。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["运维", "隐私", "审计", "安全"], "description": "利益相关方诉求完整", "fix": "说明运维、隐私、审计和安全角色的验收目标。" }
+      ]
+    },
+    {
+      "key": "S2", "dim": "spec", "name": "契约、验收与追踪设计", "max": 7,
+      "rule": "输入输出、策略、需求、验收和测试之间可双向追踪。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "headings", "path": "SPEC.md", "terms": ["输入输出契约", "需求追踪矩阵"], "description": "接口契约与追踪矩阵独立成章", "fix": "增加输入输出契约和需求追踪矩阵。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["AC-01", "AC-12", "输入", "期望输出", "判定"], "description": "验收标准覆盖全部层级", "fix": "为主流程、安全和工程边界编写带判定的验收标准。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["policy/redaction_policy.json", "redact_line", "redact_stream", "load_policy"], "description": "策略与公开接口冻结", "fix": "明确策略文件及三个公开接口的职责和签名。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["test_plain_text", "test_hmac_correlation", "test_streaming", "HT-24"], "description": "公开与隐藏测试映射可追踪", "fix": "在追踪矩阵中引用公开测试与隐藏验收编号。" }
+      ]
+    },
+    {
+      "key": "S3", "dim": "spec", "name": "安全、边界与资源策略", "max": 6,
+      "rule": "密钥、失败关闭、原文保护、资源上限和数据保真均有明确口径。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "all", "path": "SPEC.md", "terms": ["HMAC-SHA256", "LOG_REDACTION_KEY", "不得写入代码"], "description": "密钥和关联策略明确", "fix": "定义 HMAC 算法、密钥入口和交付禁区。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["失败关闭", "不得回显原文", "稳定错误码"], "description": "失败默认安全", "fix": "明确所有异常只返回稳定错误码，不回显输入。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["最大行长", "逐行", "内存", "处理时限"], "description": "资源边界可验证", "fix": "声明行长、读取方式、内存与处理时限。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["Unicode", "数值", "布尔", "空值"], "description": "非敏感数据语义保真", "fix": "明确 Unicode 与 JSON 非字符串类型的保真规则。" }
+      ]
+    },
+    {
+      "key": "S4", "dim": "spec", "name": "规则版本与回滚设计", "max": 4,
+      "rule": "策略升级、兼容性、影响范围、回归和回滚均可执行。", "path": "SPEC.md",
+      "checks": [
+        { "kind": "headings", "path": "SPEC.md", "terms": ["变更影响与回滚"], "description": "变更与回滚独立成章", "fix": "增加策略变更影响与回滚章节。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["规则版本", "向后兼容", "优先级"], "description": "规则版本和兼容口径明确", "fix": "冻结规则版本、优先级和兼容策略。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["影响范围", "策略", "实现", "测试"], "description": "影响范围覆盖工程链路", "fix": "列出策略、实现、测试和运行说明的影响。" },
+        { "kind": "all", "path": "SPEC.md", "terms": ["回滚步骤", "上一规则版本", "回滚验证"], "description": "回滚入口可执行", "fix": "给出回滚目标、步骤和验证命令。" }
+      ]
+    },
+    {
+      "key": "C1", "dim": "code", "name": "策略驱动与规则优先级", "max": 5,
+      "rule": "字段分类、文本规则和资源上限来自经过校验的版本化策略。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "hidden_all", "ids": ["HT-04", "HT-06", "HT-24"], "path": "src/log_redactor.py", "description": "策略字段与运行时变更隐藏用例通过", "fix": "加载并校验策略，实际使用字段分类和最大行长。" },
+        { "kind": "all", "path": "policy/redaction_policy.json", "terms": ["version", "maxLineChars", "keyEnv", "secretFields", "correlationFields"], "description": "策略包含冻结字段", "fix": "补齐规则版本、资源上限、密钥入口和字段分类。" },
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["load_policy", "validate_policy", "RULE_PRIORITY"], "description": "策略加载、校验和优先级职责明确", "fix": "拆分策略加载与校验，并用命名常量表达优先级。" },
+        { "kind": "ast", "path": "src/log_redactor.py", "test": "parse", "description": "源码可由 Python AST 解析", "fix": "修复 Python 语法错误。" }
+      ]
+    },
+    {
+      "key": "C2", "dim": "code", "name": "安全失败与原文保护", "max": 5,
+      "rule": "密钥、输入、策略和命令行失败路径不泄露原文。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "hidden_all", "ids": ["HT-13", "HT-14", "HT-15"], "path": "src/log_redactor.py", "description": "密钥与输入边界隐藏用例通过", "fix": "对密钥、畸形结构和超长输入执行失败关闭。" },
+        { "kind": "hidden_all", "ids": ["HT-16", "HT-17", "HT-18"], "path": "src/log_redactor.py", "description": "策略与诊断无泄露隐藏用例通过", "fix": "严格拒绝无效策略，并确保错误输出不包含原始值。" },
+        { "kind": "not_any", "path": "src/log_redactor.py", "terms": ["print(line)", "print(record)", "traceback.print_exc"], "description": "实现不直接输出原始输入或堆栈", "fix": "移除原文和异常堆栈输出，只打印稳定错误码。" },
+        { "kind": "all", "path": "tests/test_log_redactor.py", "terms": ["test_missing_key", "test_malformed_json", "test_line_too_long", "test_invalid_policy"], "description": "公开测试覆盖安全失败", "fix": "增加四类安全失败路径测试。" }
+      ]
+    },
+    {
+      "key": "C3", "dim": "code", "name": "结构保真与确定性别名", "max": 5,
+      "rule": "递归处理保持数据语义，HMAC 别名确定、隔离且不可逆。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "hidden_all", "ids": ["HT-02", "HT-03", "HT-11"], "path": "src/log_redactor.py", "description": "类型、嵌套和 Unicode 隐藏用例通过", "fix": "递归处理字符串，同时保持数值、布尔、空值和 Unicode。" },
+        { "kind": "hidden_all", "ids": ["HT-09", "HT-10", "HT-12"], "path": "src/log_redactor.py", "description": "HMAC 确定性与跨层关联隐藏用例通过", "fix": "统一使用密钥化摘要生成固定长度关联别名。" },
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["hmac.new", "hashlib.sha256", "compare"], "description": "实现使用标准库 HMAC 并显式比较变化", "fix": "使用 hmac 与 hashlib 标准库，并明确统计变更行。" },
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["ensure_ascii=False", "sort_keys=True", "separators"], "description": "JSON 输出稳定且保留 Unicode", "fix": "固定 JSON 键序和分隔符并关闭 ASCII 转义。" }
+      ]
+    },
+    {
+      "key": "C4", "dim": "code", "name": "流式接口与命令工程化", "max": 5,
+      "rule": "单行、递归、流式、统计和命令行职责分离并可批量运行。", "path": "src/log_redactor.py",
+      "checks": [
+        { "kind": "hidden_all", "ids": ["HT-19", "HT-20", "HT-21"], "path": "src/log_redactor.py", "description": "流式读取、统计和批量强度隐藏用例通过", "fix": "使用迭代器逐行处理并返回稳定统计。" },
+        { "kind": "hidden_all", "ids": ["HT-22", "HT-23"], "path": "src/log_redactor.py", "description": "命令行成功与失败路径隐藏用例通过", "fix": "补齐文件参数、策略参数和安全退出码。" },
+        { "kind": "all", "path": "src/log_redactor.py", "terms": ["def redact_text", "def redact_record", "def redact_line", "def redact_stream", "def main"], "description": "核心职责完成拆分", "fix": "拆分文本、递归、单行、流式和命令入口。" },
+        { "kind": "ast", "path": "src/log_redactor.py", "test": "functions", "description": "函数规模与数量可维护", "fix": "降低单函数复杂度并拆分职责。" }
+      ]
+    },
+    {
+      "key": "P1", "dim": "collab", "name": "规格与威胁建模先行", "max": 4,
+      "rule": "AI 协作先明确业务、威胁、约束和验收，再进入实现。", "path": "AI_WORKLOG.md",
+      "checks": [
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["先写规格", "再实现"], "description": "协作顺序为规格先行", "fix": "记录先冻结规格和验收、再实现代码的顺序。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["目标", "威胁边界", "约束", "验收标准"], "description": "首次上下文完整", "fix": "首次任务同时提供目标、安全边界、约束和验收。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["假设", "确认", "HMAC"], "description": "关键假设经过确认", "fix": "记录关联标识方案的假设和确认结果。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["SPEC.md", "需求追踪矩阵"], "description": "协作结论回写规格", "fix": "记录规格与追踪矩阵的同步更新。" }
+      ]
+    },
+    {
+      "key": "P2", "dim": "collab", "name": "小步迭代与验证编排", "max": 4,
+      "rule": "工作拆成可验证小步，并保留失败、分析与调整。", "path": "AI_WORKLOG.md",
+      "checks": [
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["迭代 1", "迭代 2", "迭代 3", "迭代 4"], "description": "至少四轮小步迭代", "fix": "按规格、核心、边界和流式回归拆成至少四轮。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["本轮目标", "验证命令", "验证结果"], "description": "每轮有目标和验证", "fix": "为每轮记录目标、命令和结果。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["失败", "原因", "调整"], "description": "保留失败后的调整证据", "fix": "保留一次真实失败、原因分析和调整。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["unittest", "compileall", "批量"], "description": "测试与静态检查形成流水线", "fix": "记录单测、语法检查和批量验证顺序。" }
+      ]
+    },
+    {
+      "key": "P3", "dim": "collab", "name": "提示词与上下文设计", "max": 4,
+      "rule": "提示词包含角色、上下文、约束、输出格式、边界用例与自检。", "path": "AI_WORKLOG.md",
+      "checks": [
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["角色", "上下文", "约束"], "description": "提示词上下文完整", "fix": "补充角色、业务上下文和硬约束。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["输出格式", "检查清单"], "description": "输出和自检要求明确", "fix": "指定输出格式和提交前检查清单。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["可复用提示词", "边界用例", "隐藏用例"], "description": "形成可复用验证提示词", "fix": "沉淀包含公开边界和未知隐藏验收的提示词模板。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["不得泄露", "逐项核对"], "description": "隐私与自检进入提示词", "fix": "把原文保护和逐项核对写入提示词。" }
+      ]
+    },
+    {
+      "key": "P4", "dim": "collab", "name": "变更定位与复测", "max": 3,
+      "rule": "策略变更能定位影响、执行回归并保留回滚依据。", "path": "AI_WORKLOG.md",
+      "checks": [
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["变更请求", "maxLineChars", "规则优先级"], "description": "真实策略变更有记录", "fix": "记录一项资源或优先级变更及业务原因。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["影响文件", "影响测试"], "description": "影响范围定位到文件和测试", "fix": "列出受影响策略、实现、说明和测试。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["变更回归", "复测通过"], "description": "变更后完成全量回归", "fix": "执行并记录策略变更后的完整复测。" },
+        { "kind": "all", "path": "AI_WORKLOG.md", "terms": ["回滚依据", "上一规则版本"], "description": "保留可执行回滚依据", "fix": "记录回滚目标、条件和验证入口。" }
+      ]
+    }
+  ]
+}

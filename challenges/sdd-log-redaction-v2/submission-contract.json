@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "1.1",
+  "root": { "mode": "ARCHIVE_ROOT" },
+  "required": [
+    { "path": "SPEC.md", "type": "markdown", "minSections": 12, "minChars": 5000, "notTemplate": true },
+    { "path": "README.md", "type": "markdown", "minSections": 4, "minChars": 800, "notTemplate": true },
+    { "path": "AI_WORKLOG.md", "type": "markdown", "minSections": 6, "minChars": 1500, "notTemplate": true },
+    { "path": "policy/redaction_policy.json", "type": "json" },
+    { "path": "src/log_redactor.py", "type": "source", "mustExport": "redact_stream", "signature": "(reader, writer, policy=None, key=None)" },
+    { "path": "tests/test_log_redactor.py", "type": "source" }
+  ],
+  "optional": [],
+  "forbidden": [
+    "**/.env",
+    "**/.git/**",
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "**/*credential*",
+    "**/*secret*"
+  ],
+  "languageEntry": { "python": "src/log_redactor.py" },
+  "allowedPaths": [
+    "SPEC.md",
+    "README.md",
+    "AI_WORKLOG.md",
+    "policy/redaction_policy.json",
+    "src/log_redactor.py",
+    "tests/test_log_redactor.py"
+  ],
+  "allowAdditionalPaths": false,
+  "maxDepth": 3,
+  "maxFiles": 24
+}

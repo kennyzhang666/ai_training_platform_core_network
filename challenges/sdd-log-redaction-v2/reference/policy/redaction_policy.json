@@ -1,0 +1,28 @@
+{
+  "version": "2.0",
+  "maxLineChars": 4096,
+  "keyEnv": "LOG_REDACTION_KEY",
+  "secretFields": [
+    "authorization",
+    "password",
+    "token",
+    "access_token",
+    "api_key",
+    "secret"
+  ],
+  "correlationFields": [
+    "user_id",
+    "device_id"
+  ],
+  "textRulePriority": [
+    "authorization",
+    "url_query_secret",
+    "key_value_secret",
+    "correlation_identifier",
+    "identity_number",
+    "mobile",
+    "email",
+    "ipv4",
+    "mac"
+  ]
+}
