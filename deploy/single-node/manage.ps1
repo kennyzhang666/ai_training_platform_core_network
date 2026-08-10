@@ -65,7 +65,7 @@ function New-EnvironmentFile([string]$Path) {
 }
 
 function Edit-EnvironmentFile([string]$Path) {
-    Write-Host '请填写 PostgreSQL、LDAP、首位管理员、Worker 和 Code Agent 配置；保存并关闭记事本后将继续安装。'
+    Write-Host '请填写 PostgreSQL、首位管理员、Worker 和 Code Agent 配置；保存并关闭记事本后将继续安装。LDAP 已使用公司内网默认参数。'
     Start-Process -FilePath 'notepad.exe' -ArgumentList @($Path) -Wait
 }
 
@@ -74,7 +74,7 @@ function Import-DotEnv([string]$Path) {
         if ($Action -in @('Prepare', 'Install')) {
             New-EnvironmentFile $Path
             if ($Action -eq 'Prepare') {
-                Write-Host '请填写 PostgreSQL、LDAP、首位管理员、Worker 和 Code Agent 配置后重新执行 Prepare。'
+                Write-Host '请填写 PostgreSQL、首位管理员、Worker 和 Code Agent 配置后重新执行 Prepare。LDAP 已使用公司内网默认参数。'
                 exit 0
             }
             Edit-EnvironmentFile $Path

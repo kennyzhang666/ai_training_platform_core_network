@@ -90,6 +90,34 @@ test('environment bootstrap generates independent secrets without overwriting bu
   }
 });
 
+test('single-node installers use the verified Huawei intranet LDAP profile by default', () => {
+  const workspaceEnvironment = readFileSync(join(deploy, '.env.example'), 'utf8');
+  const windowsEnvironment = readFileSync(join(root, 'deploy', 'release', 'windows.env.example'), 'utf8');
+  const linuxEnvironment = readFileSync(join(root, 'deploy', 'release', 'linux.env.example'), 'utf8');
+  const gatewayEnvironment = readFileSync(join(root, 'services', 'ldap3-gateway', '.env.example'), 'utf8');
+
+  for (const environment of [workspaceEnvironment, windowsEnvironment, linuxEnvironment, gatewayEnvironment]) {
+    assert.match(environment, /^LDAP_SERVER=china\.huawei\.com$/m);
+    assert.match(environment, /^LDAP_PORT=389$/m);
+    assert.match(environment, /^LDAP_USE_SSL=false$/m);
+    assert.match(environment, /^LDAP_START_TLS=false$/m);
+    assert.match(environment, /^LDAP_BASE_DN=dc=china,dc=huawei,dc=com$/m);
+    assert.match(environment, /^LDAP_ACCOUNT_ATTRIBUTE=sAMAccountName$/m);
+    assert.match(environment, /^LDAP_TITLE_ATTRIBUTE=title$/m);
+    assert.match(environment, /^LDAP_DEPARTMENT_ATTRIBUTE=department$/m);
+    assert.match(environment, /^LDAP_NAME_ATTRIBUTE=displayName$/m);
+  }
+  assert.match(workspaceEnvironment, /^LDAP_BIND_PREFIX=China\\$/m);
+  assert.match(windowsEnvironment, /^LDAP_BIND_PREFIX=China\\$/m);
+  assert.match(linuxEnvironment, /^LDAP_BIND_PREFIX='China\\'$/m);
+  assert.match(gatewayEnvironment, /^LDAP_BIND_PREFIX=China\\$/m);
+
+  const windowsManager = readFileSync(join(deploy, 'manage.ps1'), 'utf8');
+  const linuxManager = readFileSync(join(deploy, 'manage.sh'), 'utf8');
+  assert.doesNotMatch(windowsManager, /请填写 PostgreSQL、LDAP、/);
+  assert.doesNotMatch(linuxManager, /请填写 PostgreSQL、LDAP、/);
+});
+
 test('Linux single-node manager provides the same lifecycle and bundled runtime boundary', () => {
   const manager = readFileSync(join(deploy, 'manage.sh'), 'utf8');
   for (const action of ['Install', 'Uninstall', 'Prepare', 'Start', 'Stop', 'Status', 'Backup', 'Restore', 'Doctor']) {

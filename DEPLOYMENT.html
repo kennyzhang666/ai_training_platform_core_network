@@ -146,7 +146,7 @@
         <a href="#troubleshooting"><span class="n">10</span>故障排查</a>
         <a href="#boundaries"><span class="n">11</span>当前边界</a>
       </nav>
-      <div class="side-note">v0.9.8 后续主线<br>Windows x64 / Linux x64<br>原生一键安装</div>
+      <div class="side-note">v0.9.9<br>Windows x64 / Linux x64<br>原生一键安装</div>
     </aside>
 
     <main>
@@ -168,7 +168,7 @@
       </div>
 
       <div class="callout warning">
-        <strong>当前主线事实：</strong>原生发布包已经提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成和开机自启；自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。已发布的 v0.9.8 附件不包含这些未发布改动，必须使用后续重新构建的原生包。
+        <strong>v0.9.9 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP 默认参数和开机自启；自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
       </div>
 
       <section id="start">
@@ -199,7 +199,7 @@
             <tr><td class="mono">3000 / 本机</td><td>Platform API</td><td>只监听 127.0.0.1，不开放入站</td></tr>
             <tr><td class="mono">8081 / 本机</td><td>LDAP3 网关</td><td>只监听 127.0.0.1，不开放入站</td></tr>
             <tr><td class="mono">5432 / 本机</td><td>PostgreSQL</td><td>只监听本机；标准分离部署仅向 API 网段开放</td></tr>
-            <tr><td class="mono">389/636 / 出站</td><td>LDAP StartTLS/LDAPS</td><td>按企业目录要求放通</td></tr>
+            <tr><td class="mono">389 / 出站</td><td>公司内网 LDAP</td><td>访问 <code>china.huawei.com</code>；如目录策略变化再调整</td></tr>
             <tr><td class="mono">443 / 出站</td><td>OIDC、S3、内部模型或 Agent</td><td>仅按实际集成放通</td></tr>
           </tbody>
         </table>
@@ -207,7 +207,7 @@
 
       <section id="quick">
         <h2>02 · 一页纸傻瓜部署</h2>
-        <p>下面是带一键安装入口的后续原生发布包最短路径。已发布的 v0.9.8 附件仍使用旧管理流程；重新构建后，Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。企业 PostgreSQL、LDAP、管理员和 Code Agent 信息必须填写，随机密钥由脚本生成。</p>
+        <p>下面是 v0.9.9 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。PostgreSQL、首位管理员、Worker 和 Code Agent 信息需要填写；公司内网 LDAP 参数已经内置，随机密钥由脚本生成。</p>
 
         <div class="tabs" role="tablist" aria-label="操作系统">
           <button class="tab" role="tab" aria-selected="true" aria-controls="quick-windows" id="tab-windows">Windows Server</button>
@@ -215,7 +215,7 @@
         </div>
 
         <div class="tabpanel active" id="quick-windows" role="tabpanel" aria-labelledby="tab-windows">
-          <div class="callout"><strong>准备：</strong>以管理员身份打开 PowerShell；安装 PostgreSQL 16/17；准备企业 LDAP 参数和可运行的 Code Agent；把 ZIP 与同名 <code>.sha256</code> 放到 <code>D:\Release</code>。</div>
+          <div class="callout"><strong>准备：</strong>以管理员身份打开 PowerShell；安装 PostgreSQL 16/17；准备可运行的 Code Agent；把 ZIP 与同名 <code>.sha256</code> 放到 <code>D:\Release</code>。</div>
 
           <div class="step"><div class="stepno">1</div><div><h4>创建数据库</h4><p>在 pgAdmin 查询工具中以 PostgreSQL 管理员执行，先替换密码：</p>
             <div class="codebox"><div class="codehead"><span>PostgreSQL SQL</span><button class="copy" data-copy>复制</button></div><pre>CREATE ROLE ai_training LOGIN PASSWORD '&lt;独立数据库强密码&gt;';
@@ -237,7 +237,7 @@ Set-Location C:\AITraining</pre></div>
           <div class="step"><div class="stepno">3</div><div><h4>执行一键安装</h4>
             <div class="codebox"><div class="codehead"><span>PowerShell 或双击</span><button class="copy" data-copy>复制</button></div><pre>Set-Location C:\AITraining
 .\install.cmd</pre></div>
-            <p>脚本会请求管理员权限、生成独立随机密钥并打开配置文件。填写本页“只改这些配置”中的企业信息，保存并关闭记事本后，脚本继续完成预检、数据库迁移、启动和开机自启注册。</p>
+            <p>脚本会请求管理员权限、生成独立随机密钥并打开配置文件。填写本页“只改这些配置”中的数据库、管理员、Worker 和 Code Agent 信息，保存并关闭记事本后，脚本继续完成预检、数据库迁移、启动和开机自启注册。</p>
           </div></div>
 
           <div class="step"><div class="stepno">4</div><div><h4>确认安装结果</h4>
@@ -256,7 +256,7 @@ Invoke-WebRequest http://127.0.0.1:8080/ -UseBasicParsing | Select-Object Status
         </div>
 
         <div class="tabpanel" id="quick-linux" role="tabpanel" aria-labelledby="tab-linux">
-          <div class="callout"><strong>准备：</strong>使用具有 sudo 权限的部署账号；安装 PostgreSQL 16/17；准备企业 LDAP 参数和 Code Agent；把 tar.gz 与同名 <code>.sha256</code> 放到 <code>/tmp/release</code>。</div>
+          <div class="callout"><strong>准备：</strong>使用具有 sudo 权限的部署账号；安装 PostgreSQL 16/17；准备 Code Agent；把 tar.gz 与同名 <code>.sha256</code> 放到 <code>/tmp/release</code>。</div>
 
           <div class="step"><div class="stepno">1</div><div><h4>创建数据库</h4>
             <div class="codebox"><div class="codehead"><span>Linux shell + psql</span><button class="copy" data-copy>复制</button></div><pre>sudo -u postgres psql &lt;&lt;'SQL'
@@ -279,7 +279,7 @@ chmod +x install.sh deploy/single-node/manage.sh</pre></div>
           <div class="step"><div class="stepno">3</div><div><h4>执行一键安装</h4>
             <div class="codebox"><div class="codehead"><span>Linux shell</span><button class="copy" data-copy>复制</button></div><pre>cd /opt/ai-training
 EDITOR=vi ./install.sh</pre></div>
-            <p>脚本生成独立随机密钥并打开配置文件。填写企业信息并退出编辑器后，脚本完成预检、数据库迁移、启动和 systemd 开机自启；安装系统服务时会按需请求 sudo。</p>
+            <p>脚本生成独立随机密钥并打开配置文件。填写数据库、管理员、Worker 和 Code Agent 信息并退出编辑器后，脚本完成预检、数据库迁移、启动和 systemd 开机自启；安装系统服务时会按需请求 sudo。</p>
           </div></div>
 
           <div class="step"><div class="stepno">4</div><div><h4>确认安装结果</h4>
@@ -311,13 +311,6 @@ curl -I http://127.0.0.1:8080/</pre></div>
             <tr><td><code>TRUSTED_GATEWAY_HMAC_SECRET</code></td><td>安装器自动生成</td><td>不要手工复制或对外发送</td></tr>
             <tr><td><code>LDAP_GATEWAY_SESSION_SECRET</code></td><td>安装器自动生成的另一条独立密钥</td><td>不会与 HMAC 密钥复用</td></tr>
             <tr><td><code>PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO</code></td><td>首位全局管理员工号</td><td>仅空系统第一次有效</td></tr>
-            <tr><td><code>LDAP_SERVER</code></td><td>企业 LDAP/AD 主机名</td><td>不能写浏览器平台地址</td></tr>
-            <tr><td><code>LDAP_PORT</code></td><td>StartTLS 通常 389，LDAPS 通常 636</td><td>与下面两个 TLS 开关一致</td></tr>
-            <tr><td><code>LDAP_USE_SSL</code></td><td>LDAPS 时 true</td><td>不能与 <code>LDAP_START_TLS</code> 同时为 true</td></tr>
-            <tr><td><code>LDAP_START_TLS</code></td><td>StartTLS 时 true</td><td>推荐启用加密 LDAP 链路</td></tr>
-            <tr><td><code>LDAP_CA_CERT_FILE</code></td><td>企业 CA 证书绝对路径</td><td>按企业证书策略配置</td></tr>
-            <tr><td><code>LDAP_BASE_DN</code></td><td>目录搜索根 DN</td><td>例如 <code>dc=corp,dc=example,dc=com</code></td></tr>
-            <tr><td><code>LDAP_BIND_PREFIX</code></td><td>域账号前缀</td><td>例如 Windows <code>Corp\</code>；Linux env 注意反斜杠</td></tr>
             <tr><td><code>EVALUATION_WORKER_EMPLOYEE_NO</code></td><td>已有全局管理员工号</td><td>用于 Worker 领取和回传批次</td></tr>
             <tr><td><code>EVALUATION_WORKER_NAME</code></td><td>该工号在 SSO 中的真实姓名</td><td>必须与首次登记身份一致</td></tr>
             <tr><td><code>EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET</code></td><td>安装器自动同步为网关 HMAC 密钥</td><td>不能使用浏览器 Cookie</td></tr>
@@ -326,6 +319,22 @@ curl -I http://127.0.0.1:8080/</pre></div>
             <tr><td><code>CODE_AGENT_ALLOWED_EXECUTABLES</code></td><td>允许启动的可执行文件，逗号分隔</td><td>必须包含命令名或绝对路径</td></tr>
           </tbody>
         </table>
+
+        <h3>公司内网 LDAP 默认值</h3>
+        <p>以下参数来自已验证的公司内网登录代码，发布包已直接写入，无需在安装时修改。平台按工号绑定 <code>China\工号</code>，并优先从 <code>title</code> 的“工号,姓名,部门”格式解析姓名和部门，部门缺失时回退到 <code>department</code>。</p>
+        <div class="codebox"><div class="codehead"><span>发布包内置配置</span><button class="copy" data-copy>复制</button></div><pre>LDAP_SERVER=china.huawei.com
+LDAP_PORT=389
+LDAP_USE_SSL=false
+LDAP_START_TLS=false
+LDAP_BASE_DN=dc=china,dc=huawei,dc=com
+LDAP_BIND_PREFIX=China\
+LDAP_ACCOUNT_ATTRIBUTE=sAMAccountName
+LDAP_TITLE_ATTRIBUTE=title
+LDAP_DEPARTMENT_ATTRIBUTE=department
+LDAP_NAME_ATTRIBUTE=displayName</pre></div>
+
+        <h3>仅在 LDAP 环境变化时覆盖</h3>
+        <p>如果公司目录以后切换为 StartTLS、LDAPS、其他域或其他属性名，再修改上述默认值。使用企业私有 CA 时在 <code>.env</code> 中增加 <code>LDAP_CA_CERT_FILE</code> 的绝对路径。</p>
 
         <div class="grid g2">
           <div class="card"><h3>StartTLS</h3><div class="codebox"><div class="codehead"><span>.env 片段</span><button class="copy" data-copy>复制</button></div><pre>LDAP_PORT=389
@@ -742,7 +751,7 @@ cd /opt/ai-training
         <div class="callout success"><strong>部署完成标准：</strong>用户只访问一个地址；真实 SSO 登录；管理员能建题、建训战、选人评测；员工能提交并查看报告；数据库和交付件能一致备份恢复；日常操作不需要理解 Node、pnpm、Python 虚拟环境或平台源码。</div>
       </section>
 
-      <div class="footer">AI 能力训战平台部署与运维手册 · v0.9.8 后续主线 · 2026-08-10<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
+      <div class="footer">AI 能力训战平台部署与运维手册 · v0.9.9 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
     </main>
   </div>
   <div id="toast" role="status" aria-live="polite">已复制</div>

@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：0.9.8。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：0.9.9。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -1113,8 +1113,8 @@ AI 能力画像
 
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v0.9.8`（主线包含未发布的一键安装改动）
-> 更新日期：2026-08-10
+> 当前发布版本：`v0.9.9`
+> 更新日期：2026-08-11
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
 企业内部 AI 训战、交付评测和能力复盘平台。当前主线已经完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布的本地闭环，并提供双平台一键安装入口与 Ubuntu 22.04 x64 原生 GitHub 发布流水线；Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是下一阶段工作。
@@ -1313,6 +1313,8 @@ API 内部关键边界：
 - 管理员不能手工新增员工，只能配置部门、角色和角色范围；
 - 昵称和头像属于平台个人资料，可以由员工维护。
 
+单服务器原生发布包默认使用已经在公司内网验证的 LDAP 参数：`china.huawei.com:389`、`dc=china,dc=huawei,dc=com`、`China\`、`sAMAccountName`、`title` 和 `department`，连接方式与现有登录脚本一致，不启用 SSL 或 StartTLS。安装时无需重复填写这些字段；如果目录环境发生变化，仍可在 `.env` 中显式覆盖。
+
 权限层级：
 
 | 角色 | 服务端范围 |
@@ -1494,16 +1496,16 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v0.9.8 已验证基线
+### 12.2 v0.9.9 已验证基线
 
 - Workspace：152 项，151 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web 交付方式规则：3/3；
 - 契约：7/7；
 - Python grader：18/18；
-- LDAP 网关：20/20；
+- LDAP 网关：21/21；
 - 评测资料包：2/2；
 - 离线发布：10/10；
-- Windows 部署门禁：15 项通过；Linux Bash 原生语法项在 Windows 上按平台跳过；
+- 部署门禁：20 项中 19 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并已使用 Git Bash 补充验证脚本语法和 Linux 环境模板解析；
 - 100 人集中提交与有界评测队列：通过；
 - 构建、类型检查和 `git diff --check`：通过。
 
@@ -1568,6 +1570,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 难题审核、待揭榜、揭榜成功、解决方案提交和公开控制；
 - Windows x64/Linux x64 离线发布布局、双平台管理命令和一致性备份恢复；
 - Windows/Linux `Install` / `Uninstall`、随机密钥生成和开机自启注册；
+- 公司内网 LDAP 地址、搜索根、域前缀和用户属性已经固化为双平台发布包默认值；
 - Ubuntu 22.04 x64 原生 GitHub Actions 构建、SHA-256 校验、运行时冒烟和 Release 附件发布；
 - SDD 运维日志脱敏综合训战的真实角色端到端验收，以及版本化 v2 进阶赛题的 24 项隐藏强度用例。
 
@@ -1585,7 +1588,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 ## 16. 后续路线
 
-### 16.1 v0.9.9：目标机验收与极简运维
+### 16.1 v0.9.10：目标机验收与极简运维
 
 目标：运维人员在全新断网服务器上使用离线包和一份配置，在 30 分钟内完成部署，并能长期运行。
 
@@ -1640,6 +1643,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v0.9.6` | 2026-08-10 | 修复首次部署端口、进程回滚、Windows OpenCode、离线依赖和评分 profile 一致性。 |
 | `v0.9.7` | 2026-08-10 | 将平台说明收口为开发、设计、部署三份核心文档，并补齐交付方式禁用规则与前端回归测试。 |
 | `v0.9.8` | 2026-08-10 | 发布 SDD 日志脱敏 v2 进阶赛题，以 24 项评测方隐藏用例强化 HMAC、失败关闭、复杂载荷和流式批处理验收，并稳定 Windows 本地验收端口分配。 |
+| `v0.9.9` | 2026-08-11 | 发布 Windows/Linux 原生一键安装、开机自启、幂等卸载、Ubuntu 22.04 原生发布流水线，并内置已验证的公司内网 LDAP 默认参数。 |
 
 ## 18. 交接检查表
 
@@ -6589,7 +6593,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {
@@ -7664,8 +7668,8 @@ do {
 LDAP_SERVER=china.huawei.com
 LDAP_PORT=389
 LDAP_USE_SSL=false
-LDAP_START_TLS=true
-LDAP_CA_CERT_FILE=/etc/ssl/certs/company-ldap-ca.pem
+LDAP_START_TLS=false
+# LDAP_CA_CERT_FILE=/etc/ssl/certs/company-ldap-ca.pem
 LDAP_BASE_DN=dc=china,dc=huawei,dc=com
 LDAP_BIND_PREFIX=China\
 LDAP_ACCOUNT_ATTRIBUTE=sAMAccountName
@@ -8673,6 +8677,18 @@ class LdapGatewayTests(unittest.TestCase):
     def test_gateway_server_handles_multiple_login_and_verify_requests_concurrently(self):
         self.assertTrue(issubclass(ThreadingWSGIServer, ThreadingMixIn))
         self.assertTrue(ThreadingWSGIServer.daemon_threads)
+
+    def test_company_intranet_ldap_profile_is_the_runtime_default(self):
+        config = LdapConfig.from_env({})
+        self.assertEqual(config.server, "china.huawei.com")
+        self.assertEqual(config.port, 389)
+        self.assertFalse(config.use_ssl)
+        self.assertFalse(config.start_tls)
+        self.assertEqual(config.base_dn, "dc=china,dc=huawei,dc=com")
+        self.assertEqual(config.bind_prefix, "China\\")
+        self.assertEqual(config.account_attribute, "sAMAccountName")
+        self.assertEqual(config.title_attribute, "title")
+        self.assertEqual(config.department_attribute, "department")
 
     def test_http_only_switch_disables_secure_cookie_without_changing_default(self):
         base = {

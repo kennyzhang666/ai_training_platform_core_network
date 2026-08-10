@@ -1,6 +1,6 @@
 {
   "name": "@ai-training/web",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "private": true,
   "scripts": {
     "predev": "node ../../scripts/build-evaluation-engine-kit.mjs",

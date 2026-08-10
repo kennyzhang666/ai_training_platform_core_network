@@ -78,6 +78,18 @@ class LdapGatewayTests(unittest.TestCase):
         self.assertTrue(issubclass(ThreadingWSGIServer, ThreadingMixIn))
         self.assertTrue(ThreadingWSGIServer.daemon_threads)
 
+    def test_company_intranet_ldap_profile_is_the_runtime_default(self):
+        config = LdapConfig.from_env({})
+        self.assertEqual(config.server, "china.huawei.com")
+        self.assertEqual(config.port, 389)
+        self.assertFalse(config.use_ssl)
+        self.assertFalse(config.start_tls)
+        self.assertEqual(config.base_dn, "dc=china,dc=huawei,dc=com")
+        self.assertEqual(config.bind_prefix, "China\\")
+        self.assertEqual(config.account_attribute, "sAMAccountName")
+        self.assertEqual(config.title_attribute, "title")
+        self.assertEqual(config.department_attribute, "department")
+
     def test_http_only_switch_disables_secure_cookie_without_changing_default(self):
         base = {
             "TRUSTED_GATEWAY_HMAC_SECRET": "t" * 32,
