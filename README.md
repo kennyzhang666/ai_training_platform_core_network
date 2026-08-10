@@ -4,7 +4,7 @@
 > 更新日期：2026-08-10
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。当前版本已经完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布的本地闭环；Windows Server x64 与 Linux x64 断网目标机 UAT、系统服务化、自动备份和离线升级仍是下一阶段工作。
+企业内部 AI 训战、交付评测和能力复盘平台。当前版本已经完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布的本地闭环，并提供 Ubuntu 22.04 x64 原生 GitHub 发布流水线；Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、系统服务化、自动备份和离线升级仍是下一阶段工作。
 
 平台级文档只保留三个入口：
 
@@ -170,6 +170,8 @@ pnpm dev:web
 | `scripts/evaluation-worker.mjs` | 拉取式批次 Worker |
 | `scripts/code-agent-local-bridge.mjs` | 仅用于联调的本地 Code Agent 适配器 |
 | `scripts/build-single-node-release.mjs` | Windows/Linux 离线发布包组装器 |
+| `scripts/prepare-linux-release-runtime.sh` | Ubuntu 22.04 x64 固定版本运行时与离线 wheelhouse 准备器 |
+| `.github/workflows/release-linux-ubuntu-22.04.yml` | 从不可变版本标签构建并发布 Linux 离线包 |
 | `deploy/single-node/` | 单服务器运维脚本、配置模板与 Nginx 模板 |
 | `tools/engine-dev-kit/` | 可独立交付给评测引擎开发者的工具包 |
 | `tmp/` | 本地数据、日志和临时工作区，不进入版本库 |
@@ -385,7 +387,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - Python grader：18/18；
 - LDAP 网关：20/20；
 - 评测资料包：2/2；
-- 离线发布：6/6；
+- 离线发布：8/8；
 - Windows 部署门禁：15 项通过；Linux Bash 原生语法项在 Windows 上按平台跳过；
 - 100 人集中提交与有界评测队列：通过；
 - 构建、类型检查和 `git diff --check`：通过。
@@ -450,6 +452,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 全局管理员与部门管理员的组织范围隔离；
 - 难题审核、待揭榜、揭榜成功、解决方案提交和公开控制；
 - Windows x64/Linux x64 离线发布布局、双平台管理命令和一致性备份恢复；
+- Ubuntu 22.04 x64 原生 GitHub Actions 构建、SHA-256 校验、运行时冒烟和 Release 附件发布；
 - SDD 运维日志脱敏综合训战的真实角色端到端验收，以及版本化 v2 进阶赛题的 24 项隐藏强度用例。
 
 ### 15.2 当前限制
@@ -471,7 +474,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 按纵切面推进：
 
-1. Windows Server x64 与 Linux x64 原生发布包 UAT；
+1. Windows Server x64 原生发布包，以及 Ubuntu 22.04.5 断网目标机 UAT；
 2. `Install` / `Uninstall`、随机密钥、目录权限、磁盘、LDAP、数据库和 Agent 自检；
 3. Windows 服务与 Linux systemd，开机自启和异常重启；
 4. 定时备份、校验、轮转和低磁盘预警；

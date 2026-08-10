@@ -158,6 +158,7 @@
         </div>
         <div class="actions">
           <button class="button" type="button" onclick="window.print()">打印 / 导出 PDF</button>
+          <a class="button" href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases/tag/v0.9.8">下载 v0.9.8</a>
           <a class="button primary" href="#quick">直接部署</a>
         </div>
       </div>
@@ -206,7 +207,7 @@
 
       <section id="quick">
         <h2>02 · 一页纸傻瓜部署</h2>
-        <p>下面是目标服务器的最短路径。先由发布人员提供对应平台的发布包和 <code>.sha256</code> 文件，再按操作系统执行。尖括号内容属于企业环境信息，必须替换；其余命令可以照抄。</p>
+        <p>下面是目标服务器的最短路径。Ubuntu 22.04 x64 从 <a href="https://github.com/kennyzhang666/ai_training_platform_core_network/releases/tag/v0.9.8">v0.9.8 Release</a> 下载发布包和同名 <code>.sha256</code>；其他系统由发布人员提供对应平台文件。尖括号内容属于企业环境信息，必须替换；其余命令可以照抄。</p>
 
         <div class="tabs" role="tablist" aria-label="操作系统">
           <button class="tab" role="tab" aria-selected="true" aria-controls="quick-windows" id="tab-windows">Windows Server</button>
@@ -591,8 +592,21 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>v0.9.8 单服务
       </section>
 
       <section id="release">
-        <h2>08 · 发布人员制作离线包</h2>
+        <h2>08 · 制作与发布离线包</h2>
         <p>Windows 包必须在 Windows x64 发布机构建；Linux 包必须在与目标服务器发行版和 glibc 基线兼容的 Linux x64 发布机构建。Prisma 引擎、Python 扩展和 Nginx 不能跨平台复制。</p>
+
+        <h3>GitHub 原生构建 Ubuntu 22.04 x64</h3>
+        <div class="callout success"><strong>推荐：</strong>推送正式版本标签后，<code>release-linux-ubuntu-22.04.yml</code> 在 GitHub 的 Ubuntu 22.04 x64 Runner 中执行原生构建；既有标签可在 Actions 页面手动输入标签补建。</div>
+        <ol>
+          <li>源码只从 <code>vX.Y.Z</code> 不可变标签检出，并核对标签与 <code>package.json</code> 版本；</li>
+          <li>Node.js、Python 和 Nginx 固定版本并逐项校验 SHA-256；</li>
+          <li>在 Linux 原生环境重新安装依赖、生成 Prisma 产物、执行完整测试和发布门禁；</li>
+          <li>解包后再次运行 Node、Python、Nginx 冒烟检查；</li>
+          <li>把 <code>.tar.gz</code> 和 <code>.tar.gz.sha256</code> 同时上传到对应 GitHub Release。</li>
+        </ol>
+        <p>GitHub 构建证明发布包在 Ubuntu 22.04 原生环境可组装和启动运行时，不替代公司内网 Ubuntu 22.04.5 服务器上的 PostgreSQL、LDAP、Code Agent、多人提交和断网验收。</p>
+
+        <h3>手工准备其他平台运行时</h3>
 
         <div class="grid g2">
           <div class="card"><h3>Windows 运行时输入</h3><div class="flow">win32-x64/

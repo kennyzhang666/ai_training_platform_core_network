@@ -1,0 +1,189 @@
+name: Build Ubuntu 22.04 offline release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to package, for example v0.9.8
+        required: true
+        default: v0.9.8
+        type: string
+      publish:
+        description: Create or update the GitHub Release assets
+        required: true
+        default: true
+        type: boolean
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ubuntu-22.04-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Ubuntu 22.04 x64
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Resolve immutable release tag
+        id: release
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || {
+            printf 'Invalid release tag: %s\n' "$REQUESTED_TAG" >&2
+            exit 1
+          }
+          printf 'tag=%s\n' "$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${REQUESTED_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release tooling
+        uses: actions/checkout@v4
+        with:
+          path: tooling
+          sparse-checkout: scripts/prepare-linux-release-runtime.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 0
+          path: source
+
+      - name: Verify tag and package version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(git -C source describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+          package_version=$(node -p "require('./source/package.json').version")
+          test "$package_version" = "$RELEASE_VERSION" || {
+            printf 'Tag %s does not match package version %s\n' "$RELEASE_TAG" "$package_version" >&2
+            exit 1
+          }
+          source_date_epoch=$(git -C source show -s --format=%ct HEAD)
+          printf 'SOURCE_DATE_EPOCH=%s\n' "$source_date_epoch" >> "$GITHUB_ENV"
+          printf 'RUNTIME_ROOT=%s/ai-training-runtime-linux-x64\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'WHEELHOUSE_ROOT=%s/ai-training-wheelhouse-linux-x64\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+
+      - name: Install workspace dependencies
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@11.8.0 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Prepare pinned Linux runtime and wheelhouse
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tooling/scripts/prepare-linux-release-runtime.sh \
+            --runtime-root "$RUNTIME_ROOT" \
+            --wheelhouse "$WHEELHOUSE_ROOT" \
+            --source-root "$GITHUB_WORKSPACE/source"
+          printf '%s\n' "$RUNTIME_ROOT/python/bin" >> "$GITHUB_PATH"
+
+      - name: Run release validation
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm contract:test
+          pnpm grader:test
+          pnpm test
+          pnpm kit:test
+          pnpm ldap3:test
+          pnpm deployment:test
+          pnpm release:test
+          pnpm lint
+
+      - name: Build native Ubuntu package
+        working-directory: source
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          pnpm release:build -- \
+            --target linux-x64 \
+            --runtime-root "$RUNTIME_ROOT" \
+            --wheelhouse "$WHEELHOUSE_ROOT" \
+            --version "$RELEASE_VERSION" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH"
+
+      - name: Verify archive and packaged runtimes
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          archive="$GITHUB_WORKSPACE/source/release/ai-training-platform-${RELEASE_VERSION}-linux-x64.tar.gz"
+          checksum="${archive}.sha256"
+          test -f "$archive"
+          test -f "$checksum"
+          (cd "$(dirname "$archive")" && sha256sum --check "$(basename "$checksum")")
+
+          unpacked="$RUNNER_TEMP/release-smoke"
+          mkdir "$unpacked"
+          tar -xzf "$archive" --directory "$unpacked"
+          "$unpacked/runtime/node/bin/node" --version
+          "$unpacked/runtime/python/bin/python3" -c 'import ldap3, jsonschema, yaml'
+          "$unpacked/runtime/nginx/sbin/nginx" -v
+          test -f "$unpacked/runtime/runtime-provenance.json"
+          test ! -e "$unpacked/deploy/single-node/.env"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-training-platform-${{ steps.release.outputs.version }}-ubuntu-22.04-x64
+          path: |
+            source/release/ai-training-platform-${{ steps.release.outputs.version }}-linux-x64.tar.gz
+            source/release/ai-training-platform-${{ steps.release.outputs.version }}-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release assets
+        if: github.event_name == 'push' || inputs.publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          archive="$GITHUB_WORKSPACE/source/release/ai-training-platform-${RELEASE_VERSION}-linux-x64.tar.gz"
+          checksum="${archive}.sha256"
+          notes="$RUNNER_TEMP/release-notes.md"
+          cat > "$notes" <<EOF
+          Ubuntu 22.04 x64 单服务器离线发布包，源码固定为 ${RELEASE_TAG}。
+
+          下载后请先按同目录 SHA-256 文件校验，再依据包内 DEPLOYMENT.html 部署。
+          该构建已在 GitHub Ubuntu 22.04 原生环境完成完整自动化检查；目标内网服务器仍需执行上线验收。
+          EOF
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$archive" "$checksum" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$archive" "$checksum" \
+              --verify-tag \
+              --title "$RELEASE_TAG" \
+              --notes-file "$notes"
+          fi

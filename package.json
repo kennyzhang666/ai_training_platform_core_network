@@ -15,7 +15,7 @@
     "kit:test": "node --test scripts/evaluation-engine-kit.test.mjs",
     "ldap3:test": "python services/ldap3-gateway/test_ldap3_gateway.py",
     "deployment:test": "node --test scripts/single-node-deployment.test.mjs scripts/code-agent-executable.test.mjs",
-    "release:test": "node --test scripts/single-node-release.test.mjs",
+    "release:test": "node --test scripts/single-node-release.test.mjs scripts/github-linux-release.test.mjs",
     "release:build": "node scripts/build-single-node-release.mjs",
     "contract:test": "pnpm --filter @ai-training/platform-api contract:test",
     "grader:test": "node scripts/run-grader-tests.mjs",
