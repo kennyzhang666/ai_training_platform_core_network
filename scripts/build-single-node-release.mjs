@@ -107,7 +107,14 @@ async function requireDirectory(path, label) {
 async function copyDirectory(source, destination, label, filter = undefined) {
   await requireDirectory(source, label);
   await mkdir(dirname(destination), { recursive: true });
-  await cp(source, destination, { recursive: true, force: false, errorOnExist: true, dereference: false, ...(filter ? { filter } : {}) });
+  await cp(source, destination, {
+    recursive: true,
+    force: false,
+    errorOnExist: true,
+    dereference: false,
+    verbatimSymlinks: true,
+    ...(filter ? { filter } : {}),
+  });
 }
 
 async function copyFile(source, destination, label) {

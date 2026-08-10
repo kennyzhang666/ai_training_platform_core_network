@@ -38,5 +38,7 @@ test('Linux runtime preparation is pinned, checksummed and restricted to Ubuntu 
   assert.doesNotMatch(script, /curl[^\n]*\|\s*(?:ba)?sh/);
   assert.match(script, /grader\/requirements\.txt/);
   assert.match(script, /services\/ldap3-gateway\/requirements\.txt/);
+  assert.match(script, /is_symlink\(\)/);
+  assert.match(script, /relative_to\(root\)/);
   assert.match(script, /runtime-provenance\.json/);
 });

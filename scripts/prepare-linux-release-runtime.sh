@@ -160,6 +160,37 @@ done
   --requirement "$source_root/grader/requirements.txt" \
   --requirement "$source_root/services/ldap3-gateway/requirements.txt"
 
+materialized_symlinks=$("$runtime_python" - "$runtime_root" <<'PY'
+import os
+import pathlib
+import shutil
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve()
+links = []
+for directory, directories, files in os.walk(root, followlinks=False):
+    base = pathlib.Path(directory)
+    for name in [*directories, *files]:
+        path = base / name
+        if path.is_symlink():
+            links.append(path)
+
+for path in sorted(links, key=lambda item: len(item.parts), reverse=True):
+    target = path.resolve(strict=True)
+    try:
+        target.relative_to(root)
+    except ValueError as error:
+        raise SystemExit(f'runtime symlink escapes the runtime root: {path}') from error
+    if not target.is_file():
+        raise SystemExit(f'runtime directory symlinks are not supported: {path}')
+    path.unlink()
+    shutil.copy2(target, path)
+
+print(len(links))
+PY
+)
+[[ "$materialized_symlinks" =~ ^[0-9]+$ ]] || fail 'runtime symlink materialization did not return a count'
+
 find "$wheelhouse_root" -maxdepth 1 -type f -name '*.whl' -print -quit | grep -q . \
   || fail 'offline wheelhouse contains no wheel files'
 "$runtime_node" -e 'const [major] = process.versions.node.split(".").map(Number); if (major < 20 || process.platform !== "linux" || process.arch !== "x64") process.exit(1)'
@@ -205,13 +236,14 @@ nginx_runtime_version=$($runtime_nginx -v 2>&1 | sed 's|^nginx version: nginx/||
   "$node_runtime_version" \
   "$python_runtime_version" \
   "$nginx_runtime_version" \
+  "$materialized_symlinks" \
   "$requirements_json" <<PY
 import datetime
 import json
 import pathlib
 import sys
 
-output, epoch, build_os, glibc, node, python, nginx, requirements_path = sys.argv[1:]
+output, epoch, build_os, glibc, node, python, nginx, materialized_symlinks, requirements_path = sys.argv[1:]
 created_at = datetime.datetime.fromtimestamp(int(epoch), datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
 requirements = json.loads(pathlib.Path(requirements_path).read_text(encoding='utf-8'))
 payload = {
@@ -221,6 +253,7 @@ payload = {
     'buildOs': build_os,
     'glibc': glibc,
     'createdAt': created_at,
+    'materializedSymlinks': int(materialized_symlinks),
     'components': {
         'node': {'version': node, 'sourceSha256': '$NODE_SHA256'},
         'python': {'version': python, 'build': '$PYTHON_BUILD', 'sourceSha256': '$PYTHON_SHA256'},

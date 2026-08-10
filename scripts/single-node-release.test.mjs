@@ -108,6 +108,7 @@ test('release builder creates a portable production dependency tree with pnpm 11
   const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), 'build-single-node-release.mjs'), 'utf8');
   assert.match(source, /'--config\.node-linker=hoisted', 'deploy', '--prod', '--legacy', apiDeployRoot/);
   assert.match(source, /import ldap3, jsonschema, yaml/);
+  assert.match(source, /verbatimSymlinks: true/);
 });
 
 test('release CLI accepts pnpm arguments with or without a separator', () => {
