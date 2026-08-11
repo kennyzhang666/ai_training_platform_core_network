@@ -357,20 +357,23 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
     await client.appUser.deleteMany({ where: { OR: [{ id: userId }, { employeeNo: bootstrapEmployeeNo }, { employeeNo }, { employeeNo: raceEmployeeNo }, { employeeNo: genericLabelEmployeeNo }, { employeeNo: { in: capacityEmployeeNos } }] } });
     await client.roleBinding.deleteMany({ where: { userId: adminId } });
     await client.appUser.deleteMany({ where: { id: adminId } });
-    // Snapshot persistence can materialize additional users that belong to
-    // this isolated test organization. Discover those rows from the database
-    // instead of assuming the fixture employee-number list is exhaustive.
-    const remainingOrgUserIds = (await client.appUser.findMany({
-      where: { orgUnitId: orgId },
-      select: { id: true },
-    })).map((user) => user.id);
-    if (remainingOrgUserIds.length) {
-      await client.roleBinding.deleteMany({ where: { userId: { in: remainingOrgUserIds } } });
-      await client.appUser.deleteMany({ where: { id: { in: remainingOrgUserIds } } });
-    }
     await client.orgUnit.deleteMany({ where: { id: { in: [casOrgA, casOrgB] } } });
     await client.orgUnit.deleteMany({ where: { id: { in: [duplicateRootId, raceRootA, raceRootB] } } });
-    await client.orgUnit.deleteMany({ where: { id: orgId } });
+    await client.$transaction(async (cleanup) => {
+      // Lock the organization before discovering its remaining users. This
+      // prevents a concurrent SSO/snapshot transaction from adding a fresh
+      // foreign-key reference between user cleanup and organization removal.
+      await cleanup.$queryRaw`SELECT "id" FROM "OrgUnit" WHERE "id" = ${orgId} FOR UPDATE`;
+      const remainingOrgUserIds = (await cleanup.appUser.findMany({
+        where: { orgUnitId: orgId },
+        select: { id: true },
+      })).map((user) => user.id);
+      if (remainingOrgUserIds.length) {
+        await cleanup.roleBinding.deleteMany({ where: { userId: { in: remainingOrgUserIds } } });
+        await cleanup.appUser.deleteMany({ where: { id: { in: remainingOrgUserIds } } });
+      }
+      await cleanup.orgUnit.deleteMany({ where: { id: orgId } });
+    });
     await readService?.onModuleDestroy();
     await repository.close();
     await client.$disconnect();
