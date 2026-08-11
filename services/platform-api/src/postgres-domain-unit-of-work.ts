@@ -1,7 +1,7 @@
 import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PlatformStore } from './store';
-import { claimSnapshotRevision, loadNormalizedState, synchronizeNormalized } from './postgres-platform-store';
+import { claimSnapshotRevision, loadNormalizedState, SnapshotRevisionConflictError, synchronizeNormalized } from './postgres-platform-store';
 
 const SNAPSHOT_ID = 'singleton';
 
@@ -12,6 +12,39 @@ function repositoryMode(): string {
 function snapshotState(value: Prisma.JsonValue | null | undefined): Partial<import('./store').PlatformStateSnapshot> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   return value as Partial<import('./store').PlatformStateSnapshot>;
+}
+
+export function postgresTransactionTimeoutMs(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.PERSIST_TRANSACTION_TIMEOUT_MS?.trim();
+  if (!raw) return 120_000;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1_000 || value > 600_000) {
+    throw new Error('PERSIST_TRANSACTION_TIMEOUT_MS must be an integer between 1000 and 600000');
+  }
+  return value;
+}
+
+function retryablePostgresWriteConflict(error: unknown): boolean {
+  if (error instanceof SnapshotRevisionConflictError) return true;
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034';
+}
+
+export async function runWithPostgresConflictRetry<T>(
+  operation: () => Promise<T>,
+  options: { maxAttempts?: number; baseDelayMs?: number } = {},
+): Promise<T> {
+  const maxAttempts = Math.max(1, Math.min(10, options.maxAttempts ?? 6));
+  const baseDelayMs = Math.max(0, Math.min(1_000, options.baseDelayMs ?? 10));
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!retryablePostgresWriteConflict(error) || attempt === maxAttempts) throw error;
+      const delayMs = Math.min(250, baseDelayMs * (2 ** (attempt - 1)));
+      if (delayMs) await new Promise<void>((resolve) => setTimeout(resolve, delayMs + Math.floor(Math.random() * Math.min(15, delayMs))));
+    }
+  }
+  throw new Error('unreachable');
 }
 
 /**
@@ -80,7 +113,7 @@ export class PostgresDomainUnitOfWork implements OnModuleDestroy {
     if (!this.client) return operation(this.cache);
 
     return this.writes.run(async () => {
-      const committed = await this.client!.$transaction(async (db) => {
+      const committed = await runWithPostgresConflictRetry(() => this.client!.$transaction(async (db) => {
         const snapshot = await db.platformSnapshot.findUnique({ where: { id: SNAPSHOT_ID } });
         const working = await this.workingStore(db);
 
@@ -89,7 +122,7 @@ export class PostgresDomainUnitOfWork implements OnModuleDestroy {
         const state = working.exportState();
         await synchronizeNormalized(db, state, revision);
         return { result, state };
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: Number(process.env.PERSIST_TRANSACTION_TIMEOUT_MS ?? 120_000) });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: postgresTransactionTimeoutMs() }));
 
       // Keep this process's authorization and compatibility read cache aligned
       // with the committed canonical state. No persistence write is queued;
@@ -103,7 +136,7 @@ export class PostgresDomainUnitOfWork implements OnModuleDestroy {
   /** Read the latest canonical graph without touching the process cache. */
   async read<T>(operation: (store: PlatformStore) => T | Promise<T>): Promise<T> {
     if (!this.client) return operation(this.cache);
-    return this.client.$transaction(async (db) => operation(await this.workingStore(db)), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: Number(process.env.PERSIST_TRANSACTION_TIMEOUT_MS ?? 120_000) });
+    return this.client.$transaction(async (db) => operation(await this.workingStore(db)), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: postgresTransactionTimeoutMs() });
   }
 
   async onModuleDestroy(): Promise<void> {

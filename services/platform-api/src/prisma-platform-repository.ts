@@ -18,7 +18,7 @@ import {
   UserRepository,
 } from './repository';
 import { PrismaChallengeRepository, PrismaEventRepository, PrismaSubmissionRepository } from './prisma-domain-repository';
-import { SerialExecutionQueue } from './postgres-domain-unit-of-work';
+import { postgresTransactionTimeoutMs, runWithPostgresConflictRetry, SerialExecutionQueue } from './postgres-domain-unit-of-work';
 
 type PrismaExecutor = PrismaClient | Prisma.TransactionClient;
 type UserRow = Prisma.AppUserGetPayload<{ include: { roleBindings: true } }>;
@@ -635,7 +635,7 @@ export class PrismaPlatformRepository implements PlatformRepository {
   }
 
   async transaction<T>(work: (transaction: RepositoryTransaction) => Promise<T>): Promise<T> {
-    return this.writes.run(() => this.client.$transaction(async (client) => {
+    return this.writes.run(() => runWithPostgresConflictRetry(() => this.client.$transaction(async (client) => {
       const result = await work({
         organizations: new PrismaOrganizationRepository(client),
         users: new PrismaUserRepository(client),
@@ -646,7 +646,7 @@ export class PrismaPlatformRepository implements PlatformRepository {
       });
       await bumpPlatformRevision(client);
       return result;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }));
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: postgresTransactionTimeoutMs() })));
   }
 
   async close(): Promise<void> {

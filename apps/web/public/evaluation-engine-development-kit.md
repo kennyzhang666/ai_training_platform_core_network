@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：1.0.2。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：1.0.4。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -285,7 +285,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台设计文档
 
-> 设计基线：`v1.0.2`
+> 设计基线：`v1.0.4`
 > 更新日期：2026-08-11
 > 文档职责：产品、业务、权限、评测、报告、能力画像、页面、交互、视觉与文案的唯一标准
 
@@ -325,7 +325,7 @@ AI 能力训战平台是企业内部专业训战工具，把“AI 用得好不�
 ### 1.2 当前产品决策
 
 - 核心平台部署在内网；
-- 优先跑通 10–100 人的真实训战闭环；
+- 优先跑通员工总量少于 100、同时使用约 20 人的真实训战闭环；
 - 评测引擎由每个赛题版本单独配置；
 - 当前主流程是平台发起批次，独立 Worker 拉取交付件与引擎，调用 Code Agent 逐份评分并回传；
 - 管理员也可以线下评测后导入同一输出契约；
@@ -1069,7 +1069,7 @@ AI 能力画像
 
 ### 16.1 容量
 
-当前单服务器设计目标为单场 50–100 人集中提交，一个 API 实例，评测并发由 Worker 和 Code Agent 能力限制。提交接收、队列和状态查询应保持稳定；实际评分时长由赛题引擎决定。
+当前单服务器设计目标为员工总量少于 100、同时使用平台约 20 人，一个 API 实例。提交按最多 20 人的活跃波次稳定接收，评测批次由单 Worker 默认顺序处理；实际评分时长由赛题引擎和 Code Agent 决定。平台仍保留 100 人完整名册、历史报告和画像数据，不把“总人数”误当成“同时并发数”。
 
 ### 16.2 数据可信
 
@@ -1113,11 +1113,11 @@ AI 能力画像
 
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v1.0.2`
+> 当前发布版本：`v1.0.4`
 > 更新日期：2026-08-11
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.2` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并提供双平台一键安装入口与 Ubuntu 22.04 x64 原生 GitHub 发布流水线。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；内网 Linux 数据库兼容基线固定为 PostgreSQL 14，并在安装迁移前执行版本自检。Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
+企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.4` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并按“员工总量少于 100、同时使用约 20 人”完成身份同步、PostgreSQL 写入冲突和评测队列显示收口。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；内网 Linux 数据库兼容基线固定为 PostgreSQL 14，并在安装迁移前执行版本自检。Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
 
 平台级文档只保留三个入口：
 
@@ -1482,7 +1482,7 @@ git diff --check
 | 领域单元测试 | 状态机、权限、幂等、分页、哈希和校验规则 |
 | PostgreSQL 集成测试 | 迁移、事务、唯一性、租约 CAS、备份恢复和并发 |
 | Worker 端到端 | 批次领取、物化、Agent 启动、结果回传和部分失败 |
-| 本地验收 | 100 人集中提交、有界队列与完整业务闭环 |
+| 本地验收 | 100 人名册、20 人并发访问与分批提交、有界队列和完整业务闭环 |
 | 部署/发布测试 | Windows/Linux 脚本、运行时门禁、可复现归档和清单 |
 | 浏览器验收 | 全局管理员、部门管理员、导师和学员关键路径 |
 
@@ -1496,9 +1496,9 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v1.0.2 已验证基线
+### 12.2 v1.0.4 已验证基线
 
-- Workspace：154 项，153 通过，1 项 PostgreSQL 集成按显式配置跳过；
+- Workspace：158 项，157 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web 交付方式规则：3/3；
 - 契约：7/7；
 - Python grader：18/18；
@@ -1508,7 +1508,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 部署门禁：31 项中 30 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并由 Ubuntu 22.04 发布流水线执行；
 - PostgreSQL 14：Ubuntu 22.04 发布流水线使用真实 PostgreSQL 14 运行版本检查、全部迁移和集成测试；
 - 依赖审计：生产依赖 0 个已知漏洞；
-- 100 人集中提交与有界评测队列：通过；
+- 100 人名册、20 人并发身份访问、20 人一组混合身份/提交写入与有界评测队列：通过；
 - 构建、类型检查和 `git diff --check`：通过。
 
 这些是本地与自动化证据，不替代 Windows Server、Linux Server、真实 PostgreSQL、真实 LDAP 和真实 Code Agent 的断网 UAT。
@@ -1591,7 +1591,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 ## 16. 后续路线
 
-### 16.1 v1.0.3：目标机验收与极简运维
+### 16.1 v1.1.0：目标机验收与极简运维
 
 目标：运维人员在全新断网服务器上使用离线包和一份配置，在 30 分钟内完成部署，并能长期运行。
 
@@ -1603,7 +1603,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 4. 定时备份、校验、轮转和低磁盘预警；
 5. 离线 `Upgrade`、升级前恢复点与失败回退；
 6. 脱敏诊断包和日志轮转；
-7. 50–100 人真实提交、Code Agent 评测、备份恢复与故障演练。
+7. 100 人真实名册、20 人同时访问和分批提交、Code Agent 评测、备份恢复与故障演练。
 
 保持单服务器边界：同机 PostgreSQL、本地交付件、一个 API、独立 Worker；不引入 Docker、Kubernetes、Redis、Kafka、MinIO 或额外配置中心。
 
@@ -1644,6 +1644,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v1.0.0` | 2026-08-11 | 完成全仓审查，修复 Windows 发布构建、Worker 安全解压、续租、清理和日志脱敏问题，清零生产依赖已知漏洞，并将公司 `codeagent` 与赛题级自动 Prompt 设为默认。 |
 | `v1.0.1` | 2026-08-11 | 将公司内网 Code Agent 默认命令修正为 `codeagent -p "{{prompt}}"`，启用非交互模式并沿用默认 bypass，同步双平台部署模板、后台配置说明和评测引擎开发包。 |
 | `v1.0.2` | 2026-08-11 | 将 PostgreSQL 14 固定为内网 Linux 数据库兼容基线，安装迁移前执行版本自检，并在 Ubuntu 发布流水线使用真实 PostgreSQL 14 跑迁移与集成测试。 |
+| `v1.0.4` | 2026-08-11 | 按少于 100 名员工、约 20 人同时使用重新审查：避免每个页面请求重复写入 SSO 身份，重试 PostgreSQL 可恢复写冲突，并纠正独立 Worker 租约上限与实际并发的显示。 |
 
 ## 18. 交接检查表
 
@@ -3792,12 +3793,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [queued, running, maxConcurrency, scheduled]
+                required: [queued, running, maxConcurrency, scheduled, embedded]
                 properties:
                   queued: { type: integer, minimum: 0 }
                   running: { type: integer, minimum: 0 }
-                  maxConcurrency: { type: integer, minimum: 1 }
+                  maxConcurrency: { type: integer, minimum: 1, description: 内嵌本地评测的并发数；独立 Worker 模式固定返回单 Worker 并发 1，界面不将租约领取上限误作并发数。 }
                   scheduled: { type: integer, minimum: 0 }
+                  embedded: { type: boolean, description: 是否使用仅限开发环境的内嵌评测队列。 }
   /api/v1/admin/code-agent-runtime:
     get:
       operationId: getCodeAgentRuntime
@@ -6593,7 +6595,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {

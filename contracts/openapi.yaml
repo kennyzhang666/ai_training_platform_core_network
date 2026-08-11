@@ -390,12 +390,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [queued, running, maxConcurrency, scheduled]
+                required: [queued, running, maxConcurrency, scheduled, embedded]
                 properties:
                   queued: { type: integer, minimum: 0 }
                   running: { type: integer, minimum: 0 }
-                  maxConcurrency: { type: integer, minimum: 1 }
+                  maxConcurrency: { type: integer, minimum: 1, description: 内嵌本地评测的并发数；独立 Worker 模式固定返回单 Worker 并发 1，界面不将租约领取上限误作并发数。 }
                   scheduled: { type: integer, minimum: 0 }
+                  embedded: { type: boolean, description: 是否使用仅限开发环境的内嵌评测队列。 }
   /api/v1/admin/code-agent-runtime:
     get:
       operationId: getCodeAgentRuntime

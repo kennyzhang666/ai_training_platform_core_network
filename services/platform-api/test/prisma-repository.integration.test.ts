@@ -9,7 +9,7 @@ import { createPlatformStore } from '../src/postgres-platform-store';
 import { PrismaUploadSessionPersistence } from '../src/prisma-upload-session-persistence';
 import { PlatformReadService } from '../src/platform-read-service';
 import { PostgresDomainUnitOfWork } from '../src/postgres-domain-unit-of-work';
-import { Challenge, EventConfig, EvaluationBatch, GradingRun, SubmissionRecord } from '../src/domain';
+import { AppUser, Challenge, EventConfig, EvaluationBatch, GradingRun, SubmissionRecord } from '../src/domain';
 
 const enabled = process.env.POSTGRES_INTEGRATION === 'true';
 const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -207,23 +207,41 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
     assert.match(String(rejectedRoot.reason?.message ?? rejectedRoot.reason), /duplicate sibling name|already exists/i);
 
     await client.appUser.create({ data: { id: adminId, employeeNo: adminId, name: 'Integration Admin', roles: ['admin'], roleBindings: { create: [{ role: 'admin', scopeOrgPath: '/' }] } } });
-    const capacityIdentities = await Promise.all(capacityEmployeeNos.map((capacityEmployeeNo, index) => repository.users.syncSsoIdentity({
-      employeeNo: capacityEmployeeNo,
-      name: `Capacity Learner ${index + 1}`,
-      department: result.org.path,
-    })));
+    const capacityIdentities = [] as Array<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }>;
+    for (let offset = 0; offset < capacityEmployeeNos.length; offset += 20) {
+      capacityIdentities.push(...await Promise.all(capacityEmployeeNos.slice(offset, offset + 20).map((capacityEmployeeNo, waveIndex) => repository.users.syncSsoIdentity({
+        employeeNo: capacityEmployeeNo,
+        name: `Capacity Learner ${offset + waveIndex + 1}`,
+        department: result.org.path,
+      }))));
+    }
     process.env.PLATFORM_REPOSITORY = 'postgres';
     process.env.PLATFORM_DEPLOYMENT_PROFILE = 'single-node';
     const normalizedStore = await createPlatformStore();
     capacityUnitOfWork = new PostgresDomainUnitOfWork(normalizedStore);
     const capacityStartedAt = Date.now();
-    const capacitySubmissions = await Promise.all(capacityIdentities.map((identity, index) => capacityUnitOfWork!.run((store) => store.createSubmission(eventId, identity.user.id, {
-      sourceType: 'UPLOAD',
-      snapshotHash: (index + 1).toString(16).padStart(64, '0'),
-      artifactHash: (index + 101).toString(16).padStart(64, '0'),
-      artifactUri: `local://capacity-${suffix}-${index + 1}`,
-      submittedAt: new Date().toISOString(),
-    }))));
+    const capacitySubmissions = [] as SubmissionRecord[];
+    for (let offset = 0; offset < capacityIdentities.length; offset += 20) {
+      const activeWave = capacityIdentities.slice(offset, offset + 20);
+      const [submissions] = await Promise.all([
+        Promise.all(activeWave.map((identity, waveIndex) => {
+          const index = offset + waveIndex;
+          return capacityUnitOfWork!.run((store) => store.createSubmission(eventId, identity.user.id, {
+            sourceType: 'UPLOAD',
+            snapshotHash: (index + 1).toString(16).padStart(64, '0'),
+            artifactHash: (index + 101).toString(16).padStart(64, '0'),
+            artifactUri: `local://capacity-${suffix}-${index + 1}`,
+            submittedAt: new Date().toISOString(),
+          }));
+        })),
+        Promise.all(activeWave.map((identity, waveIndex) => repository.users.syncSsoIdentity({
+          employeeNo: identity.user.employeeNo,
+          name: `Capacity Learner ${offset + waveIndex + 1}`,
+          department: result.org.path,
+        }))),
+      ]);
+      capacitySubmissions.push(...submissions);
+    }
     capacitySubmissionIds = capacitySubmissions.map((submission) => submission.id);
     assert.equal(new Set(capacitySubmissionIds).size, 100);
     assert.ok(Date.now() - capacityStartedAt < 120_000, 'one hundred PostgreSQL submissions must commit within two minutes');

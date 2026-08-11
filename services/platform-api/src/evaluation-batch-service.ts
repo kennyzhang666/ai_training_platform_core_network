@@ -6,8 +6,26 @@ import { ExecutorRegistry } from './executor-registry';
 import { PlatformStore } from './store';
 import { PostgresDomainUnitOfWork } from './postgres-domain-unit-of-work';
 
-const LEASE_SECONDS = Number(process.env.EVALUATION_BATCH_LEASE_SECONDS ?? process.env.EVALUATION_LEASE_SECONDS ?? 1800);
-const MAX_LEASE_BATCHES = Number(process.env.EVALUATION_BATCH_LEASE_MAX ?? 5);
+function boundedSetting(env: Record<string, string | undefined>, name: string, fallback: number, minimum: number, maximum: number, aliases: string[] = []): number {
+  const source = [name, ...aliases].find((key) => env[key]?.trim());
+  if (!source) return fallback;
+  const value = Number(env[source]);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${source} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return value;
+}
+
+export function evaluationBatchLeaseSeconds(env: Record<string, string | undefined> = process.env): number {
+  return boundedSetting(env, 'EVALUATION_BATCH_LEASE_SECONDS', 1800, 60, 21_600, ['EVALUATION_LEASE_SECONDS']);
+}
+
+export function evaluationBatchLeaseLimit(env: Record<string, string | undefined> = process.env): number {
+  return boundedSetting(env, 'EVALUATION_BATCH_LEASE_MAX', 5, 1, 100);
+}
+
+const LEASE_SECONDS = evaluationBatchLeaseSeconds();
+const MAX_LEASE_BATCHES = evaluationBatchLeaseLimit();
 
 type BatchResultInput = { runId: string; result: Record<string, unknown> };
 type BatchFailureInput = { runId: string; reason: string };

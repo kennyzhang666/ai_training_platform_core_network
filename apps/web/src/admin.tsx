@@ -123,7 +123,7 @@ type Overview = {
   eventStats: Array<{ eventId: string; challengeVersion: string; status: string; submissionCount: number; pendingCount: number }>;
   recentAudits: Audit[];
 };
-type QueueStats = { queued: number; running: number; maxConcurrency: number; scheduled: number };
+type QueueStats = { queued: number; running: number; maxConcurrency: number; scheduled: number; embedded: boolean };
 type CodeAgentRuntimeConfig = {
   schemaVersion: '1.0';
   enabled: boolean;
@@ -1854,7 +1854,7 @@ function RuntimeEnvironmentGuide({ diagnostics, onOpenEngineGuide }: { diagnosti
     { name: 'EVALUATION_LEASE_SECONDS', value: '900', description: '单个评测任务租约时长。' },
     { name: 'EVALUATION_LEASE_MAX_BATCH', value: '20', description: 'Worker 一次领取的评测任务上限。' },
     { name: 'EVALUATION_BATCH_LEASE_SECONDS', value: '1800', description: '评测批次租约时长；未设置时回退到 EVALUATION_LEASE_SECONDS。' },
-    { name: 'EVALUATION_BATCH_LEASE_MAX', value: '5', description: '一次领取的评测批次数上限，也影响管理端队列并发展示。' },
+    { name: 'EVALUATION_BATCH_LEASE_MAX', value: '5', description: 'API 允许一次领取的评测批次数上限；单服务器 Worker 默认每次领取并顺序处理 1 个批次。' },
   ];
   const engineVariables: RuntimeEnvironmentRow[] = [
     { name: 'ENGINE_PACKAGE_ROOT', value: 'tmp/engine-packages', description: '已发布评测引擎包的本地目录；生产环境应使用受控、不可变的包存储。' },
@@ -2040,7 +2040,7 @@ function GradingSection({ submissions, events, challenges, users, queue, selecte
     </>;
   };
   return <section className="admin-section">
-    <div className="admin-section-heading"><div><p className="kicker">评测中心</p><h2>评测中心</h2></div><div className="grading-queue-summary"><span className="status-pill">{submissions.filter((row) => !row.resultId).length} 条待处理</span>{queue && <small>评测队列：进行中 {queue.running}/{queue.maxConcurrency} · 等待 {queue.queued}</small>}</div></div>
+    <div className="admin-section-heading"><div><p className="kicker">评测中心</p><h2>评测中心</h2></div><div className="grading-queue-summary"><span className="status-pill">{submissions.filter((row) => !row.resultId).length} 条待处理</span>{queue && <small>{queue.embedded ? `本地评测：进行中 ${queue.running}/${queue.maxConcurrency} · 等待 ${queue.queued}` : `评测批次：执行中 ${queue.running} · 等待 ${queue.queued}`}</small>}</div></div>
     <div className="admin-grading-grid">
       <section className="panel admin-card grading-selection-card">{selectedGroup ? renderEventDetail(selectedGroup) : <><div className="admin-card-heading"><div><p className="kicker">训战列表</p><h3>选择赛题</h3></div></div><div className="grading-event-catalog">{groups.map(({ event, rows }) => { const pending = rows.filter((row) => !row.resultId).length; const completed = rows.length - pending; return <button type="button" className="grading-event-card" key={event.id} onClick={() => { setSelectedEventId(event.id); setExpandedSubmissionId(''); }}><span className="grading-event-card-main"><strong>{versionTitle(event.challengeVersion, challenges)}</strong><small>{eventScheduleLabel(event)}</small></span><span className="grading-event-card-meta"><b>{eventDisplayLabel(event, now)}</b><span>{rows.length} 份提交</span><span>{completed} 已完成 · {pending} 待处理</span></span><span className="grading-event-card-arrow">打开 →</span></button>; })}{!groups.length && <div className="empty">暂无可评测训战</div>}</div></>}</section>
     </div>

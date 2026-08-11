@@ -1,10 +1,10 @@
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v1.0.2`
+> 当前发布版本：`v1.0.4`
 > 更新日期：2026-08-11
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.2` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并提供双平台一键安装入口与 Ubuntu 22.04 x64 原生 GitHub 发布流水线。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；内网 Linux 数据库兼容基线固定为 PostgreSQL 14，并在安装迁移前执行版本自检。Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
+企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.4` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并按“员工总量少于 100、同时使用约 20 人”完成身份同步、PostgreSQL 写入冲突和评测队列显示收口。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；内网 Linux 数据库兼容基线固定为 PostgreSQL 14，并在安装迁移前执行版本自检。Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
 
 平台级文档只保留三个入口：
 
@@ -369,7 +369,7 @@ git diff --check
 | 领域单元测试 | 状态机、权限、幂等、分页、哈希和校验规则 |
 | PostgreSQL 集成测试 | 迁移、事务、唯一性、租约 CAS、备份恢复和并发 |
 | Worker 端到端 | 批次领取、物化、Agent 启动、结果回传和部分失败 |
-| 本地验收 | 100 人集中提交、有界队列与完整业务闭环 |
+| 本地验收 | 100 人名册、20 人并发访问与分批提交、有界队列和完整业务闭环 |
 | 部署/发布测试 | Windows/Linux 脚本、运行时门禁、可复现归档和清单 |
 | 浏览器验收 | 全局管理员、部门管理员、导师和学员关键路径 |
 
@@ -383,9 +383,9 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v1.0.2 已验证基线
+### 12.2 v1.0.4 已验证基线
 
-- Workspace：154 项，153 通过，1 项 PostgreSQL 集成按显式配置跳过；
+- Workspace：158 项，157 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web 交付方式规则：3/3；
 - 契约：7/7；
 - Python grader：18/18；
@@ -395,7 +395,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 部署门禁：31 项中 30 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并由 Ubuntu 22.04 发布流水线执行；
 - PostgreSQL 14：Ubuntu 22.04 发布流水线使用真实 PostgreSQL 14 运行版本检查、全部迁移和集成测试；
 - 依赖审计：生产依赖 0 个已知漏洞；
-- 100 人集中提交与有界评测队列：通过；
+- 100 人名册、20 人并发身份访问、20 人一组混合身份/提交写入与有界评测队列：通过；
 - 构建、类型检查和 `git diff --check`：通过。
 
 这些是本地与自动化证据，不替代 Windows Server、Linux Server、真实 PostgreSQL、真实 LDAP 和真实 Code Agent 的断网 UAT。
@@ -478,7 +478,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 ## 16. 后续路线
 
-### 16.1 v1.0.3：目标机验收与极简运维
+### 16.1 v1.1.0：目标机验收与极简运维
 
 目标：运维人员在全新断网服务器上使用离线包和一份配置，在 30 分钟内完成部署，并能长期运行。
 
@@ -490,7 +490,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 4. 定时备份、校验、轮转和低磁盘预警；
 5. 离线 `Upgrade`、升级前恢复点与失败回退；
 6. 脱敏诊断包和日志轮转；
-7. 50–100 人真实提交、Code Agent 评测、备份恢复与故障演练。
+7. 100 人真实名册、20 人同时访问和分批提交、Code Agent 评测、备份恢复与故障演练。
 
 保持单服务器边界：同机 PostgreSQL、本地交付件、一个 API、独立 Worker；不引入 Docker、Kubernetes、Redis、Kafka、MinIO 或额外配置中心。
 
@@ -531,6 +531,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v1.0.0` | 2026-08-11 | 完成全仓审查，修复 Windows 发布构建、Worker 安全解压、续租、清理和日志脱敏问题，清零生产依赖已知漏洞，并将公司 `codeagent` 与赛题级自动 Prompt 设为默认。 |
 | `v1.0.1` | 2026-08-11 | 将公司内网 Code Agent 默认命令修正为 `codeagent -p "{{prompt}}"`，启用非交互模式并沿用默认 bypass，同步双平台部署模板、后台配置说明和评测引擎开发包。 |
 | `v1.0.2` | 2026-08-11 | 将 PostgreSQL 14 固定为内网 Linux 数据库兼容基线，安装迁移前执行版本自检，并在 Ubuntu 发布流水线使用真实 PostgreSQL 14 跑迁移与集成测试。 |
+| `v1.0.4` | 2026-08-11 | 按少于 100 名员工、约 20 人同时使用重新审查：避免每个页面请求重复写入 SSO 身份，重试 PostgreSQL 可恢复写冲突，并纠正独立 Worker 租约上限与实际并发的显示。 |
 
 ## 18. 交接检查表
 

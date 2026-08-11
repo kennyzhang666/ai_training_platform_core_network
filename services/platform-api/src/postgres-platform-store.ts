@@ -11,6 +11,14 @@ const SNAPSHOT_ID = 'singleton';
 const SNAPSHOT_VERSION = 1;
 const RUNTIME_SETTING_KEY = 'code-agent-runtime';
 
+/** A compare-and-set collision is safe to retry because the surrounding
+ * transaction has rolled back and the next attempt reloads canonical state. */
+export class SnapshotRevisionConflictError extends ConflictException {
+  constructor() {
+    super({ code: 'PLATFORM_REVISION_CONFLICT', message: '平台数据刚刚发生变化，正在重试当前操作' });
+  }
+}
+
 function repositoryMode(): string {
   return (process.env.PLATFORM_REPOSITORY ?? 'file').trim().toLowerCase();
 }
@@ -358,7 +366,7 @@ export async function claimSnapshotRevision(db: Prisma.TransactionClient, expect
     data: { revision: { increment: 1 } },
   });
   if (changed.count !== 1) {
-    throw new ConflictException('platform state changed on another API instance; retry the request');
+    throw new SnapshotRevisionConflictError();
   }
   return expectedRevision + 1;
 }

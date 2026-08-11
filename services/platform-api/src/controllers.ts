@@ -546,9 +546,12 @@ export class PlatformController {
     return {
       queued: batches.filter((batch) => batch.status === 'QUEUED').length,
       running: batches.filter((batch) => batch.status === 'RUNNING').length,
-      maxConcurrency: Number(process.env.EVALUATION_BATCH_LEASE_MAX ?? 5),
+      // The bundled single-server Worker processes leased batches in order.
+      // EVALUATION_BATCH_LEASE_MAX is only an API request cap, not execution
+      // concurrency, so exposing it here as a denominator was misleading.
+      maxConcurrency: 1,
       scheduled: batches.filter((batch) => ['QUEUED', 'RUNNING'].includes(batch.status)).length,
-      embedded: process.env.EMBEDDED_EVALUATION_WORKER === 'true',
+      embedded: false,
     };
   }
 

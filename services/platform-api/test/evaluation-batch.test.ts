@@ -5,9 +5,18 @@ import { join, resolve } from 'node:path';
 import { PlatformStore } from '../src/store';
 import { EnginePackageStore } from '../src/engine-package-store';
 import { ExecutorRegistry } from '../src/executor-registry';
-import { EvaluationBatchService } from '../src/evaluation-batch-service';
+import { evaluationBatchLeaseLimit, evaluationBatchLeaseSeconds, EvaluationBatchService } from '../src/evaluation-batch-service';
 
 const projectRoot = resolve(__dirname, '..', '..', '..');
+
+test('evaluation batch lease settings reject malformed deployment values', () => {
+  assert.equal(evaluationBatchLeaseLimit({}), 5);
+  assert.equal(evaluationBatchLeaseLimit({ EVALUATION_BATCH_LEASE_MAX: '2' }), 2);
+  assert.throws(() => evaluationBatchLeaseLimit({ EVALUATION_BATCH_LEASE_MAX: 'invalid' }), /EVALUATION_BATCH_LEASE_MAX/);
+  assert.equal(evaluationBatchLeaseSeconds({}), 1800);
+  assert.equal(evaluationBatchLeaseSeconds({ EVALUATION_BATCH_LEASE_SECONDS: '900' }), 900);
+  assert.throws(() => evaluationBatchLeaseSeconds({ EVALUATION_BATCH_LEASE_SECONDS: '0' }), /EVALUATION_BATCH_LEASE_SECONDS/);
+});
 
 function resultFor(task: ReturnType<EvaluationBatchService['lease']>[number], index: number): Record<string, unknown> {
   const item = task.submissions[index];

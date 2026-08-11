@@ -146,7 +146,7 @@
         <a href="#troubleshooting"><span class="n">10</span>故障排查</a>
         <a href="#boundaries"><span class="n">11</span>当前边界</a>
       </nav>
-      <div class="side-note">v1.0.2<br>Windows x64 / Linux x64<br>原生一键安装</div>
+      <div class="side-note">v1.0.4<br>Windows x64 / Linux x64<br>原生一键安装</div>
     </aside>
 
     <main>
@@ -164,11 +164,11 @@
       </div>
 
       <div class="callout success">
-        <strong>推荐路径：</strong>单场 10–100 人先用一台 Windows Server x64 或 Linux x64。正式数据使用同机 PostgreSQL，交付件保存在本地磁盘，API 与评测 Worker 分进程运行。目标机不需要 Git、pnpm、前端构建或互联网。
+        <strong>推荐路径：</strong>员工总量少于 100、同时使用约 20 人时，使用一台 Windows Server x64 或 Linux x64。正式数据使用同机 PostgreSQL，交付件保存在本地磁盘，API 与评测 Worker 分进程运行。目标机不需要 Git、pnpm、前端构建或互联网。
       </div>
 
       <div class="callout warning">
-        <strong>v1.0.2 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP/Code Agent 默认参数、安全解压门禁和开机自启；Code Agent 默认使用 <code>codeagent -p "{{prompt}}"</code> 非交互模式，数据库兼容基线为 PostgreSQL 14，并在迁移前执行版本自检。自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
+        <strong>v1.0.4 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP/Code Agent 默认参数、安全解压门禁和开机自启；Code Agent 默认使用 <code>codeagent -p "{{prompt}}"</code> 非交互模式，数据库兼容基线为 PostgreSQL 14。SSO 身份默认每 300 秒刷新一次，避免页面请求重复写库；PostgreSQL 可恢复写冲突由平台自动重试。自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
       </div>
 
       <section id="start">
@@ -177,7 +177,7 @@
         <table>
           <thead><tr><th>场景</th><th>推荐方式</th><th>服务器</th><th>数据</th><th>适用状态</th></tr></thead>
           <tbody>
-            <tr><td>部门试点、10–100 人</td><td><span class="badge green">推荐</span> 单服务器离线包</td><td>Windows Server x64 或 Linux x64</td><td>同机 PostgreSQL + 本地磁盘</td><td>当前已自动化</td></tr>
+            <tr><td>少于 100 名员工、约 20 人同时使用</td><td><span class="badge green">推荐</span> 单服务器离线包</td><td>Windows Server x64 或 Linux x64</td><td>同机 PostgreSQL + 本地磁盘</td><td>当前已自动化</td></tr>
             <tr><td>数据库由 DBA 统一管理</td><td>单应用服务器 + 独立 PostgreSQL</td><td>应用机 + 数据库机</td><td>PostgreSQL + 应用机本地交付件</td><td>需手工标准部署</td></tr>
             <tr><td>多应用节点或共享存储</td><td>标准分离部署</td><td>网关、API、数据库、S3、Worker</td><td>独立 PostgreSQL + S3-compatible</td><td>适配器可用，生产 UAT 待补</td></tr>
             <tr><td>开发和功能验收</td><td>源码开发模式</td><td>Windows/Linux 开发机</td><td>文件或临时 PostgreSQL</td><td>仅本地使用</td></tr>
@@ -185,11 +185,11 @@
         </table>
 
         <div class="grid g3">
-          <div class="card"><div class="metric">4 vCPU / 8 GB</div><div class="label">10–20 人试点起步建议</div><p>系统盘之外预留至少 100 GB 数据空间。</p></div>
-          <div class="card"><div class="metric">8 vCPU / 16 GB</div><div class="label">约 50 人训战起步建议</div><p>建议 200 GB 以上数据盘，并限制 Agent 并发。</p></div>
-          <div class="card"><div class="metric">16 vCPU / 32 GB</div><div class="label">接近 100 人峰值起步建议</div><p>建议 500 GB 数据盘；复杂引擎可把 Worker/Agent 独立出去。</p></div>
+          <div class="card"><div class="metric">4 vCPU / 8 GB</div><div class="label">平台与 PostgreSQL 起步</div><p>适合约 20 人同时浏览和提交；数据盘至少 100 GB。</p></div>
+          <div class="card"><div class="metric">8 vCPU / 16 GB</div><div class="label">同机运行 Code Agent（推荐）</div><p>员工总量少于 100，评测批次默认顺序执行；数据盘建议 200 GB。</p></div>
+          <div class="card"><div class="metric">16 vCPU / 32 GB</div><div class="label">复杂引擎或多 Agent</div><p>仅在实际需要并行评测时采用，也可将 Worker/Agent 独立出去。</p></div>
         </div>
-        <p class="muted">以上是保守起步配置，不是目标环境 SLA。平台接收 100 人集中提交已经通过自动验收，实际 CPU、内存和总时长主要由 Code Agent、赛题引擎、模型调用方式和交付件大小决定。</p>
+        <p class="muted">以上是保守起步配置，不是目标环境 SLA。自动验收覆盖 100 人名册和 20 人同时身份访问、提交写入；实际 CPU、内存和评测总时长主要由 Code Agent、赛题引擎、模型调用方式和交付件大小决定。</p>
 
         <h3>端口与网络</h3>
         <table>
@@ -207,7 +207,7 @@
 
       <section id="quick">
         <h2>02 · 一页纸傻瓜部署</h2>
-        <p>下面是 v1.0.2 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL 14、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent -p</code> 非交互参数已经内置，随机密钥由脚本生成。</p>
+        <p>下面是 v1.0.4 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL 14、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent -p</code> 非交互参数已经内置，随机密钥由脚本生成。</p>
 
         <div class="tabs" role="tablist" aria-label="操作系统">
           <button class="tab" role="tab" aria-selected="true" aria-controls="quick-windows" id="tab-windows">Windows Server</button>
@@ -388,7 +388,7 @@ Nginx :8080  ── auth_request ──> LDAP3 网关 127.0.0.1:8081 ──> 企
         </table>
 
         <h3>为什么正式环境不用 JSON 或 SQLite</h3>
-        <p>50–100 人集中提交会产生并发写入、租约、幂等回传、审计和历史结果。正式兼容基线为 PostgreSQL 14；它提供平台所需的事务、唯一约束和可恢复备份，现有迁移不使用 15/16 专属语法。文件仓储只用于本地开发。简化部署通过“同机 PostgreSQL”减少组件，而不是退回不可靠的数据存储。</p>
+        <p>少于 100 人的长期数据和约 20 人同时提交仍会产生并发写入、租约、幂等回传、审计和历史结果。正式兼容基线为 PostgreSQL 14；它提供平台所需的事务、唯一约束和可恢复备份，现有迁移不使用 15/16 专属语法。文件仓储只用于本地开发。简化部署通过“同机 PostgreSQL”减少组件，而不是退回不可靠的数据存储。</p>
 
         <h3>换端口</h3>
         <p>只在冲突时修改，并保持同一份配置：</p>
@@ -438,6 +438,7 @@ OBJECT_STORAGE_PREFIX=platform
 PLATFORM_IDENTITY_MODE=TRUSTED_GATEWAY
 TRUSTED_GATEWAY_HMAC_SECRET=&lt;至少32字符随机密钥&gt;
 TRUSTED_GATEWAY_MAX_AGE_SECONDS=90
+SSO_IDENTITY_SYNC_INTERVAL_SECONDS=300
 EMBEDDED_EVALUATION_WORKER=false
 CORS_ORIGINS=https://&lt;平台域名&gt;</pre></div>
 
@@ -754,7 +755,7 @@ cd /opt/ai-training
         <div class="callout success"><strong>部署完成标准：</strong>用户只访问一个地址；真实 SSO 登录；管理员能建题、建训战、选人评测；员工能提交并查看报告；数据库和交付件能一致备份恢复；日常操作不需要理解 Node、pnpm、Python 虚拟环境或平台源码。</div>
       </section>
 
-      <div class="footer">AI 能力训战平台部署与运维手册 · v1.0.2 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
+      <div class="footer">AI 能力训战平台部署与运维手册 · v1.0.4 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
     </main>
   </div>
   <div id="toast" role="status" aria-live="polite">已复制</div>

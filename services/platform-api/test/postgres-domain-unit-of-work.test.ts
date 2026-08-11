@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PrismaClient } from '@prisma/client';
-import { SerialExecutionQueue } from '../src/postgres-domain-unit-of-work';
+import { ConflictException } from '@nestjs/common';
+import { postgresTransactionTimeoutMs, runWithPostgresConflictRetry, SerialExecutionQueue } from '../src/postgres-domain-unit-of-work';
 import { PrismaPlatformRepository } from '../src/prisma-platform-repository';
+import { SnapshotRevisionConflictError } from '../src/postgres-platform-store';
 
 test('the single-API PostgreSQL write queue serializes a one-hundred-request burst', async () => {
   const queue = new SerialExecutionQueue();
@@ -28,6 +30,31 @@ test('a failed PostgreSQL write does not poison later queued requests', async ()
   const queue = new SerialExecutionQueue();
   await assert.rejects(queue.run(async () => { throw new Error('expected failure'); }), /expected failure/);
   assert.equal(await queue.run(async () => 'next request committed'), 'next request committed');
+});
+
+test('a snapshot revision collision is retried without swallowing business conflicts', async () => {
+  let attempts = 0;
+  const value = await runWithPostgresConflictRetry(async () => {
+    attempts += 1;
+    if (attempts < 3) throw new SnapshotRevisionConflictError();
+    return 'committed';
+  }, { maxAttempts: 4, baseDelayMs: 0 });
+  assert.equal(value, 'committed');
+  assert.equal(attempts, 3);
+
+  let businessAttempts = 0;
+  await assert.rejects(runWithPostgresConflictRetry(async () => {
+    businessAttempts += 1;
+    throw new ConflictException('业务状态不允许该操作');
+  }, { maxAttempts: 4, baseDelayMs: 0 }), /业务状态不允许/);
+  assert.equal(businessAttempts, 1);
+});
+
+test('PostgreSQL transaction timeout configuration fails fast on invalid values', () => {
+  assert.equal(postgresTransactionTimeoutMs({}), 120_000);
+  assert.equal(postgresTransactionTimeoutMs({ PERSIST_TRANSACTION_TIMEOUT_MS: '45000' }), 45_000);
+  assert.throws(() => postgresTransactionTimeoutMs({ PERSIST_TRANSACTION_TIMEOUT_MS: 'not-a-number' }), /PERSIST_TRANSACTION_TIMEOUT_MS/);
+  assert.throws(() => postgresTransactionTimeoutMs({ PERSIST_TRANSACTION_TIMEOUT_MS: '500' }), /PERSIST_TRANSACTION_TIMEOUT_MS/);
 });
 
 test('the root PostgreSQL repository serializes concurrent identity transactions', async () => {

@@ -121,6 +121,9 @@ test('single-node installers use the verified Huawei intranet LDAP profile by de
     assert.match(environment, /^LDAP_DEPARTMENT_ATTRIBUTE=department$/m);
     assert.match(environment, /^LDAP_NAME_ATTRIBUTE=displayName$/m);
   }
+  for (const environment of [workspaceEnvironment, windowsEnvironment, linuxEnvironment]) {
+    assert.match(environment, /^SSO_IDENTITY_SYNC_INTERVAL_SECONDS=300$/m);
+  }
   assert.match(workspaceEnvironment, /^LDAP_BIND_PREFIX=China\\$/m);
   assert.match(windowsEnvironment, /^LDAP_BIND_PREFIX=China\\$/m);
   assert.match(linuxEnvironment, /^LDAP_BIND_PREFIX='China\\'$/m);
@@ -173,10 +176,11 @@ test('single-node Nginx stays attached to the platform process manager', () => {
   assert.match(template, /^daemon off;$/m);
 });
 
-test('single-node operator guide targets a fifty-to-one-hundred-person training session', () => {
+test('single-node operator guide targets fewer than one hundred employees with about twenty active users', () => {
   const guide = readFileSync(join(root, 'DEPLOYMENT.html'), 'utf8');
   assert.match(guide, /PostgreSQL/);
-  assert.match(guide, /50[–-]100\s*人/);
+  assert.match(guide, /少于\s*100[^<]*员工|员工总量少于\s*100/);
+  assert.match(guide, /同时使用约\s*20\s*人|约\s*20\s*人同时/);
   assert.match(guide, /数据库.*交付件|交付件.*数据库/s);
   assert.match(guide, /Windows Server/);
   assert.match(guide, /Linux Server/);

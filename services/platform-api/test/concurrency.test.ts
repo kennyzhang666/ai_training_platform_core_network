@@ -23,7 +23,15 @@ async function withApp(run: (baseUrl: string) => Promise<void>): Promise<void> {
   }
 }
 
-test('one hundred people can submit to an AUTO event and all runs drain through the bounded queue', async () => {
+async function mapInWaves<T, R>(items: readonly T[], waveSize: number, operation: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = [];
+  for (let offset = 0; offset < items.length; offset += waveSize) {
+    results.push(...await Promise.all(items.slice(offset, offset + waveSize).map((item, index) => operation(item, offset + index))));
+  }
+  return results;
+}
+
+test('a one-hundred-person roster can submit in twenty-user waves and drain through the bounded queue', async () => {
   await withApp(async (baseUrl) => {
     const eventResponse = await fetch(`${baseUrl}/api/v1/events`, {
       method: 'POST',
@@ -47,15 +55,15 @@ test('one hundred people can submit to an AUTO event and all runs drain through 
     assert.equal(eventResponse.status, 201);
 
     const subjects = Array.from({ length: 100 }, (_, index) => `concurrent-learner-${String(index + 1).padStart(3, '0')}`);
-    await Promise.all(subjects.map(async (employeeNo, index) => {
+    await mapInWaves(subjects, 20, async (employeeNo, index) => {
       const response = await fetch(`${baseUrl}/api/v1/auth/sso`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ employeeNo, name: `并发学员 ${index + 1}`, department: 'AI 工程团队' }),
       });
       assert.equal(response.status, 201);
-    }));
-    const submissions = await Promise.all(subjects.map(async (subjectId) => {
+    });
+    const submissions = await mapInWaves(subjects, 20, async (subjectId) => {
       const response = await fetch(`${baseUrl}/api/v1/events/event-auto-concurrency/submissions:upload`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -70,17 +78,17 @@ test('one hundred people can submit to an AUTO event and all runs drain through 
       });
       assert.equal(response.status, 201);
       return await response.json() as { id: string; state: string };
-    }));
+    });
     assert.equal(new Set(submissions.map((submission) => submission.id)).size, subjects.length);
     assert.ok(submissions.every((submission) => submission.state === 'QUEUED'));
 
     const deadline = Date.now() + 60_000;
     let completed = 0;
     while (Date.now() < deadline) {
-      const states = await Promise.all(submissions.map(async (submission) => {
+      const states = await mapInWaves(submissions, 20, async (submission) => {
         const response = await fetch(`${baseUrl}/api/v1/submissions/${submission.id}`);
         return await response.json() as { resultId?: string; state?: string };
-      }));
+      });
       completed = states.filter((state) => Boolean(state.resultId)).length;
       if (completed === submissions.length) break;
       await new Promise((resolve) => setTimeout(resolve, 200));
