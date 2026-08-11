@@ -40,6 +40,19 @@ test('single-node manager deploys migrations and backs up PostgreSQL with local 
   assert.doesNotMatch(manager, /PLATFORM_DATA_FILE/);
 });
 
+test('single-node deployment certifies PostgreSQL 14 and checks it before migrations', () => {
+  const windowsManager = readFileSync(join(root, 'deploy', 'single-node', 'manage.ps1'), 'utf8');
+  const linuxManager = readFileSync(join(root, 'deploy', 'single-node', 'manage.sh'), 'utf8');
+  const guide = readFileSync(join(root, 'DEPLOYMENT.html'), 'utf8');
+  const apiPackage = JSON.parse(readFileSync(join(root, 'services', 'platform-api', 'package.json'), 'utf8'));
+
+  assert.equal(apiPackage.scripts['check:postgres'], 'node scripts/check-postgres-version.mjs');
+  assert.match(windowsManager, /check-postgres-version\.mjs/);
+  assert.match(linuxManager, /check-postgres-version\.mjs/);
+  assert.match(guide, /PostgreSQL 14/);
+  assert.doesNotMatch(guide, /PostgreSQL 16\/17/);
+});
+
 test('Windows release launcher uses the bundled PowerShell runtime', () => {
   const launcher = readFileSync(join(deploy, 'manage.cmd'), 'utf8');
   assert.match(launcher, /runtime\\powershell\\pwsh\.exe/i);
@@ -245,6 +258,7 @@ test('Windows Doctor succeeds in an isolated release layout and renders configur
     put(join(releaseRoot, 'services', 'platform-api', 'dist', 'main.js'), '');
     put(join(releaseRoot, 'services', 'platform-api', 'prisma', 'schema.prisma'), '');
     put(join(releaseRoot, 'services', 'platform-api', 'node_modules', 'prisma', 'build', 'index.js'), 'process.exit(0);');
+    put(join(releaseRoot, 'services', 'platform-api', 'scripts', 'check-postgres-version.mjs'), 'process.exit(0);');
     put(join(releaseRoot, 'runtime', 'nginx', 'nginx.cmd'), '@exit /b 0\r\n');
     put(join(releaseRoot, 'runtime', 'nginx', 'conf', 'mime.types'), 'types {}\r\n');
     put(join(releaseRoot, 'python-fixture', 'ldap3.py'), '__version__ = "fixture"\n');

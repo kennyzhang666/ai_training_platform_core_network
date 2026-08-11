@@ -296,7 +296,17 @@ function Use-BundledRuntime {
     return (Env 'PLATFORM_RUNTIME_MODE' 'workspace').ToLowerInvariant() -eq 'bundled'
 }
 
+function Test-DatabaseCompatibility {
+    $versionCheck = Join-Path $projectRoot 'services\platform-api\scripts\check-postgres-version.mjs'
+    if (Use-BundledRuntime) {
+        Invoke-PlatformNode $versionCheck @()
+    } else {
+        Invoke-PlatformPackage @('check:postgres')
+    }
+}
+
 function Deploy-Database {
+    Test-DatabaseCompatibility
     if (Use-BundledRuntime) {
         $prismaCli = Join-Path $projectRoot 'services\platform-api\node_modules\prisma\build\index.js'
         $schema = Join-Path $projectRoot 'services\platform-api\prisma\schema.prisma'
@@ -307,6 +317,7 @@ function Deploy-Database {
 }
 
 function Test-Database {
+    Test-DatabaseCompatibility
     $schema = Join-Path $projectRoot 'services\platform-api\prisma\schema.prisma'
     if (Use-BundledRuntime) {
         $prismaCli = Join-Path $projectRoot 'services\platform-api\node_modules\prisma\build\index.js'

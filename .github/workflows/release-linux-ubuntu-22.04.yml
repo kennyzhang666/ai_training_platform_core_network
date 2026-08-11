@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to package, for example v1.0.1
+        description: Existing version tag to package, for example v1.0.2
         required: true
-        default: v1.0.1
+        default: v1.0.2
         type: string
       publish:
         description: Create or update the GitHub Release assets
@@ -29,6 +29,20 @@ jobs:
     name: Ubuntu 22.04 x64
     runs-on: ubuntu-22.04
     timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_DB: ai_training_ci
+          POSTGRES_USER: ai_training
+          POSTGRES_PASSWORD: integration-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ai_training -d ai_training_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Resolve immutable release tag
@@ -112,6 +126,17 @@ jobs:
             --source-root "$GITHUB_WORKSPACE/source"
           printf '%s\n' "$RUNTIME_ROOT/python/bin" >> "$GITHUB_PATH"
 
+      - name: Verify PostgreSQL 14 integration
+        working-directory: source
+        shell: bash
+        env:
+          POSTGRES_INTEGRATION: 'true'
+          DATABASE_URL: postgresql://ai_training:integration-only@127.0.0.1:5432/ai_training_ci?schema=public
+        run: |
+          set -euo pipefail
+          pnpm --filter @ai-training/platform-api check:postgres
+          pnpm --filter @ai-training/platform-api test:integration:postgres
+
       - name: Run release validation
         working-directory: source
         shell: bash
@@ -181,7 +206,7 @@ jobs:
           发布打包工具提交：${RELEASE_TOOLING_SHA}
 
           下载后请先按同目录 SHA-256 文件校验，再依据包内 DEPLOYMENT.html 部署。
-          该构建已在 GitHub Ubuntu 22.04 原生环境完成完整自动化检查；目标内网服务器仍需执行上线验收。
+          该构建已在 GitHub Ubuntu 22.04 原生环境使用 PostgreSQL 14 完成迁移与集成检查；目标内网服务器仍需执行上线验收。
           EOF
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then

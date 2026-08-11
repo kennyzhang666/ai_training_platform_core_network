@@ -272,7 +272,16 @@ use_bundled_runtime() {
   [[ "$(env_value PLATFORM_RUNTIME_MODE workspace | tr '[:upper:]' '[:lower:]')" == 'bundled' ]]
 }
 
+check_database_compatibility() {
+  if use_bundled_runtime; then
+    invoke_platform_node "$project_root/services/platform-api/scripts/check-postgres-version.mjs"
+  else
+    invoke_platform_package check:postgres
+  fi
+}
+
 deploy_database() {
+  check_database_compatibility
   if use_bundled_runtime; then
     invoke_platform_node "$project_root/services/platform-api/node_modules/prisma/build/index.js" migrate deploy \
       --schema "$project_root/services/platform-api/prisma/schema.prisma"
@@ -282,6 +291,7 @@ deploy_database() {
 }
 
 check_database() {
+  check_database_compatibility
   if use_bundled_runtime; then
     invoke_platform_node "$project_root/services/platform-api/node_modules/prisma/build/index.js" migrate status \
       --schema "$project_root/services/platform-api/prisma/schema.prisma"

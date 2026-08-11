@@ -1,10 +1,10 @@
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v1.0.1`
+> 当前发布版本：`v1.0.2`
 > 更新日期：2026-08-11
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.1` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并提供双平台一键安装入口与 Ubuntu 22.04 x64 原生 GitHub 发布流水线。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令，评测 Prompt 由平台按赛题自动组合并沿用 Agent 默认 bypass；Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
+企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.2` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并提供双平台一键安装入口与 Ubuntu 22.04 x64 原生 GitHub 发布流水线。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；内网 Linux 数据库兼容基线固定为 PostgreSQL 14，并在安装迁移前执行版本自检。Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
 
 平台级文档只保留三个入口：
 
@@ -99,7 +99,7 @@ pnpm dev:web
 
 本地身份切换只允许出现在开发构建。生产环境不能启用 `VITE_LOCAL_IDENTITY_SWITCHER=true`，不能使用 `PLATFORM_IDENTITY_MODE=LOCAL`，也不能开启匿名身份。
 
-开发数据默认写入 `tmp/platform-data.json`、`tmp/artifacts/` 和 `tmp/evaluation-*`。正式环境必须使用 PostgreSQL；部署方式见 [`DEPLOYMENT.html`](DEPLOYMENT.html)。
+开发数据默认写入 `tmp/platform-data.json`、`tmp/artifacts/` 和 `tmp/evaluation-*`。正式环境必须使用 PostgreSQL；已验证兼容基线为 PostgreSQL 14，安装器会在迁移前检查实际数据库版本。部署方式见 [`DEPLOYMENT.html`](DEPLOYMENT.html)。
 
 ## 3. 产品与领域边界
 
@@ -383,7 +383,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v1.0.1 已验证基线
+### 12.2 v1.0.2 已验证基线
 
 - Workspace：153 项，152 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web 交付方式规则：3/3；
@@ -392,7 +392,8 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - LDAP 网关：21/21；
 - 评测资料包：2/2；
 - 离线发布：11/11；
-- 部署门禁：27 项中 26 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并由 Ubuntu 22.04 发布流水线执行；
+- 部署门禁：31 项中 30 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并由 Ubuntu 22.04 发布流水线执行；
+- PostgreSQL 14：Ubuntu 22.04 发布流水线使用真实 PostgreSQL 14 运行版本检查、全部迁移和集成测试；
 - 依赖审计：生产依赖 0 个已知漏洞；
 - 100 人集中提交与有界评测队列：通过；
 - 构建、类型检查和 `git diff --check`：通过。
@@ -477,7 +478,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 ## 16. 后续路线
 
-### 16.1 v1.0.2：目标机验收与极简运维
+### 16.1 v1.0.3：目标机验收与极简运维
 
 目标：运维人员在全新断网服务器上使用离线包和一份配置，在 30 分钟内完成部署，并能长期运行。
 
@@ -529,6 +530,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v0.9.9` | 2026-08-11 | 发布 Windows/Linux 原生一键安装、开机自启、幂等卸载、Ubuntu 22.04 原生发布流水线，并内置已验证的公司内网 LDAP 默认参数。 |
 | `v1.0.0` | 2026-08-11 | 完成全仓审查，修复 Windows 发布构建、Worker 安全解压、续租、清理和日志脱敏问题，清零生产依赖已知漏洞，并将公司 `codeagent` 与赛题级自动 Prompt 设为默认。 |
 | `v1.0.1` | 2026-08-11 | 将公司内网 Code Agent 默认命令修正为 `codeagent -p "{{prompt}}"`，启用非交互模式并沿用默认 bypass，同步双平台部署模板、后台配置说明和评测引擎开发包。 |
+| `v1.0.2` | 2026-08-11 | 将 PostgreSQL 14 固定为内网 Linux 数据库兼容基线，安装迁移前执行版本自检，并在 Ubuntu 发布流水线使用真实 PostgreSQL 14 跑迁移与集成测试。 |
 
 ## 18. 交接检查表
 

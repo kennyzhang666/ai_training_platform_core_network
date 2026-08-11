@@ -146,7 +146,7 @@
         <a href="#troubleshooting"><span class="n">10</span>故障排查</a>
         <a href="#boundaries"><span class="n">11</span>当前边界</a>
       </nav>
-      <div class="side-note">v1.0.1<br>Windows x64 / Linux x64<br>原生一键安装</div>
+      <div class="side-note">v1.0.2<br>Windows x64 / Linux x64<br>原生一键安装</div>
     </aside>
 
     <main>
@@ -168,7 +168,7 @@
       </div>
 
       <div class="callout warning">
-        <strong>v1.0.1 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP/Code Agent 默认参数、安全解压门禁和开机自启；Code Agent 默认使用 <code>codeagent -p "{{prompt}}"</code> 非交互模式并沿用默认 bypass。自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
+        <strong>v1.0.2 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP/Code Agent 默认参数、安全解压门禁和开机自启；Code Agent 默认使用 <code>codeagent -p "{{prompt}}"</code> 非交互模式，数据库兼容基线为 PostgreSQL 14，并在迁移前执行版本自检。自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
       </div>
 
       <section id="start">
@@ -207,7 +207,7 @@
 
       <section id="quick">
         <h2>02 · 一页纸傻瓜部署</h2>
-        <p>下面是 v1.0.1 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent -p</code> 非交互参数已经内置，随机密钥由脚本生成。</p>
+        <p>下面是 v1.0.2 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL 14、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent -p</code> 非交互参数已经内置，随机密钥由脚本生成。</p>
 
         <div class="tabs" role="tablist" aria-label="操作系统">
           <button class="tab" role="tab" aria-selected="true" aria-controls="quick-windows" id="tab-windows">Windows Server</button>
@@ -215,7 +215,7 @@
         </div>
 
         <div class="tabpanel active" id="quick-windows" role="tabpanel" aria-labelledby="tab-windows">
-          <div class="callout"><strong>准备：</strong>以管理员身份打开 PowerShell；安装 PostgreSQL 16/17；准备可运行的 Code Agent；把 ZIP 与同名 <code>.sha256</code> 放到 <code>D:\Release</code>。</div>
+          <div class="callout"><strong>准备：</strong>以管理员身份打开 PowerShell；安装 PostgreSQL 14；准备可运行的 Code Agent；把 ZIP 与同名 <code>.sha256</code> 放到 <code>D:\Release</code>。平台在迁移前读取数据库实际版本，低于 14 将停止安装。</div>
 
           <div class="step"><div class="stepno">1</div><div><h4>创建数据库</h4><p>在 pgAdmin 查询工具中以 PostgreSQL 管理员执行，先替换密码：</p>
             <div class="codebox"><div class="codehead"><span>PostgreSQL SQL</span><button class="copy" data-copy>复制</button></div><pre>CREATE ROLE ai_training LOGIN PASSWORD '&lt;独立数据库强密码&gt;';
@@ -256,7 +256,7 @@ Invoke-WebRequest http://127.0.0.1:8080/ -UseBasicParsing | Select-Object Status
         </div>
 
         <div class="tabpanel" id="quick-linux" role="tabpanel" aria-labelledby="tab-linux">
-          <div class="callout"><strong>准备：</strong>使用具有 sudo 权限的部署账号；安装 PostgreSQL 16/17；准备 Code Agent；把 tar.gz 与同名 <code>.sha256</code> 放到 <code>/tmp/release</code>。</div>
+          <div class="callout"><strong>准备：</strong>使用具有 sudo 权限的部署账号；安装公司内网提供的 PostgreSQL 14；准备 Code Agent；把 tar.gz 与同名 <code>.sha256</code> 放到 <code>/tmp/release</code>。平台在迁移前读取数据库实际版本，PostgreSQL 14 可直接通过兼容检查。</div>
 
           <div class="step"><div class="stepno">1</div><div><h4>创建数据库</h4>
             <div class="codebox"><div class="codehead"><span>Linux shell + psql</span><button class="copy" data-copy>复制</button></div><pre>sudo -u postgres psql &lt;&lt;'SQL'
@@ -307,7 +307,7 @@ curl -I http://127.0.0.1:8080/</pre></div>
         <table>
           <thead><tr><th>配置项</th><th>填写内容</th><th>约束</th></tr></thead>
           <tbody>
-            <tr><td><code>DATABASE_URL</code></td><td>刚创建的 PostgreSQL 用户、密码和数据库</td><td>单服务器主机固定 127.0.0.1；特殊字符需 URL 编码</td></tr>
+            <tr><td><code>DATABASE_URL</code></td><td>刚创建的 PostgreSQL 14 用户、密码和数据库</td><td>单服务器主机固定 127.0.0.1；特殊字符需 URL 编码</td></tr>
             <tr><td><code>TRUSTED_GATEWAY_HMAC_SECRET</code></td><td>安装器自动生成</td><td>不要手工复制或对外发送</td></tr>
             <tr><td><code>LDAP_GATEWAY_SESSION_SECRET</code></td><td>安装器自动生成的另一条独立密钥</td><td>不会与 HMAC 密钥复用</td></tr>
             <tr><td><code>PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO</code></td><td>首位全局管理员工号</td><td>仅空系统第一次有效</td></tr>
@@ -388,7 +388,7 @@ Nginx :8080  ── auth_request ──> LDAP3 网关 127.0.0.1:8081 ──> 企
         </table>
 
         <h3>为什么正式环境不用 JSON 或 SQLite</h3>
-        <p>50–100 人集中提交会产生并发写入、租约、幂等回传、审计和历史结果。PostgreSQL 提供事务、唯一约束和可恢复备份；文件仓储只用于本地开发。简化部署通过“同机 PostgreSQL”减少组件，而不是退回不可靠的数据存储。</p>
+        <p>50–100 人集中提交会产生并发写入、租约、幂等回传、审计和历史结果。正式兼容基线为 PostgreSQL 14；它提供平台所需的事务、唯一约束和可恢复备份，现有迁移不使用 15/16 专属语法。文件仓储只用于本地开发。简化部署通过“同机 PostgreSQL”减少组件，而不是退回不可靠的数据存储。</p>
 
         <h3>换端口</h3>
         <p>只在冲突时修改，并保持同一份配置：</p>
@@ -612,7 +612,7 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>当前单服务�
           <li>解包后再次运行 Node、Python、Nginx 冒烟检查；</li>
           <li>把 <code>.tar.gz</code> 和 <code>.tar.gz.sha256</code> 同时上传到对应 GitHub Release。</li>
         </ol>
-        <p>GitHub 构建证明发布包在 Ubuntu 22.04 原生环境可组装和启动运行时，不替代公司内网 Ubuntu 22.04.5 服务器上的 PostgreSQL、LDAP、Code Agent、多人提交和断网验收。</p>
+        <p>GitHub 构建使用真实 PostgreSQL 14 执行全部版本化迁移、事务、租约、备份恢复和并发集成测试，并证明发布包可在 Ubuntu 22.04 原生环境组装。它不替代公司内网 Ubuntu 22.04.5 服务器上的 PostgreSQL 14、LDAP、Code Agent、多人提交和断网验收。</p>
 
         <h3>手工准备其他平台运行时</h3>
 
@@ -754,7 +754,7 @@ cd /opt/ai-training
         <div class="callout success"><strong>部署完成标准：</strong>用户只访问一个地址；真实 SSO 登录；管理员能建题、建训战、选人评测；员工能提交并查看报告；数据库和交付件能一致备份恢复；日常操作不需要理解 Node、pnpm、Python 虚拟环境或平台源码。</div>
       </section>
 
-      <div class="footer">AI 能力训战平台部署与运维手册 · v1.0.1 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
+      <div class="footer">AI 能力训战平台部署与运维手册 · v1.0.2 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
     </main>
   </div>
   <div id="toast" role="status" aria-live="polite">已复制</div>
