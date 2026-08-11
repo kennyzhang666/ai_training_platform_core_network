@@ -709,6 +709,7 @@ curl -I http://127.0.0.1:8080/</pre></div></div>
           <tbody>
             <tr><td><code>Doctor</code> 报占位值</td><td>打开 <code>deploy/single-node/.env</code>，搜索 <code>&lt;</code>、<code>change-me</code></td><td>删除校验或写假值</td></tr>
             <tr><td>Linux v1.0.4 报 <code>PLATFORM_IDENTITY_MODE 必须是 TRUSTED_GATEWAY</code></td><td>保持配置值不变；在发布目录执行 <code>sed -i 's/\[\[ "${actual,,}" == "$expected" \]\]/[[ "${actual,,}" == "${expected,,}" ]]/' deploy/single-node/manage.sh</code> 后重新运行 <code>install.sh</code></td><td>改成 <code>LOCAL</code>、关闭身份校验或删除预检</td></tr>
+            <tr><td>v1.0.4 报 <code>@prisma/client did not initialize yet</code></td><td>在发布目录执行 <code>./runtime/node/bin/node ./services/platform-api/node_modules/prisma/build/index.js generate --schema ./services/platform-api/prisma/schema.prisma</code>，确认 <code>services/platform-api/node_modules/.prisma/client/default.js</code> 已生成，再重新运行 <code>install.sh</code></td><td>执行 <code>prisma db push</code>、删除数据库或跳过迁移</td></tr>
             <tr><td>数据库无法连接</td><td>PostgreSQL 服务、127.0.0.1:5432、用户/数据库、URL 编码</td><td>改回文件仓储</td></tr>
             <tr><td>迁移失败</td><td>数据库权限、磁盘、迁移状态和版本</td><td>跳过迁移启动 API</td></tr>
             <tr><td>端口冲突</td><td><code>PORT</code>、<code>PLATFORM_API</code>、<code>LDAP_GATEWAY_PORT</code>、<code>SINGLE_NODE_LISTEN_PORT</code></td><td>把 API 改为 0.0.0.0 暴露</td></tr>

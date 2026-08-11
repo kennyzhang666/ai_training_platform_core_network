@@ -280,11 +280,25 @@ check_database_compatibility() {
   fi
 }
 
+initialize_prisma_client() {
+  local prisma_cli="$project_root/services/platform-api/node_modules/prisma/build/index.js"
+  local schema="$project_root/services/platform-api/prisma/schema.prisma"
+  if use_bundled_runtime; then
+    invoke_platform_node "$prisma_cli" 'generate' '--schema' "$schema"
+  else
+    invoke_platform_package prisma:generate
+  fi
+  (cd "$project_root/services/platform-api" &&
+    "$runtime_node" -e "const { PrismaClient } = require('@prisma/client'); const client = new PrismaClient(); client.\$disconnect().catch(() => process.exitCode = 1);") \
+    || die 'Prisma Client 生成后仍无法加载，请检查发布包完整性'
+}
+
 deploy_database() {
+  initialize_prisma_client
   check_database_compatibility
   if use_bundled_runtime; then
-    invoke_platform_node "$project_root/services/platform-api/node_modules/prisma/build/index.js" migrate deploy \
-      --schema "$project_root/services/platform-api/prisma/schema.prisma"
+    invoke_platform_node "$project_root/services/platform-api/node_modules/prisma/build/index.js" 'migrate' 'deploy' \
+      '--schema' "$project_root/services/platform-api/prisma/schema.prisma"
   else
     invoke_platform_package prisma:migrate:deploy
   fi

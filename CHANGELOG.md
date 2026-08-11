@@ -5,6 +5,7 @@
 ## 未发布
 
 - 修复 Linux 单服务器安装器对枚举配置只转换实际值大小写、未转换期望值，导致合法的 `PLATFORM_IDENTITY_MODE=TRUSTED_GATEWAY` 被错误拒绝。
+- 修复 Windows/Linux 离线发布包遗漏生成后的 Prisma Client，导致安装迁移后 API 报 `@prisma/client did not initialize yet`；构建阶段生成并校验产物，安装阶段在迁移前自动补生成和实际加载验证，Linux 发布门禁同步检查解压后的客户端。
 
 ## v1.0.4 · 2026-08-11
 

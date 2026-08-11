@@ -182,6 +182,7 @@ jobs:
           mkdir "$unpacked"
           tar -xzf "$archive" --directory "$unpacked"
           "$unpacked/runtime/node/bin/node" --version
+          (cd "$unpacked/services/platform-api" && "$unpacked/runtime/node/bin/node" -e "const { PrismaClient } = require('@prisma/client'); const client = new PrismaClient(); client.\$disconnect().catch(() => process.exitCode = 1);")
           "$unpacked/runtime/python/bin/python3" -c 'import ldap3, jsonschema, yaml'
           "$unpacked/runtime/nginx/sbin/nginx" -v
           test -f "$unpacked/runtime/runtime-provenance.json"

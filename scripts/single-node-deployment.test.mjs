@@ -220,6 +220,18 @@ test('single-node backend ports have one source of truth across proxy and health
   assert.match(linux, /wait_health 'LDAP 网关' "\$ldap_health_uri"/);
 });
 
+test('single-node managers generate and load Prisma Client before database migrations', () => {
+  const windows = readFileSync(join(deploy, 'manage.ps1'), 'utf8');
+  const linux = readFileSync(join(deploy, 'manage.sh'), 'utf8');
+
+  assert.match(windows, /@\('generate', '--schema'/);
+  assert.match(windows, /require\('@prisma\/client'\)/);
+  assert.ok(windows.indexOf("@('generate', '--schema'") < windows.indexOf("@('migrate', 'deploy'"));
+  assert.match(linux, /'generate' '--schema'/);
+  assert.match(linux, /require\('@prisma\/client'\)/);
+  assert.ok(linux.indexOf("'generate' '--schema'") < linux.indexOf("'migrate' 'deploy'"));
+});
+
 test('single-node managers validate the Worker command and roll back a partial start', () => {
   const windows = readFileSync(join(deploy, 'manage.ps1'), 'utf8');
   const linux = readFileSync(join(deploy, 'manage.sh'), 'utf8');

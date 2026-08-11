@@ -69,6 +69,7 @@ async function fixture(root) {
 
   for (const path of [
     'dist/main.js',
+    'node_modules/.prisma/client/default.js',
     'node_modules/@prisma/client/index.js',
     'node_modules/prisma/build/index.js',
     'node_modules/runtime-dependency/src/index.js',
@@ -113,6 +114,7 @@ test('release runtime gate rejects unsupported versions and the wrong target arc
 test('release builder creates a portable production dependency tree with pnpm 11', async () => {
   const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), 'build-single-node-release.mjs'), 'utf8');
   assert.match(source, /'--config\.node-linker=hoisted', 'deploy', '--prod', '--legacy', apiDeployRoot/);
+  assert.match(source, /'generate', '--schema'/);
   assert.match(source, /import ldap3, jsonschema, yaml/);
   assert.match(source, /verbatimSymlinks: true/);
 });
@@ -181,6 +183,7 @@ for (const target of ['win32-x64', 'linux-x64']) {
       assert.equal(manifest.target, target);
       assert.equal(manifest.version, '0.9.2-test');
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/dist/main.js'));
+      assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/.prisma/client/default.js'));
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/prisma/build/index.js'));
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/runtime-dependency/src/index.js'));
       assert.ok(manifest.files.some((file) => file.path === 'grader/src/drill_grader/__init__.py'));

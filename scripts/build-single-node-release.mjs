@@ -240,6 +240,7 @@ export async function assembleReleaseLayout(options) {
   await requireDirectory(apiDeployRoot, 'API deploy root');
   await requireDirectory(runtimeRoot, `${target} runtime root`);
   await requireDirectory(wheelhouseRoot, 'offline wheelhouse');
+  await requireFile(join(apiDeployRoot, 'node_modules', '.prisma', 'client', 'default.js'), 'generated Prisma Client');
   if (existsSync(outputRoot)) throw new Error(`release output already exists: ${outputRoot}`);
   if (inside(outputRoot, sourceRoot) || outputRoot === sourceRoot) throw new Error('release output cannot contain the source root');
   if (!(await wheelFiles(wheelhouseRoot)).length) throw new Error(`offline wheelhouse contains no .whl files: ${wheelhouseRoot}`);
@@ -315,6 +316,7 @@ export async function verifyReleaseLayout(rootValue) {
   if (manifest.schemaVersion !== '1.0' || manifest.product !== 'ai-training-platform' || !RELEASE_TARGETS[manifest.target] || !Array.isArray(manifest.files)) {
     throw new Error('release manifest is invalid');
   }
+  await requireFile(join(root, 'services', 'platform-api', 'node_modules', '.prisma', 'client', 'default.js'), 'generated Prisma Client');
   const actual = (await listReleaseFiles(root)).filter((file) => file.path !== 'release-manifest.json');
   if (JSON.stringify(actual) !== JSON.stringify(manifest.files)) throw new Error('release manifest does not match package files');
   if (RELEASE_TARGETS[manifest.target].platform === 'win32') {
@@ -389,6 +391,36 @@ async function verifyRuntimeExecutables(runtimeRoot, target) {
   }
 }
 
+function targetNodeExecutable(runtimeRoot, target) {
+  const descriptor = RELEASE_TARGETS[target];
+  const relativePath = descriptor.runtimeFiles.find((path) => /node(?:\.exe)?$/.test(path));
+  return join(runtimeRoot, ...relativePath.split('/'));
+}
+
+async function generatePrismaClient(apiDeployRoot, runtimeRoot, target) {
+  const nodePath = targetNodeExecutable(runtimeRoot, target);
+  const prismaCli = join(apiDeployRoot, 'node_modules', 'prisma', 'build', 'index.js');
+  const schema = join(apiDeployRoot, 'prisma', 'schema.prisma');
+  await requireFile(prismaCli, 'Prisma CLI');
+  await requireFile(schema, 'Prisma schema');
+  await execFileAsync(nodePath, [prismaCli, 'generate', '--schema', schema], {
+    cwd: apiDeployRoot,
+    windowsHide: true,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  await requireFile(join(apiDeployRoot, 'node_modules', '.prisma', 'client', 'default.js'), 'generated Prisma Client');
+}
+
+async function verifyPackagedPrismaClient(releaseRoot, runtimeRoot, target) {
+  const nodePath = targetNodeExecutable(runtimeRoot, target);
+  const apiRoot = join(releaseRoot, 'services', 'platform-api');
+  await execFileAsync(nodePath, ['-e', "const { PrismaClient } = require('@prisma/client'); const client = new PrismaClient(); client.$disconnect().catch(() => process.exitCode = 1);"], {
+    cwd: apiRoot,
+    windowsHide: true,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+}
+
 async function runCli() {
   const args = parseReleaseArguments(process.argv.slice(2));
   const target = args.get('target') ?? `${process.platform}-${process.arch}`;
@@ -418,7 +450,9 @@ async function runCli() {
       await execFileAsync(pnpm.executable, [...pnpm.args, 'build'], { cwd: projectRoot, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
       await execFileAsync(pnpm.executable, [...pnpm.args, '--filter', '@ai-training/platform-api', '--config.node-linker=hoisted', 'deploy', '--prod', '--legacy', apiDeployRoot], { cwd: projectRoot, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
     }
+    await generatePrismaClient(apiDeployRoot, runtimeRoot, target);
     await assembleReleaseLayout({ sourceRoot: projectRoot, apiDeployRoot, runtimeRoot, wheelhouseRoot, outputRoot: releaseDirectory, target, version, sourceDateEpoch: epoch });
+    await verifyPackagedPrismaClient(releaseDirectory, runtimeRoot, target);
     const archive = await createReleaseArchive({ releaseRoot: releaseDirectory, archivePath, target });
     process.stdout.write(`release directory: ${releaseDirectory}\nrelease archive: ${archive.archivePath}\nsha256: ${archive.sha256}\n`);
   } finally {
