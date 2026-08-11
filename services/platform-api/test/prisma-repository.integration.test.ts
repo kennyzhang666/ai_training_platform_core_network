@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPlatformRepository } from '../src/prisma-platform-repository';
-import { createPlatformStore } from '../src/postgres-platform-store';
+import { createPlatformStore, SnapshotRevisionConflictError } from '../src/postgres-platform-store';
 import { PrismaUploadSessionPersistence } from '../src/prisma-upload-session-persistence';
 import { PlatformReadService } from '../src/platform-read-service';
 import { PostgresDomainUnitOfWork } from '../src/postgres-domain-unit-of-work';
@@ -263,7 +263,14 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
     normalizedStore.createOrgUnit({ id: casOrgA, parentId: orgId, name: 'CAS first', label: 'IT' }, adminId);
     await normalizedStore.flushPersistence();
     staleStore.createOrgUnit({ id: casOrgB, parentId: orgId, name: 'CAS stale', label: 'IT' }, adminId);
-    await assert.rejects(staleStore.flushPersistence(), /changed on another API instance/);
+    await assert.rejects(staleStore.flushPersistence(), (error) => {
+      assert.ok(error instanceof SnapshotRevisionConflictError);
+      assert.deepEqual(error.getResponse(), {
+        code: 'PLATFORM_REVISION_CONFLICT',
+        message: '平台数据刚刚发生变化，正在重试当前操作',
+      });
+      return true;
+    });
     await staleStore.onModuleDestroy().catch(() => undefined);
     normalizedStore.cacheUserSnapshot({ ...result.updated, name: 'Normalized reload' });
     await normalizedStore.flushPersistence();
