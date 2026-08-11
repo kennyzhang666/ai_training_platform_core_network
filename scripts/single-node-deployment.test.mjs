@@ -150,6 +150,12 @@ test('Linux single-node manager provides the same lifecycle and bundled runtime 
   assert.doesNotMatch(manager, /docker|redis|kafka|minio/i);
 });
 
+test('Linux preflight compares enumerated environment values case-insensitively on both sides', () => {
+  const manager = readFileSync(join(deploy, 'manage.sh'), 'utf8');
+  assert.match(manager, /\[\[ "\$\{actual,,\}" == "\$\{expected,,\}" \]\]/);
+  assert.doesNotMatch(manager, /\[\[ "\$\{actual,,\}" == "\$expected" \]\]/);
+});
+
 test('one-command installation registers startup without deleting persistent data', () => {
   const windows = readFileSync(join(deploy, 'manage.ps1'), 'utf8');
   const linux = readFileSync(join(deploy, 'manage.sh'), 'utf8');

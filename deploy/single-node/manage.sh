@@ -205,7 +205,7 @@ assert_preflight() {
     name="${pair%%=*}"
     expected="${pair#*=}"
     actual="$(env_value "$name")"
-    [[ "${actual,,}" == "$expected" ]] || die "$name 必须是 $expected"
+    [[ "${actual,,}" == "${expected,,}" ]] || die "$name 必须是 $expected"
   done
 
   assert_configured DATABASE_URL
