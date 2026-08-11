@@ -146,7 +146,7 @@
         <a href="#troubleshooting"><span class="n">10</span>故障排查</a>
         <a href="#boundaries"><span class="n">11</span>当前边界</a>
       </nav>
-      <div class="side-note">v1.0.4<br>Windows x64 / Linux x64<br>原生一键安装</div>
+      <div class="side-note">v1.0.5<br>Windows x64 / Linux x64<br>原生一键安装</div>
     </aside>
 
     <main>
@@ -168,7 +168,7 @@
       </div>
 
       <div class="callout warning">
-        <strong>v1.0.4 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP/Code Agent 默认参数、安全解压门禁和开机自启；Code Agent 默认使用 <code>codeagent -p "{{prompt}}"</code> 非交互模式，数据库兼容基线为 PostgreSQL 14。SSO 身份默认每 300 秒刷新一次，避免页面请求重复写库；PostgreSQL 可恢复写冲突由平台自动重试。自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
+        <strong>v1.0.5 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP/Code Agent 默认参数、安全解压门禁和开机自启；Code Agent 默认使用 <code>codeagent -p "{{prompt}}"</code> 非交互模式，数据库兼容基线为 PostgreSQL 14。安装器在迁移前自动生成并验证 Prisma Client，Linux 可信网关模式按大小写不敏感规则校验。SSO 身份默认每 300 秒刷新一次，避免页面请求重复写库；PostgreSQL 可恢复写冲突由平台自动重试。自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
       </div>
 
       <section id="start">
@@ -207,7 +207,7 @@
 
       <section id="quick">
         <h2>02 · 一页纸傻瓜部署</h2>
-        <p>下面是 v1.0.4 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL 14、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent -p</code> 非交互参数已经内置，随机密钥由脚本生成。</p>
+        <p>下面是 v1.0.5 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL 14、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent -p</code> 非交互参数已经内置，随机密钥由脚本生成。</p>
 
         <div class="tabs" role="tablist" aria-label="操作系统">
           <button class="tab" role="tab" aria-selected="true" aria-controls="quick-windows" id="tab-windows">Windows Server</button>
@@ -757,7 +757,7 @@ cd /opt/ai-training
         <div class="callout success"><strong>部署完成标准：</strong>用户只访问一个地址；真实 SSO 登录；管理员能建题、建训战、选人评测；员工能提交并查看报告；数据库和交付件能一致备份恢复；日常操作不需要理解 Node、pnpm、Python 虚拟环境或平台源码。</div>
       </section>
 
-      <div class="footer">AI 能力训战平台部署与运维手册 · v1.0.4 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
+      <div class="footer">AI 能力训战平台部署与运维手册 · v1.0.5 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
     </main>
   </div>
   <div id="toast" role="status" aria-live="polite">已复制</div>
