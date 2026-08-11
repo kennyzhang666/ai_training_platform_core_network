@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { PrismaClient } from '@prisma/client';
 import { SerialExecutionQueue } from '../src/postgres-domain-unit-of-work';
+import { PrismaPlatformRepository } from '../src/prisma-platform-repository';
 
 test('the single-API PostgreSQL write queue serializes a one-hundred-request burst', async () => {
   const queue = new SerialExecutionQueue();
@@ -26,4 +28,32 @@ test('a failed PostgreSQL write does not poison later queued requests', async ()
   const queue = new SerialExecutionQueue();
   await assert.rejects(queue.run(async () => { throw new Error('expected failure'); }), /expected failure/);
   assert.equal(await queue.run(async () => 'next request committed'), 'next request committed');
+});
+
+test('the root PostgreSQL repository serializes concurrent identity transactions', async () => {
+  let active = 0;
+  let peak = 0;
+  const transactionClient = {
+    platformSnapshot: { upsert: async () => undefined },
+  };
+  const client = {
+    ...transactionClient,
+    $transaction: async <T>(operation: (db: typeof transactionClient) => Promise<T>) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      try {
+        return await operation(transactionClient);
+      } finally {
+        active -= 1;
+      }
+    },
+  } as unknown as PrismaClient;
+  const repository = new PrismaPlatformRepository({ client });
+
+  const values = await Promise.all(Array.from({ length: 100 }, (_, index) => repository.transaction(async () => index)));
+
+  assert.equal(peak, 1);
+  assert.deepEqual(values, Array.from({ length: 100 }, (_, index) => index));
+  await repository.close();
 });
