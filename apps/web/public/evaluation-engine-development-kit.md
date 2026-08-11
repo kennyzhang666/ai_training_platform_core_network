@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：1.0.5。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：1.0.6。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -285,7 +285,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台设计文档
 
-> 设计基线：`v1.0.5`
+> 设计基线：`v1.0.6`
 > 更新日期：2026-08-11
 > 文档职责：产品、业务、权限、评测、报告、能力画像、页面、交互、视觉与文案的唯一标准
 
@@ -1113,11 +1113,11 @@ AI 能力画像
 
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v1.0.5`
+> 当前发布版本：`v1.0.6`
 > 更新日期：2026-08-11
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.5` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并按“员工总量少于 100、同时使用约 20 人”完成身份同步、PostgreSQL 写入冲突和评测队列显示收口。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；内网 Linux 数据库兼容基线固定为 PostgreSQL 14。双平台安装器在迁移前自动生成并验证 Prisma Client，Linux 枚举配置比较不再误拒绝合法的可信网关模式。Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
+企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.6` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并按“员工总量少于 100、同时使用约 20 人”完成身份同步、PostgreSQL 写入冲突和评测队列显示收口。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；内网 Linux 数据库兼容基线固定为 PostgreSQL 14。原生离线包在构建期固化 Prisma Client，Linux 包固定携带 Ubuntu 22.04.5/OpenSSL 3 查询引擎，安装时只加载校验、不访问外网；Linux 枚举配置比较不再误拒绝合法的可信网关模式。Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
 
 平台级文档只保留三个入口：
 
@@ -1496,7 +1496,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v1.0.5 已验证基线
+### 12.2 v1.0.6 已验证基线
 
 - Workspace：158 项，157 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web 交付方式规则：3/3；
@@ -1646,6 +1646,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v1.0.2` | 2026-08-11 | 将 PostgreSQL 14 固定为内网 Linux 数据库兼容基线，安装迁移前执行版本自检，并在 Ubuntu 发布流水线使用真实 PostgreSQL 14 跑迁移与集成测试。 |
 | `v1.0.4` | 2026-08-11 | 按少于 100 名员工、约 20 人同时使用重新审查：避免每个页面请求重复写入 SSO 身份，重试 PostgreSQL 可恢复写冲突，并纠正独立 Worker 租约上限与实际并发的显示。 |
 | `v1.0.5` | 2026-08-11 | 修复 Linux 可信网关配置误判和双平台发布包 Prisma Client 缺失；构建、安装与 Linux 发布流水线增加生成及实际加载门禁。 |
+| `v1.0.6` | 2026-08-11 | 修复完全断网安装重复下载和 Linux Prisma 引擎目标不匹配；原生包只加载构建期客户端，并强制包含 Ubuntu 22.04.5/OpenSSL 3 引擎。 |
 
 ## 18. 交接检查表
 
@@ -6596,7 +6597,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {

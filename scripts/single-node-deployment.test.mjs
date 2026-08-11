@@ -220,16 +220,21 @@ test('single-node backend ports have one source of truth across proxy and health
   assert.match(linux, /wait_health 'LDAP 网关' "\$ldap_health_uri"/);
 });
 
-test('single-node managers generate and load Prisma Client before database migrations', () => {
+test('single-node managers load packaged Prisma Client without generating it in bundled mode', () => {
   const windows = readFileSync(join(deploy, 'manage.ps1'), 'utf8');
   const linux = readFileSync(join(deploy, 'manage.sh'), 'utf8');
 
-  assert.match(windows, /@\('generate', '--schema'/);
   assert.match(windows, /require\('@prisma\/client'\)/);
-  assert.ok(windows.indexOf("@('generate', '--schema'") < windows.indexOf("@('migrate', 'deploy'"));
-  assert.match(linux, /'generate' '--schema'/);
   assert.match(linux, /require\('@prisma\/client'\)/);
-  assert.ok(linux.indexOf("'generate' '--schema'") < linux.indexOf("'migrate' 'deploy'"));
+  assert.ok(windows.indexOf("require('@prisma/client')") < windows.indexOf("@('migrate', 'deploy'"));
+  assert.ok(linux.indexOf("require('@prisma/client')") < linux.indexOf("'migrate' 'deploy'"));
+
+  const windowsInitializer = windows.slice(windows.indexOf('function Initialize-PrismaClient'), windows.indexOf('function Deploy-Database'));
+  const linuxInitializer = linux.slice(linux.indexOf('initialize_prisma_client()'), linux.indexOf('deploy_database()'));
+  assert.match(windowsInitializer, /Use-BundledRuntime[\s\S]*Test-PackagedPrismaClient[\s\S]*return/);
+  assert.match(linuxInitializer, /use_bundled_runtime[\s\S]*test_packaged_prisma_client[\s\S]*return/);
+  assert.match(windowsInitializer, /@\('prisma:generate'\)/);
+  assert.match(linuxInitializer, /invoke_platform_package prisma:generate/);
 });
 
 test('single-node managers validate the Worker command and roll back a partial start', () => {

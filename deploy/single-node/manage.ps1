@@ -305,23 +305,24 @@ function Test-DatabaseCompatibility {
     }
 }
 
-function Initialize-PrismaClient {
-    $prismaCli = Join-Path $projectRoot 'services\platform-api\node_modules\prisma\build\index.js'
-    $schema = Join-Path $projectRoot 'services\platform-api\prisma\schema.prisma'
-    if (Use-BundledRuntime) {
-        Invoke-PlatformNode $prismaCli @('generate', '--schema', $schema)
-    } else {
-        Invoke-PlatformPackage @('prisma:generate')
-    }
-
+function Test-PackagedPrismaClient {
     $node = Resolve-Executable (Env 'NODE_EXE' 'node') 'Node.js'
     Push-Location (Join-Path $projectRoot 'services\platform-api')
     try {
         & $node -e "const { PrismaClient } = require('@prisma/client'); const client = new PrismaClient(); client.`$disconnect().catch(() => process.exitCode = 1);"
-        if ($LASTEXITCODE -ne 0) { throw 'Prisma Client 生成后仍无法加载，请检查发布包完整性' }
+        if ($LASTEXITCODE -ne 0) { throw '离线发布包内置 Prisma Client 无法加载，请重新校验并获取完整发布包' }
     } finally {
         Pop-Location
     }
+}
+
+function Initialize-PrismaClient {
+    if (Use-BundledRuntime) {
+        Test-PackagedPrismaClient
+        return
+    }
+    Invoke-PlatformPackage @('prisma:generate')
+    Test-PackagedPrismaClient
 }
 
 function Deploy-Database {

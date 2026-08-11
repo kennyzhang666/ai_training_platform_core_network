@@ -70,6 +70,8 @@ async function fixture(root) {
   for (const path of [
     'dist/main.js',
     'node_modules/.prisma/client/default.js',
+    'node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node',
+    'node_modules/.prisma/client/query_engine-windows.dll.node',
     'node_modules/@prisma/client/index.js',
     'node_modules/prisma/build/index.js',
     'node_modules/runtime-dependency/src/index.js',
@@ -100,6 +102,13 @@ test('release contract supports Windows x64 and Linux x64 with platform runtimes
   assert.ok(RELEASE_TARGETS['linux-x64'].runtimeFiles.includes('node/bin/node'));
   assert.equal(RELEASE_TARGETS['win32-x64'].archiveExtension, '.zip');
   assert.equal(RELEASE_TARGETS['linux-x64'].archiveExtension, '.tar.gz');
+  assert.equal(RELEASE_TARGETS['linux-x64'].prismaEngine, 'libquery_engine-debian-openssl-3.0.x.so.node');
+  assert.equal(RELEASE_TARGETS['win32-x64'].prismaEngine, 'query_engine-windows.dll.node');
+});
+
+test('Prisma schema pins the Ubuntu 22.04 OpenSSL 3 query engine', async () => {
+  const schema = await readFile(join(dirname(fileURLToPath(import.meta.url)), '..', 'services', 'platform-api', 'prisma', 'schema.prisma'), 'utf8');
+  assert.match(schema, /binaryTargets\s*=\s*\["native",\s*"debian-openssl-3\.0\.x"\]/);
 });
 
 test('release runtime gate rejects unsupported versions and the wrong target architecture', () => {
@@ -184,6 +193,7 @@ for (const target of ['win32-x64', 'linux-x64']) {
       assert.equal(manifest.version, '0.9.2-test');
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/dist/main.js'));
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/.prisma/client/default.js'));
+      assert.ok(manifest.files.some((file) => file.path === `services/platform-api/node_modules/.prisma/client/${RELEASE_TARGETS[target].prismaEngine}`));
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/prisma/build/index.js'));
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/runtime-dependency/src/index.js'));
       assert.ok(manifest.files.some((file) => file.path === 'grader/src/drill_grader/__init__.py'));

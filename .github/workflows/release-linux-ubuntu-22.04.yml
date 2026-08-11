@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to package, for example v1.0.5
+        description: Existing version tag to package, for example v1.0.6
         required: true
-        default: v1.0.5
+        default: v1.0.6
         type: string
       publish:
         description: Create or update the GitHub Release assets
@@ -182,7 +182,9 @@ jobs:
           mkdir "$unpacked"
           tar -xzf "$archive" --directory "$unpacked"
           "$unpacked/runtime/node/bin/node" --version
-          (cd "$unpacked/services/platform-api" && "$unpacked/runtime/node/bin/node" -e "const { PrismaClient } = require('@prisma/client'); const client = new PrismaClient(); client.\$disconnect().catch(() => process.exitCode = 1);")
+          prisma_engine="$unpacked/services/platform-api/node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node"
+          test -f "$prisma_engine"
+          (cd "$unpacked/services/platform-api" && PRISMA_QUERY_ENGINE_LIBRARY="$prisma_engine" "$unpacked/runtime/node/bin/node" -e "const { PrismaClient } = require('@prisma/client'); const client = new PrismaClient(); client.\$disconnect().catch(() => process.exitCode = 1);")
           "$unpacked/runtime/python/bin/python3" -c 'import ldap3, jsonschema, yaml'
           "$unpacked/runtime/nginx/sbin/nginx" -v
           test -f "$unpacked/runtime/runtime-provenance.json"

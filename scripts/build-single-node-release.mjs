@@ -53,6 +53,7 @@ export const RELEASE_TARGETS = Object.freeze({
     installer: 'install.cmd',
     environmentTemplate: 'windows.env.example',
     archiveExtension: '.zip',
+    prismaEngine: 'query_engine-windows.dll.node',
     runtimeFiles: Object.freeze([
       'node/node.exe',
       'powershell/pwsh.exe',
@@ -68,6 +69,7 @@ export const RELEASE_TARGETS = Object.freeze({
     installer: 'install.sh',
     environmentTemplate: 'linux.env.example',
     archiveExtension: '.tar.gz',
+    prismaEngine: 'libquery_engine-debian-openssl-3.0.x.so.node',
     runtimeFiles: Object.freeze([
       'node/bin/node',
       'python/bin/python3',
@@ -241,6 +243,7 @@ export async function assembleReleaseLayout(options) {
   await requireDirectory(runtimeRoot, `${target} runtime root`);
   await requireDirectory(wheelhouseRoot, 'offline wheelhouse');
   await requireFile(join(apiDeployRoot, 'node_modules', '.prisma', 'client', 'default.js'), 'generated Prisma Client');
+  await requireFile(join(apiDeployRoot, 'node_modules', '.prisma', 'client', descriptor.prismaEngine), `${target} Prisma query engine`);
   if (existsSync(outputRoot)) throw new Error(`release output already exists: ${outputRoot}`);
   if (inside(outputRoot, sourceRoot) || outputRoot === sourceRoot) throw new Error('release output cannot contain the source root');
   if (!(await wheelFiles(wheelhouseRoot)).length) throw new Error(`offline wheelhouse contains no .whl files: ${wheelhouseRoot}`);
@@ -317,6 +320,7 @@ export async function verifyReleaseLayout(rootValue) {
     throw new Error('release manifest is invalid');
   }
   await requireFile(join(root, 'services', 'platform-api', 'node_modules', '.prisma', 'client', 'default.js'), 'generated Prisma Client');
+  await requireFile(join(root, 'services', 'platform-api', 'node_modules', '.prisma', 'client', RELEASE_TARGETS[manifest.target].prismaEngine), `${manifest.target} Prisma query engine`);
   const actual = (await listReleaseFiles(root)).filter((file) => file.path !== 'release-manifest.json');
   if (JSON.stringify(actual) !== JSON.stringify(manifest.files)) throw new Error('release manifest does not match package files');
   if (RELEASE_TARGETS[manifest.target].platform === 'win32') {
@@ -409,13 +413,17 @@ async function generatePrismaClient(apiDeployRoot, runtimeRoot, target) {
     maxBuffer: 32 * 1024 * 1024,
   });
   await requireFile(join(apiDeployRoot, 'node_modules', '.prisma', 'client', 'default.js'), 'generated Prisma Client');
+  await requireFile(join(apiDeployRoot, 'node_modules', '.prisma', 'client', RELEASE_TARGETS[target].prismaEngine), `${target} Prisma query engine`);
 }
 
 async function verifyPackagedPrismaClient(releaseRoot, runtimeRoot, target) {
   const nodePath = targetNodeExecutable(runtimeRoot, target);
   const apiRoot = join(releaseRoot, 'services', 'platform-api');
+  const enginePath = join(apiRoot, 'node_modules', '.prisma', 'client', RELEASE_TARGETS[target].prismaEngine);
+  await requireFile(enginePath, `${target} Prisma query engine`);
   await execFileAsync(nodePath, ['-e', "const { PrismaClient } = require('@prisma/client'); const client = new PrismaClient(); client.$disconnect().catch(() => process.exitCode = 1);"], {
     cwd: apiRoot,
+    env: { ...process.env, PRISMA_QUERY_ENGINE_LIBRARY: enginePath },
     windowsHide: true,
     maxBuffer: 4 * 1024 * 1024,
   });
