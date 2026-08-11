@@ -235,6 +235,11 @@ test('single-node managers load packaged Prisma Client without generating it in 
   assert.match(linuxInitializer, /use_bundled_runtime[\s\S]*test_packaged_prisma_client[\s\S]*return/);
   assert.match(windowsInitializer, /@\('prisma:generate'\)/);
   assert.match(linuxInitializer, /invoke_platform_package prisma:generate/);
+  assert.match(windows, /PRISMA_SCHEMA_ENGINE_BINARY/);
+  assert.match(windows, /PRISMA_QUERY_ENGINE_LIBRARY/);
+  assert.match(linux, /PRISMA_SCHEMA_ENGINE_BINARY/);
+  assert.match(linux, /PRISMA_QUERY_ENGINE_LIBRARY/);
+  assert.match(linux, /schema-engine-debian-openssl-3\.0\.x/);
 });
 
 test('single-node managers validate the Worker command and roll back a partial start', () => {
@@ -285,6 +290,8 @@ test('Windows Doctor succeeds in an isolated release layout and renders configur
     put(join(releaseRoot, 'services', 'platform-api', 'dist', 'main.js'), '');
     put(join(releaseRoot, 'services', 'platform-api', 'prisma', 'schema.prisma'), '');
     put(join(releaseRoot, 'services', 'platform-api', 'node_modules', 'prisma', 'build', 'index.js'), 'process.exit(0);');
+    put(join(releaseRoot, 'services', 'platform-api', 'node_modules', '@prisma', 'engines', 'query_engine-windows.dll.node'), 'fixture');
+    put(join(releaseRoot, 'services', 'platform-api', 'node_modules', '@prisma', 'engines', 'schema-engine-windows.exe'), 'fixture');
     put(join(releaseRoot, 'services', 'platform-api', 'scripts', 'check-postgres-version.mjs'), 'process.exit(0);');
     put(join(releaseRoot, 'runtime', 'nginx', 'nginx.cmd'), '@exit /b 0\r\n');
     put(join(releaseRoot, 'runtime', 'nginx', 'conf', 'mime.types'), 'types {}\r\n');

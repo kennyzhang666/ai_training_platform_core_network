@@ -4,6 +4,11 @@
 
 ## 未发布
 
+## v1.0.7 · 2026-08-11
+
+- 修复 Ubuntu 22.04.5 完全断网安装 v1.0.6 时，Prisma CLI 在执行数据库迁移前尝试下载 `schema-engine-debian-openssl-3.0.x` 的问题。Linux 发布包现在同时固化客户端查询引擎、CLI 查询引擎和 Schema Engine，安装与数据库检查通过包内绝对路径运行，缺少任一文件会在预检阶段直接停止。
+- Ubuntu 22.04 发布流水线增加最终压缩包级验证：解压正式交付包后，使用包内 Node、Prisma CLI 和两类引擎对真实 PostgreSQL 14 执行 `migrate deploy`，成功后才发布 GitHub Release。
+
 ## v1.0.6 · 2026-08-11
 
 - 修复完全断网环境安装 v1.0.5 时重复执行 `prisma generate` 并尝试下载 Prisma 引擎的问题，以及 GitHub Runner 生成的客户端只有 `debian-openssl-1.1.x`、无法在目标 Ubuntu 22.04.5/OpenSSL 3 服务器运行的问题；原生离线包改为只加载构建阶段已固化的 Prisma Client，Linux 包强制包含并加载验证 `debian-openssl-3.0.x` 引擎，安装时绝不访问外网。

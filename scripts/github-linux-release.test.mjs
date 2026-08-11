@@ -29,6 +29,9 @@ test('GitHub workflow builds tagged releases on native Ubuntu 22.04 and publishe
   assert.match(workflow, /require\(['"]@prisma\/client['"]\)/);
   assert.match(workflow, /libquery_engine-debian-openssl-3\.0\.x\.so\.node/);
   assert.match(workflow, /PRISMA_QUERY_ENGINE_LIBRARY/);
+  assert.match(workflow, /PRISMA_SCHEMA_ENGINE_BINARY/);
+  assert.match(workflow, /schema-engine-debian-openssl-3\.0\.x/);
+  assert.match(workflow, /migrate deploy/);
   assert.match(workflow, /gh release (?:create|upload)/);
   assert.match(workflow, /GH_REPO: \$\{\{ github\.repository \}\}/);
   assert.match(workflow, /--verify-tag/);

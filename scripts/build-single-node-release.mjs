@@ -54,6 +54,8 @@ export const RELEASE_TARGETS = Object.freeze({
     environmentTemplate: 'windows.env.example',
     archiveExtension: '.zip',
     prismaEngine: 'query_engine-windows.dll.node',
+    prismaSchemaEngine: 'schema-engine-windows.exe',
+    prismaBinaryTarget: 'windows',
     runtimeFiles: Object.freeze([
       'node/node.exe',
       'powershell/pwsh.exe',
@@ -70,6 +72,8 @@ export const RELEASE_TARGETS = Object.freeze({
     environmentTemplate: 'linux.env.example',
     archiveExtension: '.tar.gz',
     prismaEngine: 'libquery_engine-debian-openssl-3.0.x.so.node',
+    prismaSchemaEngine: 'schema-engine-debian-openssl-3.0.x',
+    prismaBinaryTarget: 'debian-openssl-3.0.x',
     runtimeFiles: Object.freeze([
       'node/bin/node',
       'python/bin/python3',
@@ -244,6 +248,8 @@ export async function assembleReleaseLayout(options) {
   await requireDirectory(wheelhouseRoot, 'offline wheelhouse');
   await requireFile(join(apiDeployRoot, 'node_modules', '.prisma', 'client', 'default.js'), 'generated Prisma Client');
   await requireFile(join(apiDeployRoot, 'node_modules', '.prisma', 'client', descriptor.prismaEngine), `${target} Prisma query engine`);
+  await requireFile(join(apiDeployRoot, 'node_modules', '@prisma', 'engines', descriptor.prismaEngine), `${target} Prisma CLI query engine`);
+  await requireFile(join(apiDeployRoot, 'node_modules', '@prisma', 'engines', descriptor.prismaSchemaEngine), `${target} Prisma schema engine`);
   if (existsSync(outputRoot)) throw new Error(`release output already exists: ${outputRoot}`);
   if (inside(outputRoot, sourceRoot) || outputRoot === sourceRoot) throw new Error('release output cannot contain the source root');
   if (!(await wheelFiles(wheelhouseRoot)).length) throw new Error(`offline wheelhouse contains no .whl files: ${wheelhouseRoot}`);
@@ -321,6 +327,8 @@ export async function verifyReleaseLayout(rootValue) {
   }
   await requireFile(join(root, 'services', 'platform-api', 'node_modules', '.prisma', 'client', 'default.js'), 'generated Prisma Client');
   await requireFile(join(root, 'services', 'platform-api', 'node_modules', '.prisma', 'client', RELEASE_TARGETS[manifest.target].prismaEngine), `${manifest.target} Prisma query engine`);
+  await requireFile(join(root, 'services', 'platform-api', 'node_modules', '@prisma', 'engines', RELEASE_TARGETS[manifest.target].prismaEngine), `${manifest.target} Prisma CLI query engine`);
+  await requireFile(join(root, 'services', 'platform-api', 'node_modules', '@prisma', 'engines', RELEASE_TARGETS[manifest.target].prismaSchemaEngine), `${manifest.target} Prisma schema engine`);
   const actual = (await listReleaseFiles(root)).filter((file) => file.path !== 'release-manifest.json');
   if (JSON.stringify(actual) !== JSON.stringify(manifest.files)) throw new Error('release manifest does not match package files');
   if (RELEASE_TARGETS[manifest.target].platform === 'win32') {
@@ -401,6 +409,24 @@ function targetNodeExecutable(runtimeRoot, target) {
   return join(runtimeRoot, ...relativePath.split('/'));
 }
 
+async function preparePrismaCliEngines(apiDeployRoot, runtimeRoot, target) {
+  const descriptor = RELEASE_TARGETS[target];
+  const nodePath = targetNodeExecutable(runtimeRoot, target);
+  const postinstall = join(apiDeployRoot, 'node_modules', '@prisma', 'engines', 'scripts', 'postinstall.js');
+  const queryEngine = join(apiDeployRoot, 'node_modules', '@prisma', 'engines', descriptor.prismaEngine);
+  const schemaEngine = join(apiDeployRoot, 'node_modules', '@prisma', 'engines', descriptor.prismaSchemaEngine);
+  await requireFile(postinstall, 'Prisma engine installer');
+  await execFileAsync(nodePath, [postinstall], {
+    cwd: apiDeployRoot,
+    env: { ...process.env, PRISMA_CLI_BINARY_TARGETS: descriptor.prismaBinaryTarget },
+    windowsHide: true,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  await requireFile(queryEngine, `${target} Prisma CLI query engine`);
+  await requireFile(schemaEngine, `${target} Prisma schema engine`);
+  await execFileAsync(schemaEngine, ['--version'], { cwd: apiDeployRoot, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+}
+
 async function generatePrismaClient(apiDeployRoot, runtimeRoot, target) {
   const nodePath = targetNodeExecutable(runtimeRoot, target);
   const prismaCli = join(apiDeployRoot, 'node_modules', 'prisma', 'build', 'index.js');
@@ -458,6 +484,7 @@ async function runCli() {
       await execFileAsync(pnpm.executable, [...pnpm.args, 'build'], { cwd: projectRoot, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
       await execFileAsync(pnpm.executable, [...pnpm.args, '--filter', '@ai-training/platform-api', '--config.node-linker=hoisted', 'deploy', '--prod', '--legacy', apiDeployRoot], { cwd: projectRoot, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
     }
+    await preparePrismaCliEngines(apiDeployRoot, runtimeRoot, target);
     await generatePrismaClient(apiDeployRoot, runtimeRoot, target);
     await assembleReleaseLayout({ sourceRoot: projectRoot, apiDeployRoot, runtimeRoot, wheelhouseRoot, outputRoot: releaseDirectory, target, version, sourceDateEpoch: epoch });
     await verifyPackagedPrismaClient(releaseDirectory, runtimeRoot, target);

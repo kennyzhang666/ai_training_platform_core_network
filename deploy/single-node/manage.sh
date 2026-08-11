@@ -268,6 +268,18 @@ invoke_platform_node() {
   (cd "$project_root" && "$runtime_node" "$script" "$@")
 }
 
+invoke_bundled_prisma() {
+  local prisma_cli="$project_root/services/platform-api/node_modules/prisma/build/index.js"
+  local query_engine="$project_root/services/platform-api/node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node"
+  local schema_engine="$project_root/services/platform-api/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x"
+  [[ -f "$prisma_cli" ]] || die 'Prisma 迁移工具不存在'
+  [[ -f "$query_engine" ]] || die '离线发布包缺少 Prisma 查询引擎，请获取完整发布包'
+  [[ -f "$schema_engine" ]] || die '离线发布包缺少 Prisma 迁移引擎，请获取完整发布包'
+  PRISMA_QUERY_ENGINE_LIBRARY="$query_engine" \
+    PRISMA_SCHEMA_ENGINE_BINARY="$schema_engine" \
+    invoke_platform_node "$prisma_cli" "$@"
+}
+
 use_bundled_runtime() {
   [[ "$(env_value PLATFORM_RUNTIME_MODE workspace | tr '[:upper:]' '[:lower:]')" == 'bundled' ]]
 }
@@ -299,7 +311,7 @@ deploy_database() {
   initialize_prisma_client
   check_database_compatibility
   if use_bundled_runtime; then
-    invoke_platform_node "$project_root/services/platform-api/node_modules/prisma/build/index.js" 'migrate' 'deploy' \
+    invoke_bundled_prisma 'migrate' 'deploy' \
       '--schema' "$project_root/services/platform-api/prisma/schema.prisma"
   else
     invoke_platform_package prisma:migrate:deploy
@@ -309,7 +321,7 @@ deploy_database() {
 check_database() {
   check_database_compatibility
   if use_bundled_runtime; then
-    invoke_platform_node "$project_root/services/platform-api/node_modules/prisma/build/index.js" migrate status \
+    invoke_bundled_prisma migrate status \
       --schema "$project_root/services/platform-api/prisma/schema.prisma"
   else
     invoke_platform_package exec prisma migrate status --schema "$project_root/services/platform-api/prisma/schema.prisma"

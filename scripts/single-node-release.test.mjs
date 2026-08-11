@@ -72,6 +72,11 @@ async function fixture(root) {
     'node_modules/.prisma/client/default.js',
     'node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node',
     'node_modules/.prisma/client/query_engine-windows.dll.node',
+    'node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node',
+    'node_modules/@prisma/engines/query_engine-windows.dll.node',
+    'node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x',
+    'node_modules/@prisma/engines/schema-engine-windows.exe',
+    'node_modules/@prisma/engines/scripts/postinstall.js',
     'node_modules/@prisma/client/index.js',
     'node_modules/prisma/build/index.js',
     'node_modules/runtime-dependency/src/index.js',
@@ -104,6 +109,8 @@ test('release contract supports Windows x64 and Linux x64 with platform runtimes
   assert.equal(RELEASE_TARGETS['linux-x64'].archiveExtension, '.tar.gz');
   assert.equal(RELEASE_TARGETS['linux-x64'].prismaEngine, 'libquery_engine-debian-openssl-3.0.x.so.node');
   assert.equal(RELEASE_TARGETS['win32-x64'].prismaEngine, 'query_engine-windows.dll.node');
+  assert.equal(RELEASE_TARGETS['linux-x64'].prismaSchemaEngine, 'schema-engine-debian-openssl-3.0.x');
+  assert.equal(RELEASE_TARGETS['win32-x64'].prismaSchemaEngine, 'schema-engine-windows.exe');
 });
 
 test('Prisma schema pins the Ubuntu 22.04 OpenSSL 3 query engine', async () => {
@@ -124,6 +131,7 @@ test('release builder creates a portable production dependency tree with pnpm 11
   const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), 'build-single-node-release.mjs'), 'utf8');
   assert.match(source, /'--config\.node-linker=hoisted', 'deploy', '--prod', '--legacy', apiDeployRoot/);
   assert.match(source, /'generate', '--schema'/);
+  assert.match(source, /PRISMA_CLI_BINARY_TARGETS/);
   assert.match(source, /import ldap3, jsonschema, yaml/);
   assert.match(source, /verbatimSymlinks: true/);
 });
@@ -194,6 +202,8 @@ for (const target of ['win32-x64', 'linux-x64']) {
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/dist/main.js'));
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/.prisma/client/default.js'));
       assert.ok(manifest.files.some((file) => file.path === `services/platform-api/node_modules/.prisma/client/${RELEASE_TARGETS[target].prismaEngine}`));
+      assert.ok(manifest.files.some((file) => file.path === `services/platform-api/node_modules/@prisma/engines/${RELEASE_TARGETS[target].prismaEngine}`));
+      assert.ok(manifest.files.some((file) => file.path === `services/platform-api/node_modules/@prisma/engines/${RELEASE_TARGETS[target].prismaSchemaEngine}`));
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/prisma/build/index.js'));
       assert.ok(manifest.files.some((file) => file.path === 'services/platform-api/node_modules/runtime-dependency/src/index.js'));
       assert.ok(manifest.files.some((file) => file.path === 'grader/src/drill_grader/__init__.py'));

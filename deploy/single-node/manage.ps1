@@ -292,6 +292,27 @@ function Invoke-PlatformNode([string]$Script, [string[]]$Arguments) {
     }
 }
 
+function Invoke-BundledPrisma([string[]]$Arguments) {
+    $prismaCli = Join-Path $projectRoot 'services\platform-api\node_modules\prisma\build\index.js'
+    $queryEngine = Join-Path $projectRoot 'services\platform-api\node_modules\@prisma\engines\query_engine-windows.dll.node'
+    $schemaEngine = Join-Path $projectRoot 'services\platform-api\node_modules\@prisma\engines\schema-engine-windows.exe'
+    if (-not (Test-Path -LiteralPath $prismaCli -PathType Leaf)) { throw "Prisma 迁移工具不存在：$prismaCli" }
+    if (-not (Test-Path -LiteralPath $queryEngine -PathType Leaf)) { throw '离线发布包缺少 Prisma 查询引擎，请获取完整发布包' }
+    if (-not (Test-Path -LiteralPath $schemaEngine -PathType Leaf)) { throw '离线发布包缺少 Prisma 迁移引擎，请获取完整发布包' }
+    $hadQueryEngine = Test-Path Env:PRISMA_QUERY_ENGINE_LIBRARY
+    $hadSchemaEngine = Test-Path Env:PRISMA_SCHEMA_ENGINE_BINARY
+    $previousQueryEngine = $env:PRISMA_QUERY_ENGINE_LIBRARY
+    $previousSchemaEngine = $env:PRISMA_SCHEMA_ENGINE_BINARY
+    try {
+        $env:PRISMA_QUERY_ENGINE_LIBRARY = $queryEngine
+        $env:PRISMA_SCHEMA_ENGINE_BINARY = $schemaEngine
+        Invoke-PlatformNode $prismaCli $Arguments
+    } finally {
+        if ($hadQueryEngine) { $env:PRISMA_QUERY_ENGINE_LIBRARY = $previousQueryEngine } else { Remove-Item Env:PRISMA_QUERY_ENGINE_LIBRARY -ErrorAction SilentlyContinue }
+        if ($hadSchemaEngine) { $env:PRISMA_SCHEMA_ENGINE_BINARY = $previousSchemaEngine } else { Remove-Item Env:PRISMA_SCHEMA_ENGINE_BINARY -ErrorAction SilentlyContinue }
+    }
+}
+
 function Use-BundledRuntime {
     return (Env 'PLATFORM_RUNTIME_MODE' 'workspace').ToLowerInvariant() -eq 'bundled'
 }
@@ -329,9 +350,8 @@ function Deploy-Database {
     Initialize-PrismaClient
     Test-DatabaseCompatibility
     if (Use-BundledRuntime) {
-        $prismaCli = Join-Path $projectRoot 'services\platform-api\node_modules\prisma\build\index.js'
         $schema = Join-Path $projectRoot 'services\platform-api\prisma\schema.prisma'
-        Invoke-PlatformNode $prismaCli @('migrate', 'deploy', '--schema', $schema)
+        Invoke-BundledPrisma @('migrate', 'deploy', '--schema', $schema)
     } else {
         Invoke-PlatformPackage @('prisma:migrate:deploy')
     }
@@ -341,8 +361,7 @@ function Test-Database {
     Test-DatabaseCompatibility
     $schema = Join-Path $projectRoot 'services\platform-api\prisma\schema.prisma'
     if (Use-BundledRuntime) {
-        $prismaCli = Join-Path $projectRoot 'services\platform-api\node_modules\prisma\build\index.js'
-        Invoke-PlatformNode $prismaCli @('migrate', 'status', '--schema', $schema)
+        Invoke-BundledPrisma @('migrate', 'status', '--schema', $schema)
     } else {
         Invoke-PlatformPackage @('exec', 'prisma', 'migrate', 'status', '--schema', $schema)
     }
