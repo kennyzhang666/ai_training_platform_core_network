@@ -231,7 +231,7 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
     assert.equal(capacityPage.pageInfo.total, 100);
     const staleStore = await createPlatformStore();
     readService = new PlatformReadService(normalizedStore);
-    const normalizedSubmissionPage = await readService.listSubmissions({ eventId, page: 1, pageSize: 1 }, adminId);
+    const normalizedSubmissionPage = await readService.listSubmissions({ eventId, state: 'GRADED', page: 1, pageSize: 1 }, adminId);
     assert.equal(normalizedSubmissionPage.pageInfo.total, 1);
     assert.equal(normalizedSubmissionPage.items[0]?.id, submissionId);
     assert.equal(normalizedStore.listEvents(result.identity.user.id).some((item) => item.id === eventId), true);
