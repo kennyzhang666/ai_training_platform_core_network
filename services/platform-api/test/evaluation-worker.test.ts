@@ -87,7 +87,7 @@ test('Worker materialises a frozen batch, invokes the Code Agent bridge and impo
       "import { existsSync, readFileSync, writeFileSync } from 'node:fs';",
       "import { resolve } from 'node:path';",
       'const args = process.argv.slice(2);',
-      "const promptIndex = args.indexOf('--prompt');",
+      "const promptIndex = args.indexOf('-p');",
       "const prompt = promptIndex >= 0 ? args[promptIndex + 1] : '';",
       "if (!prompt.includes('challenge') || !prompt.includes('instructionPath') || !prompt.includes('skillPaths')) throw new Error('Worker 未按赛题自动组合 Prompt');",
       "const manifestPath = resolve(process.env.AI_TRAINING_BATCH_MANIFEST ?? '');",
@@ -104,7 +104,7 @@ test('Worker materialises a frozen batch, invokes the Code Agent bridge and impo
       method: 'PUT', headers: admin,
       body: JSON.stringify({
         enabled: true,
-        commandLine: `${quoteCommandArgument(process.execPath)} ${quoteCommandArgument(bridgeWrapper)} --prompt "{{prompt}}"`,
+        commandLine: `${quoteCommandArgument(process.execPath)} ${quoteCommandArgument(bridgeWrapper)} -p "{{prompt}}"`,
         prompt: '',
         timeoutSeconds: 3600,
       }),

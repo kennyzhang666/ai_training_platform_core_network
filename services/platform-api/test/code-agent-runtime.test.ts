@@ -44,7 +44,8 @@ test('only a global administrator can configure the Code Agent runtime', () => {
 
 test('runtime diagnostics exposes defaults and explains the Worker precedence safely', () => {
   const config = defaultCodeAgentRuntimeConfig();
-  assert.equal(config.commandLine, 'codeagent --prompt "{{prompt}}"');
+  assert.equal(config.commandLine, 'codeagent -p "{{prompt}}"');
+  assert.deepEqual(config.args, ['-p', '{{prompt}}']);
   assert.equal(config.prompt, '');
   const diagnostics = codeAgentRuntimeDiagnostics(config);
   assert.equal(diagnostics.schemaVersion, '1.0');

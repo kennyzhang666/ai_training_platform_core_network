@@ -19,7 +19,7 @@ test('single-node bundle uses same-server PostgreSQL, local artifacts and an ind
   assert.match(environment, /^EMBEDDED_EVALUATION_WORKER=false$/m);
   assert.match(environment, /^ENGINE_PIP_OFFLINE=true$/m);
   assert.match(environment, /^CODE_AGENT_COMMAND=codeagent$/m);
-  assert.match(environment, /^CODE_AGENT_ARGS_JSON=\["--prompt","\{\{prompt\}\}"\]$/m);
+  assert.match(environment, /^CODE_AGENT_ARGS_JSON=\["-p","\{\{prompt\}\}"\]$/m);
   assert.doesNotMatch(environment, /^PLATFORM_DATA_FILE=/m);
   assert.doesNotMatch(environment, /^OBJECT_STORAGE_BUCKET=/m);
 });

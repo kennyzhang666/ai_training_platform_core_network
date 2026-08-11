@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：1.0.0。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：1.0.1。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -113,7 +113,7 @@ engine.json 是元数据和限制的事实来源；instruction.md 说明 Agent �
 运行配置中的命令只能是“可执行文件 + 参数”，不会经过系统 Shell。Worker 替换占位符并注入批次清单和任务指令。
 
 ~~~text
-codeagent --prompt "{{prompt}}"
+codeagent -p "{{prompt}}"
 
 占位符：
   {{prompt}}       任务指令
@@ -285,7 +285,7 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台设计文档
 
-> 设计基线：`v1.0.0`
+> 设计基线：`v1.0.1`
 > 更新日期：2026-08-11
 > 文档职责：产品、业务、权限、评测、报告、能力画像、页面、交互、视觉与文案的唯一标准
 
@@ -629,7 +629,7 @@ Code Agent 命令由全局管理员配置，Worker 以参数数组和 `shell: fa
 
 ```text
 CODE_AGENT_COMMAND=codeagent
-CODE_AGENT_ARGS_JSON=["--prompt","{{prompt}}"]
+CODE_AGENT_ARGS_JSON=["-p","{{prompt}}"]
 ```
 
 自有 bridge 示例：
@@ -1113,11 +1113,11 @@ AI 能力画像
 
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v1.0.0`
+> 当前发布版本：`v1.0.1`
 > 更新日期：2026-08-11
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.0` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并提供双平台一键安装入口与 Ubuntu 22.04 x64 原生 GitHub 发布流水线。公司 Code Agent 使用 `codeagent` 默认命令，评测 Prompt 由平台按赛题自动组合；Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
+企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.1` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并提供双平台一键安装入口与 Ubuntu 22.04 x64 原生 GitHub 发布流水线。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令，评测 Prompt 由平台按赛题自动组合并沿用 Agent 默认 bypass；Windows Server x64 与 Ubuntu 22.04.5 断网目标机 UAT、自动备份和离线升级仍是后续工作。
 
 平台级文档只保留三个入口：
 
@@ -1496,7 +1496,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v1.0.0 已验证基线
+### 12.2 v1.0.1 已验证基线
 
 - Workspace：153 项，152 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web 交付方式规则：3/3；
@@ -1590,7 +1590,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 ## 16. 后续路线
 
-### 16.1 v1.0.1：目标机验收与极简运维
+### 16.1 v1.0.2：目标机验收与极简运维
 
 目标：运维人员在全新断网服务器上使用离线包和一份配置，在 30 分钟内完成部署，并能长期运行。
 
@@ -1641,6 +1641,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v0.9.8` | 2026-08-10 | 发布 SDD 日志脱敏 v2 进阶赛题，以 24 项评测方隐藏用例强化 HMAC、失败关闭、复杂载荷和流式批处理验收，并稳定 Windows 本地验收端口分配。 |
 | `v0.9.9` | 2026-08-11 | 发布 Windows/Linux 原生一键安装、开机自启、幂等卸载、Ubuntu 22.04 原生发布流水线，并内置已验证的公司内网 LDAP 默认参数。 |
 | `v1.0.0` | 2026-08-11 | 完成全仓审查，修复 Windows 发布构建、Worker 安全解压、续租、清理和日志脱敏问题，清零生产依赖已知漏洞，并将公司 `codeagent` 与赛题级自动 Prompt 设为默认。 |
+| `v1.0.1` | 2026-08-11 | 将公司内网 Code Agent 默认命令修正为 `codeagent -p "{{prompt}}"`，启用非交互模式并沿用默认 bypass，同步双平台部署模板、后台配置说明和评测引擎开发包。 |
 
 ## 18. 交接检查表
 
@@ -6054,13 +6055,13 @@ Worker 对每个批次创建独立目录，并验证所有不可变内容的 SHA
 全局管理员在「管理后台 → 评测环境」配置 Code Agent；部门管理员无权查看或修改。公司内网默认可执行文件为 `codeagent`，模型由公司环境内置，不需要填写 `-m`。默认命令为：
 
 ```text
-codeagent --prompt "{{prompt}}"
+codeagent -p "{{prompt}}"
 ```
 
 Worker 会解析为可执行文件和参数，并以 `spawn(..., { shell: false })` 启动。`{{prompt}}` 不由管理员逐题填写：Worker 会自动组合平台任务要求、赛题版本、题目说明、评测引擎 `instruction.md`、Skills、选中的提交、输入输出契约和结果路径。管理页的「任务指令」只用于补充全局约束，可以保持默认值。
 
 ```text
-codeagent --prompt "{{prompt}}"
+codeagent -p "{{prompt}}"
 ```
 
 可用占位符只有：
@@ -6089,7 +6090,7 @@ Worker --agent-command 显式覆盖
 
 全局管理员可以在“管理后台 → 评测环境”查看三组信息：
 
-- **默认配置**：平台内置公司 Code Agent 启动命令 `codeagent --prompt "{{prompt}}"`、自动评测任务基线和 3600 秒超时。`{{prompt}}` 由 Worker 根据当前赛题自动生成，不需要指定模型；启用前确认 Worker 主机可以直接运行 `codeagent`。
+- **默认配置**：平台内置公司 Code Agent 启动命令 `codeagent -p "{{prompt}}"`、自动评测任务基线和 3600 秒超时。`-p` 使用非交互模式并沿用 Code Agent 默认 bypass；`{{prompt}}` 由 Worker 根据当前赛题自动生成，不需要指定模型。启用前确认 Worker 主机可以直接运行 `codeagent`。
 - **平台配置**：启用后由 API 在创建评测批次时解析并冻结 `executable` 与 `args`；页面显示当前可执行文件、配置校验值和允许列表。
 - **Worker 本地配置**：读取 API 进程可见的 `CODE_AGENT_COMMAND`、`CODE_AGENT_ARGS_JSON`、`EMBEDDED_EVALUATION_WORKER` 和 `EVALUATION_WORKER_ID`。Worker 启动参数 `--agent-command` 只存在于 Worker 进程，API 无法读取，因此诊断会明确标注为“命令行覆盖（API 不可见）”，不能把它误认为未配置。
 
@@ -6590,7 +6591,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {

@@ -93,13 +93,13 @@ Worker 对每个批次创建独立目录，并验证所有不可变内容的 SHA
 全局管理员在「管理后台 → 评测环境」配置 Code Agent；部门管理员无权查看或修改。公司内网默认可执行文件为 `codeagent`，模型由公司环境内置，不需要填写 `-m`。默认命令为：
 
 ```text
-codeagent --prompt "{{prompt}}"
+codeagent -p "{{prompt}}"
 ```
 
 Worker 会解析为可执行文件和参数，并以 `spawn(..., { shell: false })` 启动。`{{prompt}}` 不由管理员逐题填写：Worker 会自动组合平台任务要求、赛题版本、题目说明、评测引擎 `instruction.md`、Skills、选中的提交、输入输出契约和结果路径。管理页的「任务指令」只用于补充全局约束，可以保持默认值。
 
 ```text
-codeagent --prompt "{{prompt}}"
+codeagent -p "{{prompt}}"
 ```
 
 可用占位符只有：
@@ -128,7 +128,7 @@ Worker --agent-command 显式覆盖
 
 全局管理员可以在“管理后台 → 评测环境”查看三组信息：
 
-- **默认配置**：平台内置公司 Code Agent 启动命令 `codeagent --prompt "{{prompt}}"`、自动评测任务基线和 3600 秒超时。`{{prompt}}` 由 Worker 根据当前赛题自动生成，不需要指定模型；启用前确认 Worker 主机可以直接运行 `codeagent`。
+- **默认配置**：平台内置公司 Code Agent 启动命令 `codeagent -p "{{prompt}}"`、自动评测任务基线和 3600 秒超时。`-p` 使用非交互模式并沿用 Code Agent 默认 bypass；`{{prompt}}` 由 Worker 根据当前赛题自动生成，不需要指定模型。启用前确认 Worker 主机可以直接运行 `codeagent`。
 - **平台配置**：启用后由 API 在创建评测批次时解析并冻结 `executable` 与 `args`；页面显示当前可执行文件、配置校验值和允许列表。
 - **Worker 本地配置**：读取 API 进程可见的 `CODE_AGENT_COMMAND`、`CODE_AGENT_ARGS_JSON`、`EMBEDDED_EVALUATION_WORKER` 和 `EVALUATION_WORKER_ID`。Worker 启动参数 `--agent-command` 只存在于 Worker 进程，API 无法读取，因此诊断会明确标注为“命令行覆盖（API 不可见）”，不能把它误认为未配置。
 

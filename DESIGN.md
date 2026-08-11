@@ -1,6 +1,6 @@
 # AI 能力训战平台设计文档
 
-> 设计基线：`v1.0.0`
+> 设计基线：`v1.0.1`
 > 更新日期：2026-08-11
 > 文档职责：产品、业务、权限、评测、报告、能力画像、页面、交互、视觉与文案的唯一标准
 
@@ -344,7 +344,7 @@ Code Agent 命令由全局管理员配置，Worker 以参数数组和 `shell: fa
 
 ```text
 CODE_AGENT_COMMAND=codeagent
-CODE_AGENT_ARGS_JSON=["--prompt","{{prompt}}"]
+CODE_AGENT_ARGS_JSON=["-p","{{prompt}}"]
 ```
 
 自有 bridge 示例：

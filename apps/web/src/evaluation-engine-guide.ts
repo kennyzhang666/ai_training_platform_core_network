@@ -101,7 +101,7 @@ engine.json 是元数据和限制的事实来源；instruction.md 说明 Agent �
 运行配置中的命令只能是“可执行文件 + 参数”，不会经过系统 Shell。Worker 替换占位符并注入批次清单和任务指令。
 
 ~~~text
-codeagent --prompt "{{prompt}}"
+codeagent -p "{{prompt}}"
 
 占位符：
   {{prompt}}       任务指令

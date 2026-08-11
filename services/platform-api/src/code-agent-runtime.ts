@@ -15,7 +15,7 @@ const DEFAULT_TEST_MAX_TIMEOUT_SECONDS = 120;
  * The template is deliberately disabled by default; an administrator must
  * enable and save it after confirming `codeagent` is available on the Worker.
  */
-export const DEFAULT_CODE_AGENT_COMMAND = 'codeagent --prompt "{{prompt}}"';
+export const DEFAULT_CODE_AGENT_COMMAND = 'codeagent -p "{{prompt}}"';
 export const DEFAULT_CODE_AGENT_PROMPT = '';
 
 /**

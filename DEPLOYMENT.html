@@ -146,7 +146,7 @@
         <a href="#troubleshooting"><span class="n">10</span>故障排查</a>
         <a href="#boundaries"><span class="n">11</span>当前边界</a>
       </nav>
-      <div class="side-note">v1.0.0<br>Windows x64 / Linux x64<br>原生一键安装</div>
+      <div class="side-note">v1.0.1<br>Windows x64 / Linux x64<br>原生一键安装</div>
     </aside>
 
     <main>
@@ -168,7 +168,7 @@
       </div>
 
       <div class="callout warning">
-        <strong>v1.0.0 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP/Code Agent 默认参数、安全解压门禁和开机自启；自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
+        <strong>v1.0.1 发布范围：</strong>原生发布包提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP/Code Agent 默认参数、安全解压门禁和开机自启；Code Agent 默认使用 <code>codeagent -p "{{prompt}}"</code> 非交互模式并沿用默认 bypass。自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
       </div>
 
       <section id="start">
@@ -207,7 +207,7 @@
 
       <section id="quick">
         <h2>02 · 一页纸傻瓜部署</h2>
-        <p>下面是 v1.0.0 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent</code> 参数已经内置，随机密钥由脚本生成。</p>
+        <p>下面是 v1.0.1 原生发布包的最短路径。Windows 包根目录包含 <code>install.cmd</code>，Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent -p</code> 非交互参数已经内置，随机密钥由脚本生成。</p>
 
         <div class="tabs" role="tablist" aria-label="操作系统">
           <button class="tab" role="tab" aria-selected="true" aria-controls="quick-windows" id="tab-windows">Windows Server</button>
@@ -315,7 +315,7 @@ curl -I http://127.0.0.1:8080/</pre></div>
             <tr><td><code>EVALUATION_WORKER_NAME</code></td><td>该工号在 SSO 中的真实姓名</td><td>必须与首次登记身份一致</td></tr>
             <tr><td><code>EVALUATION_WORKER_TRUSTED_GATEWAY_SECRET</code></td><td>安装器自动同步为网关 HMAC 密钥</td><td>不能使用浏览器 Cookie</td></tr>
             <tr><td><code>CODE_AGENT_COMMAND</code></td><td>Code Agent 可执行文件或绝对路径</td><td>公司内网默认 <code>codeagent</code>，通常无需修改</td></tr>
-            <tr><td><code>CODE_AGENT_ARGS_JSON</code></td><td>参数 JSON 数组</td><td>默认 <code>["--prompt","{{prompt}}"]</code>；Prompt 由平台按赛题自动组合</td></tr>
+            <tr><td><code>CODE_AGENT_ARGS_JSON</code></td><td>参数 JSON 数组</td><td>默认 <code>["-p","{{prompt}}"]</code>；<code>-p</code> 使用非交互模式，Prompt 由平台按赛题自动组合</td></tr>
             <tr><td><code>CODE_AGENT_ALLOWED_EXECUTABLES</code></td><td>允许启动的可执行文件，逗号分隔</td><td>必须包含命令名或绝对路径</td></tr>
             <tr><td><code>EVALUATION_ARCHIVE_MAX_FILES</code></td><td>单个引擎包或交付 ZIP 文件项上限</td><td>默认 10000</td></tr>
             <tr><td><code>EVALUATION_ARCHIVE_MAX_UNCOMPRESSED_BYTES</code></td><td>单个 ZIP 解压后总量上限</td><td>默认 536870912（512 MiB）</td></tr>
@@ -353,7 +353,7 @@ LDAP_CA_CERT_FILE=&lt;企业CA证书路径&gt;</pre></div></div>
         <h3>Code Agent 运行配置</h3>
         <div class="grid g2">
           <div class="card"><h4>公司内网默认</h4><div class="codebox"><div class="codehead"><span>.env</span><button class="copy" data-copy>复制</button></div><pre>CODE_AGENT_COMMAND=codeagent
-CODE_AGENT_ARGS_JSON=["--prompt","{{prompt}}"]
+CODE_AGENT_ARGS_JSON=["-p","{{prompt}}"]
 CODE_AGENT_ALLOWED_EXECUTABLES=codeagent</pre><p class="muted">模型由公司环境内置。<code>{{prompt}}</code> 由 Worker 自动组合赛题、instruction、Skills、提交清单和结果契约。</p></div></div>
           <div class="card"><h4>调用公司自有 bridge</h4><div class="codebox"><div class="codehead"><span>.env</span><button class="copy" data-copy>复制</button></div><pre>CODE_AGENT_COMMAND=company-evaluation-bridge
 CODE_AGENT_ARGS_JSON=["--manifest","{{manifestPath}}"]
@@ -453,7 +453,7 @@ ENGINE_CACHE_ROOT=/var/lib/ai-training/worker-engines
 ENGINE_PIP_OFFLINE=true
 ENGINE_PIP_FIND_LINKS=/opt/ai-training/wheelhouse
 CODE_AGENT_COMMAND=codeagent
-CODE_AGENT_ARGS_JSON='["--prompt","{{prompt}}"]'
+CODE_AGENT_ARGS_JSON='["-p","{{prompt}}"]'
 CODE_AGENT_ALLOWED_EXECUTABLES=codeagent</pre></div>
 
         <h3>标准部署顺序</h3>
@@ -754,7 +754,7 @@ cd /opt/ai-training
         <div class="callout success"><strong>部署完成标准：</strong>用户只访问一个地址；真实 SSO 登录；管理员能建题、建训战、选人评测；员工能提交并查看报告；数据库和交付件能一致备份恢复；日常操作不需要理解 Node、pnpm、Python 虚拟环境或平台源码。</div>
       </section>
 
-      <div class="footer">AI 能力训战平台部署与运维手册 · v1.0.0 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
+      <div class="footer">AI 能力训战平台部署与运维手册 · v1.0.1 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
     </main>
   </div>
   <div id="toast" role="status" aria-live="polite">已复制</div>
