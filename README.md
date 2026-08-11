@@ -388,7 +388,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 ### 12.2 v1.1.0 已验证基线
 
-- Workspace：173 项，172 通过，1 项 PostgreSQL 集成按显式配置跳过；
+- Workspace：174 项，173 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web：11/11；
 - 契约：11/11；
 - Python grader：18/18；

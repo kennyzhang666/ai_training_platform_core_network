@@ -103,6 +103,22 @@ test('a snapshot revision collision is retried without swallowing business confl
   assert.equal(businessAttempts, 1);
 });
 
+test('wrapped PostgreSQL deadlocks and serialization failures are retried', async () => {
+  for (const databaseError of [
+    'ConnectorError: PostgresError { code: "40P01", message: "deadlock detected" }',
+    'ConnectorError: PostgresError { code: "40001", message: "could not serialize access due to concurrent update" }',
+  ]) {
+    let attempts = 0;
+    const value = await runWithPostgresConflictRetry(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error(databaseError);
+      return 'committed';
+    }, { maxAttempts: 2, baseDelayMs: 0 });
+    assert.equal(value, 'committed');
+    assert.equal(attempts, 2);
+  }
+});
+
 test('PostgreSQL transaction timeout configuration fails fast on invalid values', () => {
   assert.equal(postgresTransactionTimeoutMs({}), 120_000);
   assert.equal(postgresTransactionTimeoutMs({ PERSIST_TRANSACTION_TIMEOUT_MS: '45000' }), 45_000);
@@ -113,8 +129,9 @@ test('PostgreSQL transaction timeout configuration fails fast on invalid values'
 test('the root PostgreSQL repository serializes concurrent identity transactions', async () => {
   let active = 0;
   let peak = 0;
+  const transactionOrder: string[] = [];
   const transactionClient = {
-    platformSnapshot: { upsert: async () => undefined },
+    platformSnapshot: { upsert: async () => { transactionOrder.push('revision'); } },
   };
   const client = {
     ...transactionClient,
@@ -131,9 +148,13 @@ test('the root PostgreSQL repository serializes concurrent identity transactions
   } as unknown as PrismaClient;
   const repository = new PrismaPlatformRepository({ client });
 
-  const values = await Promise.all(Array.from({ length: 100 }, (_, index) => repository.transaction(async () => index)));
+  const values = await Promise.all(Array.from({ length: 100 }, (_, index) => repository.transaction(async () => {
+    transactionOrder.push(`work-${index}`);
+    return index;
+  })));
 
   assert.equal(peak, 1);
   assert.deepEqual(values, Array.from({ length: 100 }, (_, index) => index));
+  assert.deepEqual(transactionOrder.slice(0, 2), ['revision', 'work-0']);
   await repository.close();
 });

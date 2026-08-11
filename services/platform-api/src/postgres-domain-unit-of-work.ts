@@ -27,7 +27,18 @@ export function postgresTransactionTimeoutMs(env: Record<string, string | undefi
 
 function retryablePostgresWriteConflict(error: unknown): boolean {
   if (error instanceof SnapshotRevisionConflictError) return true;
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034';
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') return true;
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { code?: unknown; message?: unknown; meta?: unknown; cause?: unknown };
+  if (candidate.code === '40P01' || candidate.code === '40001') return true;
+  let details = typeof candidate.message === 'string' ? candidate.message : '';
+  if (candidate.meta !== undefined) {
+    try { details += ` ${JSON.stringify(candidate.meta)}`; } catch { /* retain the message-only check */ }
+  }
+  if (candidate.cause && candidate.cause !== error && retryablePostgresWriteConflict(candidate.cause)) return true;
+  // Prisma 6 can surface PostgreSQL 40P01/40001 as an unknown request error
+  // whose only structured database code is embedded in the diagnostic text.
+  return /(?:code:\s*["']?(?:40P01|40001)\b|deadlock detected|could not serialize access due to concurrent update)/i.test(details);
 }
 
 export async function runWithPostgresConflictRetry<T>(

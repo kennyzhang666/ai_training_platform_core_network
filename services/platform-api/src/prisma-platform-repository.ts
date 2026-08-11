@@ -636,6 +636,11 @@ export class PrismaPlatformRepository implements PlatformRepository {
 
   async transaction<T>(work: (transaction: RepositoryTransaction) => Promise<T>): Promise<T> {
     return this.writes.run(() => runWithPostgresConflictRetry(() => this.client.$transaction(async (client) => {
+      // Every platform write channel acquires PlatformSnapshot before domain
+      // rows. The snapshot-backed unit of work already follows this order;
+      // doing the same here prevents a snapshot->AppUser / AppUser->snapshot
+      // deadlock when identity refresh overlaps a submission wave.
+      await bumpPlatformRevision(client);
       const result = await work({
         organizations: new PrismaOrganizationRepository(client),
         users: new PrismaUserRepository(client),
@@ -644,7 +649,6 @@ export class PrismaPlatformRepository implements PlatformRepository {
         events: new PrismaEventRepository(client),
         submissions: new PrismaSubmissionRepository(client),
       });
-      await bumpPlatformRevision(client);
       return result;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: postgresTransactionTimeoutMs() })));
   }
