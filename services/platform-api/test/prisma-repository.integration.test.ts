@@ -238,6 +238,12 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
           employeeNo: identity.user.employeeNo,
           name: `Capacity Learner ${offset + waveIndex + 1}`,
           department: result.org.path,
+        }).then((synced) => {
+          // Production identity synchronization notifies the shared store after
+          // every canonical repository commit. Mirror that path here while the
+          // test deliberately overlaps 20 identity refreshes with submissions.
+          normalizedStore.noteExternalCommit();
+          return synced;
         }))),
       ]);
       capacitySubmissions.push(...submissions);
