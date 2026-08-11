@@ -1,10 +1,10 @@
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v1.0.7`
-> 更新日期：2026-08-11
+> 当前发布版本：`v1.1.0`
+> 更新日期：2026-08-12
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.7` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并按“员工总量少于 100、同时使用约 20 人”完成身份同步、PostgreSQL 写入冲突和评测队列显示收口。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；内网 Linux 数据库兼容基线固定为 PostgreSQL 14。Linux 离线包在构建期固化 Prisma Client、CLI 查询引擎和 Schema Engine，安装与迁移只使用包内文件、不访问外网；最终压缩包必须在 Ubuntu 22.04 与真实 PostgreSQL 14 上完成迁移后才可发布。本次先发布 Linux 包，Windows Server x64 断网包继续沿用上一版，目标机 UAT、自动备份和离线升级仍是后续工作。
+企业内部 AI 训战、交付评测和能力复盘平台。`v1.1.0` 在完整训战闭环上进一步收口内网运行性能与正式使用体验：PostgreSQL 读取按 revision 复用规范化业务图，提交列表只返回已公布结果摘要，完整报告按需加载；赛题卡片简介与 Markdown 详情分离；空数据库可由全局管理员初始化首个组织；管理员下载同一学员、同一训战的最新成功 ZIP；员工端展示中文部门并自动选择运行中赛季。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；Linux 兼容基线仍为 Ubuntu 22.04 x64 + PostgreSQL 14，完整离线包不访问外网。Windows Server x64 断网包继续沿用上一版，自动化离线 Upgrade、诊断包和目标机 UAT 仍是后续工作。
 
 平台级文档只保留三个入口：
 
@@ -238,6 +238,7 @@ API 内部关键边界：
 - 提交进入排队或评测中后锁定，完成或失败后才能重新交付；
 - 重新评测创建新的 `GradingRun`，历史结果不可覆盖；
 - 相同快照由不同员工提交时，仍然各自拥有独立运行和结果。
+- 管理后台普通下载解析到同一训战、同一员工最新一次成功接收的 ZIP；Worker 和审计仍使用指定提交编号下载不可变快照。
 
 赛题交付契约属于管理后台和评测运行资产，详见 `docs/submission-contract.md`。
 
@@ -319,7 +320,9 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 所有生产档都必须设置 `PLATFORM_REPOSITORY=postgres`。只有 `PLATFORM_DEPLOYMENT_PROFILE=single-node` 的生产模式允许 `OBJECT_STORAGE_MODE=local`；标准生产默认要求 S3-compatible 存储和持久化上传会话。
 
-PostgreSQL 请求级读写使用 repeatable-read 事务并以 revision CAS 拒绝旧状态覆盖。当前单服务器档只运行一个 API 实例；虽然标准模式存在数据库和 S3 适配器，但多 API 实例仍需继续拆分领域 Repository 并完成容量与故障演练，不能把现有 CAS 当成完整高可用方案。
+PostgreSQL 写操作使用 repeatable-read 事务并以 revision CAS 拒绝旧状态覆盖。单 API 进程的读取先检查 revision：同一 revision 的并发页面请求共享一次规范化业务图装载，revision 变化后自动刷新；读取回调使用隔离副本，不能污染共享缓存。评测结果与审计按不可变增量写入，兼容快照不再重复保存全部历史业务数据。当前单服务器档只运行一个 API 实例；虽然标准模式存在数据库和 S3 适配器，但多 API 实例仍需继续拆分领域 Repository 并完成容量与故障演练，不能把现有 CAS 当成完整高可用方案。
+
+`GET /api/v1/submissions` 仅附带已公布结果的轻量 `resultSummary`。员工端启动和刷新不会为历史提交逐份请求 `/reports/:submissionId`；完整判据、证据和改进建议只在用户点击报告时加载。
 
 ## 11. API 与契约开发
 
@@ -383,15 +386,15 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v1.0.7 已验证基线
+### 12.2 v1.1.0 已验证基线
 
-- Workspace：158 项，157 通过，1 项 PostgreSQL 集成按显式配置跳过；
-- Web 交付方式规则：3/3；
-- 契约：7/7；
+- Workspace：173 项，172 通过，1 项 PostgreSQL 集成按显式配置跳过；
+- Web：11/11；
+- 契约：11/11；
 - Python grader：18/18；
 - LDAP 网关：21/21；
 - 评测资料包：2/2；
-- 离线发布：11/11；
+- 离线发布：12/12；
 - 部署门禁：33 项中 32 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并由 Ubuntu 22.04 发布流水线执行；
 - PostgreSQL 14：Ubuntu 22.04 发布流水线使用真实 PostgreSQL 14 运行版本检查、全部迁移和集成测试，并从最终压缩包再次执行迁移；
 - 依赖审计：生产依赖 0 个已知漏洞；
@@ -535,6 +538,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v1.0.5` | 2026-08-11 | 修复 Linux 可信网关配置误判和双平台发布包 Prisma Client 缺失；构建、安装与 Linux 发布流水线增加生成及实际加载门禁。 |
 | `v1.0.6` | 2026-08-11 | 修复完全断网安装重复下载和 Linux Prisma 引擎目标不匹配；原生包只加载构建期客户端，并强制包含 Ubuntu 22.04.5/OpenSSL 3 引擎。 |
 | `v1.0.7` | 2026-08-11 | 补齐 Linux 离线迁移所需的 Prisma CLI 查询引擎和 Schema Engine，并以最终发布包对 PostgreSQL 14 实跑迁移。 |
+| `v1.1.0` | 2026-08-12 | 收口 PostgreSQL revision 读取缓存和历史结果写放大，移除历史报告 N+1 请求，增加赛题简介/Markdown 详情、空组织初始化、最新交付件下载、中文部门和运行中赛季选择。 |
 
 ## 18. 交接检查表
 

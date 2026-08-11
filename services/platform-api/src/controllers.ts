@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { assertEventSubmissionWindow, PlatformStore } from './store';
 import type { UserListQuery, UserListSortBy, UserListSortOrder } from './store';
 import type { SubmissionListQuery } from './repository';
-import { Announcement, Challenge, ChallengeCategory, ChallengeVersion, CodeAgentRuntimeDiagnostics, CodeAgentRuntimeInput, CodeAgentRuntimeTestInput, EvaluationEngineConfig, EventConfig, HardProblem, HardProblemReviewStatus, HardProblemSolutionVisibility, Season, SubmissionSnapshot, SsoIdentity } from './domain';
+import { Announcement, Challenge, ChallengeCategory, ChallengeVersion, CodeAgentRuntimeDiagnostics, CodeAgentRuntimeInput, CodeAgentRuntimeTestInput, EvaluationEngineConfig, EventConfig, HardProblem, HardProblemReviewStatus, HardProblemSolutionVisibility, Season, SubmissionRecord, SubmissionSnapshot, SsoIdentity } from './domain';
 import { validateEvaluationResult } from './contract-validator';
 import { ArtifactStore } from './artifact-store';
 import { GradingExecutor, GRADING_EXECUTOR } from './grading-executor';
@@ -152,6 +152,24 @@ function validateRichTextDescription(value: unknown): void {
       throw new BadRequestException(`description image must be a valid image no larger than ${RICH_TEXT_IMAGE_MAX_BYTES} bytes`);
     }
   }
+}
+
+function validateChallengeContent(summary: unknown, description: unknown, descriptionFormat: unknown): void {
+  if (summary !== undefined) {
+    if (typeof summary !== 'string') throw new BadRequestException('赛题简介必须是文本');
+    if (Array.from(summary.trim()).length > 300) throw new BadRequestException('赛题简介不能超过 300 个字符');
+  }
+  if (descriptionFormat !== undefined && descriptionFormat !== 'MARKDOWN' && descriptionFormat !== 'HTML') {
+    throw new BadRequestException('赛题详情格式不正确');
+  }
+  if (descriptionFormat === 'MARKDOWN') {
+    if (description !== undefined && typeof description !== 'string') throw new BadRequestException('赛题详情必须是文本');
+    if (typeof description === 'string' && Buffer.byteLength(description, 'utf8') > RICH_TEXT_DESCRIPTION_MAX_BYTES) {
+      throw new BadRequestException(`赛题详情不能超过 ${RICH_TEXT_DESCRIPTION_MAX_BYTES} 字节`);
+    }
+    return;
+  }
+  validateRichTextDescription(description);
 }
 
 function parseUserProfilePatch(input: unknown): UserProfilePatch {
@@ -668,7 +686,7 @@ export class PlatformController {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...challenge } = body;
     for (const version of challenge.versions ?? []) {
-      validateRichTextDescription(version.description);
+      validateChallengeContent(version.summary, version.description, version.descriptionFormat);
       this.assertExecutorSelection(version);
       this.assertSubmissionContract(version);
       this.contractCatalog.assertSelection(version.evaluationEngine);
@@ -717,7 +735,7 @@ export class PlatformController {
   async createChallengeVersion(@Param('challengeId') challengeId: string, @Body() body: ChallengeVersion & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...version } = body;
-    validateRichTextDescription(version.description);
+    validateChallengeContent(version.summary, version.description, version.descriptionFormat);
     this.assertExecutorSelection(version);
     this.assertSubmissionContract(version);
     this.contractCatalog.assertSelection(version.evaluationEngine);
@@ -728,7 +746,7 @@ export class PlatformController {
   async updateChallengeVersion(@Param('challengeId') challengeId: string, @Param('versionId') versionId: string, @Body() body: Partial<ChallengeVersion> & { actorId?: string }, @Headers('x-employee-id') employeeId?: string) {
     const actorId = this.requireAdmin(employeeId);
     const { actorId: _ignoredActorId, ...patch } = body;
-    validateRichTextDescription(patch.description);
+    validateChallengeContent(patch.summary, patch.description, patch.descriptionFormat);
     if (patch.evaluationEngine) this.assertExecutorSelection(patch as { evaluationEngine?: EvaluationEngineConfig });
     this.assertSubmissionContract(patch);
     if (patch.evaluationEngine) this.contractCatalog.assertSelection(patch.evaluationEngine);
@@ -1289,6 +1307,18 @@ export class PlatformController {
       store.assertCanViewSubmission(actorId, submissionId);
       return store.getSubmission(submissionId);
     });
+    return this.sendSubmissionArtifact(submission, response);
+  }
+
+  @Get('/submissions/:submissionId/latest-artifact')
+  async downloadLatestSubmissionArtifact(@Param('submissionId') submissionId: string, @Headers('x-employee-id') employeeId?: string, @Res({ passthrough: true }) response?: any) {
+    const actorId = this.requireAdmin(employeeId);
+    const submission = await this.domainUnitOfWork.read((store) => store.latestSuccessfulUploadSubmission(submissionId, actorId));
+    response?.header('x-submission-id', submission.id);
+    return this.sendSubmissionArtifact(submission, response);
+  }
+
+  private async sendSubmissionArtifact(submission: SubmissionRecord, response?: any): Promise<Buffer> {
     const artifactUri = submission.snapshot.artifactUri;
     if (!artifactUri) throw new NotFoundException('该提交没有可下载的交付件');
     let content: Buffer;

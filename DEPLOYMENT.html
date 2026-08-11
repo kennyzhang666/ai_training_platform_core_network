@@ -146,7 +146,7 @@
         <a href="#troubleshooting"><span class="n">10</span>故障排查</a>
         <a href="#boundaries"><span class="n">11</span>当前边界</a>
       </nav>
-      <div class="side-note">v1.0.7<br>Linux x64<br>原生一键安装</div>
+      <div class="side-note">v1.1.0<br>Linux x64<br>原生一键安装</div>
     </aside>
 
     <main>
@@ -168,7 +168,7 @@
       </div>
 
       <div class="callout warning">
-        <strong>v1.0.7 发布范围：</strong>本次先发布 Ubuntu 22.04 x64 原生包，提供 <code>Install</code> / <code>Uninstall</code>、随机密钥生成、公司内网 LDAP/Code Agent 默认参数、安全解压门禁和开机自启；Code Agent 默认使用 <code>codeagent -p "{{prompt}}"</code> 非交互模式，数据库兼容基线为 PostgreSQL 14。发布包强制携带 Prisma Client、CLI 查询引擎和 Schema Engine，安装与迁移只使用包内绝对路径，完整安装不会访问外网；正式压缩包已经在 GitHub Ubuntu 22.04 环境对真实 PostgreSQL 14 执行迁移。Windows 包本次不重新制作。自动备份、离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
+        <strong>v1.1.0 发布范围：</strong>本次发布 Ubuntu 22.04 x64 原生包，继续提供完全断网安装、PostgreSQL 14 迁移、公司内网 LDAP/Code Agent 默认参数和 systemd 开机自启；新增数据库读取缓存与轻量报告摘要，降低多人浏览、保存和历史提交增长后的等待时间。发布包强制携带 Prisma Client、CLI 查询引擎和 Schema Engine，最终压缩包在 GitHub Ubuntu 22.04 环境对真实 PostgreSQL 14 执行全部迁移后才发布。Windows 包本次不重新制作。自动化离线 <code>Upgrade</code>、诊断包以及进程异常退出后的自动拉起尚未实现。
       </div>
 
       <section id="start">
@@ -207,7 +207,7 @@
 
       <section id="quick">
         <h2>02 · 一页纸傻瓜部署</h2>
-        <p>下面是 v1.0.7 Linux 原生发布包的最短路径。Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL 14、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent -p</code> 非交互参数已经内置，随机密钥由脚本生成，安装和数据库迁移均不访问外网。Windows 部署步骤保留供上一版包使用。</p>
+        <p>下面是 v1.1.0 Linux 原生发布包的最短路径。Linux 包根目录包含 <code>install.sh</code>。只需填写 PostgreSQL 14、首位管理员和 Worker 身份；公司内网 LDAP 与 <code>codeagent -p</code> 非交互参数已经内置，随机密钥由脚本生成，安装和数据库迁移均不访问外网。Windows 部署步骤保留供上一版包使用。</p>
 
         <div class="tabs" role="tablist" aria-label="操作系统">
           <button class="tab" role="tab" aria-selected="true" aria-controls="quick-windows" id="tab-windows">Windows Server</button>
@@ -576,17 +576,44 @@ CORS_ORIGINS=https://ai-platform.example.internal</pre></div><p>当前单服务�
           <li>至少每季度在非生产环境做一次真实恢复演练。</li>
         </ul>
 
-        <h3>手工离线升级</h3>
+        <h3>Linux 手工离线升级</h3>
         <ol>
-          <li>执行 <code>Backup</code>，把备份和旧发布包移到独立位置；</li>
-          <li>执行 <code>Stop</code>；</li>
+          <li>等待正在运行的评测结束，执行 <code>Backup</code>，并把备份、旧 <code>.env</code> 和旧发布包移到独立位置；</li>
+          <li>执行 <code>systemctl stop ai-training-platform.service</code>，将旧目录改名保留，不要原地覆盖；</li>
           <li>校验新发布包 SHA-256，解压到新目录，不覆盖旧目录；</li>
-          <li>复制旧 <code>.env</code> 到新目录，并对照新模板补充新增字段；</li>
+          <li>复制旧 <code>deploy/single-node/.env</code> 到新目录，并对照新模板补充新增字段；</li>
+          <li>把旧目录的 <code>data/</code> 内容复制到新目录的 <code>data/</code>；不要复制包含 PID 和临时批次的整个 <code>runtime-state/</code>；</li>
           <li>在新目录执行根目录 <code>install.cmd</code> 或 <code>install.sh</code>，更新开机自启到新目录，再执行 <code>Doctor</code>；</li>
           <li>完成登录、提交、评测和报告抽样；</li>
           <li>失败时停止新目录，使用升级前备份恢复数据库和交付件，再启动旧版本。</li>
         </ol>
+        <div class="codebox"><div class="codehead"><span>Ubuntu 22.04 · v1.0.7 升级到 v1.1.0</span><button class="copy" data-copy>复制</button></div><pre>cd /opt/ai-training
+./deploy/single-node/manage.sh Backup --archive /opt/ai-training-backups/pre-v1.1.0.tar.gz
+cp deploy/single-node/.env /opt/ai-training-backups/pre-v1.1.0.env
+systemctl stop ai-training-platform.service
+mv /opt/ai-training /opt/ai-training-v1.0.7
+mkdir /opt/ai-training
+tar -xzf /tmp/ai-training-platform-1.1.0-linux-x64.tar.gz -C /opt/ai-training
+cp /opt/ai-training-v1.0.7/deploy/single-node/.env /opt/ai-training/deploy/single-node/.env
+cp -a /opt/ai-training-v1.0.7/data/. /opt/ai-training/data/
+cd /opt/ai-training
+chmod +x install.sh deploy/single-node/manage.sh
+./install.sh
+./deploy/single-node/manage.sh Doctor
+./deploy/single-node/manage.sh Status</pre></div>
         <div class="callout warning">不要把新版本直接覆盖旧目录。数据库迁移可能不可逆，回退必须使用升级前的一致性备份，不能只把程序目录换回旧版本。</div>
+
+        <h3>Linux 清库全新安装</h3>
+        <p>清库会删除全部组织、员工、赛题、训战、提交、评测结果和画像。保留 PostgreSQL 14 服务、数据库账号和系统中的 <code>codeagent</code> 即可；不要复制旧 <code>.env</code>、<code>data/</code> 或 <code>runtime-state/</code>。执行前仍应生成一次平台备份并把旧目录改名保留。</p>
+        <div class="codebox"><div class="codehead"><span>重建默认 ai_training 数据库</span><button class="copy" data-copy>复制</button></div><pre>sudo -u postgres psql -d postgres -v ON_ERROR_STOP=1
+
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = 'ai_training' AND pid &lt;&gt; pg_backend_pid();
+DROP DATABASE IF EXISTS ai_training;
+CREATE DATABASE ai_training OWNER ai_training ENCODING 'UTF8' TEMPLATE template0;
+\q</pre></div>
+        <p>随后把 v1.1.0 解压到空的 <code>/opt/ai-training</code>，执行 <code>EDITOR=vi ./install.sh</code>，重新填写 PostgreSQL、首位管理员和 Worker 身份。安装器会在空库执行全部版本化迁移。</p>
 
         <h3>日志与磁盘</h3>
         <table>
@@ -759,7 +786,7 @@ cd /opt/ai-training
         <div class="callout success"><strong>部署完成标准：</strong>用户只访问一个地址；真实 SSO 登录；管理员能建题、建训战、选人评测；员工能提交并查看报告；数据库和交付件能一致备份恢复；日常操作不需要理解 Node、pnpm、Python 虚拟环境或平台源码。</div>
       </section>
 
-      <div class="footer">AI 能力训战平台部署与运维手册 · v1.0.7 · 2026-08-11<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
+      <div class="footer">AI 能力训战平台部署与运维手册 · v1.1.0 · 2026-08-12<br>部署行为变化时只更新本文件，不再新增独立的 Windows、Linux、LDAP、Nginx、离线包或冒烟测试说明。</div>
     </main>
   </div>
   <div id="toast" role="status" aria-live="polite">已复制</div>

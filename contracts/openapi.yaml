@@ -856,7 +856,11 @@ paths:
           required: false
           schema: { type: boolean, default: true }
       responses:
-        '200': { description: 能力画像与成绩历史 }
+        '200':
+          description: 能力画像与成绩历史
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
   /api/v1/profiles/{subjectId}/history:
     get:
       operationId: getProfileHistory
@@ -1125,12 +1129,29 @@ paths:
   /api/v1/submissions/{submissionId}/artifact:
     get:
       operationId: downloadSubmissionArtifact
-      description: 管理员下载指定提交的交付件，用于线下评测。
+      description: Worker 或审计流程下载指定不可变提交快照，不自动切换到其他提交。
       parameters:
         - $ref: '#/components/parameters/SubmissionId'
       responses:
         '200':
           description: 交付件文件
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { description: 交付件不存在 }
+  /api/v1/submissions/{submissionId}/latest-artifact:
+    get:
+      operationId: downloadLatestSubmissionArtifact
+      description: 管理员网页下载同一训战、同一学员最新一次已成功接收的 ZIP。
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+      responses:
+        '200':
+          description: 最新交付件文件
+          headers:
+            X-Submission-Id:
+              description: 实际下载的最新提交编号
+              schema: { type: string }
           content:
             application/octet-stream:
               schema: { type: string, format: binary }
@@ -1716,6 +1737,15 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Audit' }
         pageInfo: { $ref: '#/components/schemas/ListPageInfo' }
+    SubmissionResultSummary:
+      type: object
+      additionalProperties: false
+      required: [resultId, total, status, published]
+      properties:
+        resultId: { type: string }
+        total: { type: number }
+        status: { type: string }
+        published: { type: boolean, enum: [true] }
     Submission:
       type: object
       required: [eventId, subjectId, snapshot]
@@ -1727,6 +1757,7 @@ components:
         rubricVersionSnapshot: { type: string, readOnly: true }
         gradingAttempt: { type: integer, minimum: 1, readOnly: true }
         failureReason: { type: string, readOnly: true }
+        resultSummary: { $ref: '#/components/schemas/SubmissionResultSummary', readOnly: true }
     EventConfig:
       type: object
       required: [id, challengeVersion, submissionSource, trigger, reveal]
@@ -1947,7 +1978,9 @@ components:
         challengeId: { type: string }
         version: { type: integer, minimum: 1 }
         title: { type: string }
-        description: { type: string }
+        summary: { type: string, maxLength: 300 }
+        description: { type: string, description: 完整赛题详情；新版本使用 Markdown，旧版本可保留受控 HTML。 }
+        descriptionFormat: { type: string, enum: [MARKDOWN, HTML] }
         objectives: { type: array, items: { type: string } }
         requirements: { type: array, items: { type: string } }
         constraints: { type: array, items: { type: string } }
@@ -2205,6 +2238,28 @@ components:
         subjectId: { type: string, description: 仅管理员可见的用户标识 }
         name: { type: string, description: 仅管理员可见的真实姓名 }
         employeeNo: { type: string, description: 仅管理员可见的工号 }
+    ProfileSubject:
+      type: object
+      additionalProperties: true
+      required: [id, employeeNo, name, orgUnitId, orgPath, roles]
+      properties:
+        id: { type: string }
+        employeeNo: { type: string }
+        name: { type: string }
+        nickname: { type: string }
+        avatarDataUrl: { type: string }
+        orgUnitId: { type: string }
+        orgPath: { type: string, description: 组织权限计算使用的内部路径，不直接作为部门文案展示 }
+        departmentName: { type: string, description: 当前直属部门的正式名称，供终端界面展示 }
+        roles: { type: array, items: { type: string } }
+    Profile:
+      type: object
+      additionalProperties: false
+      required: [subject, stats, history]
+      properties:
+        subject: { $ref: '#/components/schemas/ProfileSubject' }
+        stats: { type: object, additionalProperties: true }
+        history: { type: array, items: { type: object, additionalProperties: true } }
     CapabilityProfile:
       type: object
       required: [subjectId, summary, dimensions, domains, skills, trend, capabilityCatalogVersion]

@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：1.0.7。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：1.1.0。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -285,8 +285,8 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 # AI 能力训战平台设计文档
 
-> 设计基线：`v1.0.7`
-> 更新日期：2026-08-11
+> 设计基线：`v1.1.0`
+> 更新日期：2026-08-12
 > 文档职责：产品、业务、权限、评测、报告、能力画像、页面、交互、视觉与文案的唯一标准
 
 ## 1. 产品定位
@@ -517,6 +517,8 @@ submission/
 ```
 
 必需项、可选项、禁止项、glob、最小/最大数量、扩展名和结构约束均由赛题版本配置。格式诊断分为阻断、警告和提示；同一问题不能同时因格式和评分重复扣分。
+
+同一员工在同一训战可以形成多份不可变提交记录。管理后台的普通“下载交付件”始终下载该员工最新一次已成功接收并完成哈希固化的 ZIP；评测 Worker、历史报告和审计接口仍按明确的提交编号读取指定快照，不能因为员工后来再次提交而自动切换版本。
 
 ### 5.4 评测运行与批次
 
@@ -889,6 +891,8 @@ AI 能力画像
 
 “推荐赛题”“赛题推荐”等表达禁止使用。训战是必须参加的业务安排，不是内容推荐。使用“当前训战”“本期训战”“训战安排”。
 
+右上角账号信息中的部门只展示员工当前直属部门的正式中文名称。组织路径和部门编号只用于权限计算与后台管理，不作为员工端部门文案展示；未匹配部门时显示“未分配部门”。
+
 ### 12.2 训战卡片
 
 卡片必须一眼看到：
@@ -920,7 +924,7 @@ AI 能力画像
 一级页面按训战列出待处理量、完成量和状态。打开某个训战进入独立子页面：
 
 - 提交人、部门、提交时间、方式和快照；
-- 查看 Git 信息或下载 ZIP 交付件；
+- 查看 Git 信息或下载该员工最新一次成功提交的 ZIP；
 - 勾选一人、多人或当前筛选结果；
 - 发起评测、重新评测；
 - 查看每次运行状态、失败原因和结果；
@@ -941,7 +945,9 @@ AI 能力画像
 
 ### 12.6 赛题管理
 
-- 赛题详情使用富文本编辑器；
+- 赛题版本分别维护“赛题简介”和“赛题详情”：简介是最多 300 字的纯文本，只用于训战卡片和紧凑列表；详情承载完整题面、输入输出格式和用例；
+- 新赛题详情使用 Markdown 编辑与实时预览，支持标题、列表、表格、引用、链接、行内代码和代码块；旧版本受控 HTML 继续只读兼容；
+- 训战卡片固定显示两行简介，不渲染详情正文；超长单词、代码和表格只能在详情页内部换行或横向滚动，不能撑破页面；
 - 训战时间在训战管理中配置，不放在赛题资产编辑器；
 - 赛题版本可关联交付契约、引擎、输入输出 Schema；
 - 支持发布、封存、垃圾箱、恢复和受保护的永久删除；
@@ -1071,6 +1077,10 @@ AI 能力画像
 
 当前单服务器设计目标为员工总量少于 100、同时使用平台约 20 人，一个 API 实例。提交按最多 20 人的活跃波次稳定接收，评测批次由单 Worker 默认顺序处理；实际评分时长由赛题引擎和 Code Agent 决定。平台仍保留 100 人完整名册、历史报告和画像数据，不把“总人数”误当成“同时并发数”。
 
+单 API 进程按 PostgreSQL revision 复用已加载的规范化业务图；同一版本的页面并发读取只能触发一次全量装载。revision 变化后自动失效并重新装载。规范化表是业务事实来源，兼容快照只保留尚未完成关系投影的少量字段，不能在每次保存时重复写入全部提交、评测证据和审计历史。
+
+提交列表只返回已公布结果的轻量摘要（结果编号、总分和状态），不能嵌入判据、证据链、文件明细或修改建议。员工端页面刷新不得按提交数量逐份请求完整报告；完整报告只在用户打开对应报告时按需加载，并在提交列表刷新后失效旧缓存。
+
 ### 16.2 数据可信
 
 - PostgreSQL 是正式业务事实来源；
@@ -1113,11 +1123,11 @@ AI 能力画像
 
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v1.0.7`
-> 更新日期：2026-08-11
+> 当前发布版本：`v1.1.0`
+> 更新日期：2026-08-12
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。`v1.0.7` 已完成赛题、训战、提交、独立 Worker 评测、详细报告、能力画像、组织权限和单服务器离线发布闭环，并按“员工总量少于 100、同时使用约 20 人”完成身份同步、PostgreSQL 写入冲突和评测队列显示收口。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；内网 Linux 数据库兼容基线固定为 PostgreSQL 14。Linux 离线包在构建期固化 Prisma Client、CLI 查询引擎和 Schema Engine，安装与迁移只使用包内文件、不访问外网；最终压缩包必须在 Ubuntu 22.04 与真实 PostgreSQL 14 上完成迁移后才可发布。本次先发布 Linux 包，Windows Server x64 断网包继续沿用上一版，目标机 UAT、自动备份和离线升级仍是后续工作。
+企业内部 AI 训战、交付评测和能力复盘平台。`v1.1.0` 在完整训战闭环上进一步收口内网运行性能与正式使用体验：PostgreSQL 读取按 revision 复用规范化业务图，提交列表只返回已公布结果摘要，完整报告按需加载；赛题卡片简介与 Markdown 详情分离；空数据库可由全局管理员初始化首个组织；管理员下载同一学员、同一训战的最新成功 ZIP；员工端展示中文部门并自动选择运行中赛季。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；Linux 兼容基线仍为 Ubuntu 22.04 x64 + PostgreSQL 14，完整离线包不访问外网。Windows Server x64 断网包继续沿用上一版，自动化离线 Upgrade、诊断包和目标机 UAT 仍是后续工作。
 
 平台级文档只保留三个入口：
 
@@ -1351,6 +1361,7 @@ API 内部关键边界：
 - 提交进入排队或评测中后锁定，完成或失败后才能重新交付；
 - 重新评测创建新的 `GradingRun`，历史结果不可覆盖；
 - 相同快照由不同员工提交时，仍然各自拥有独立运行和结果。
+- 管理后台普通下载解析到同一训战、同一员工最新一次成功接收的 ZIP；Worker 和审计仍使用指定提交编号下载不可变快照。
 
 赛题交付契约属于管理后台和评测运行资产，详见 `docs/submission-contract.md`。
 
@@ -1432,7 +1443,9 @@ node scripts/evaluation-worker.mjs --api http://127.0.0.1:3000/api/v1 --employee
 
 所有生产档都必须设置 `PLATFORM_REPOSITORY=postgres`。只有 `PLATFORM_DEPLOYMENT_PROFILE=single-node` 的生产模式允许 `OBJECT_STORAGE_MODE=local`；标准生产默认要求 S3-compatible 存储和持久化上传会话。
 
-PostgreSQL 请求级读写使用 repeatable-read 事务并以 revision CAS 拒绝旧状态覆盖。当前单服务器档只运行一个 API 实例；虽然标准模式存在数据库和 S3 适配器，但多 API 实例仍需继续拆分领域 Repository 并完成容量与故障演练，不能把现有 CAS 当成完整高可用方案。
+PostgreSQL 写操作使用 repeatable-read 事务并以 revision CAS 拒绝旧状态覆盖。单 API 进程的读取先检查 revision：同一 revision 的并发页面请求共享一次规范化业务图装载，revision 变化后自动刷新；读取回调使用隔离副本，不能污染共享缓存。评测结果与审计按不可变增量写入，兼容快照不再重复保存全部历史业务数据。当前单服务器档只运行一个 API 实例；虽然标准模式存在数据库和 S3 适配器，但多 API 实例仍需继续拆分领域 Repository 并完成容量与故障演练，不能把现有 CAS 当成完整高可用方案。
+
+`GET /api/v1/submissions` 仅附带已公布结果的轻量 `resultSummary`。员工端启动和刷新不会为历史提交逐份请求 `/reports/:submissionId`；完整判据、证据和改进建议只在用户点击报告时加载。
 
 ## 11. API 与契约开发
 
@@ -1496,15 +1509,15 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v1.0.7 已验证基线
+### 12.2 v1.1.0 已验证基线
 
-- Workspace：158 项，157 通过，1 项 PostgreSQL 集成按显式配置跳过；
-- Web 交付方式规则：3/3；
-- 契约：7/7；
+- Workspace：173 项，172 通过，1 项 PostgreSQL 集成按显式配置跳过；
+- Web：11/11；
+- 契约：11/11；
 - Python grader：18/18；
 - LDAP 网关：21/21；
 - 评测资料包：2/2；
-- 离线发布：11/11；
+- 离线发布：12/12；
 - 部署门禁：33 项中 32 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并由 Ubuntu 22.04 发布流水线执行；
 - PostgreSQL 14：Ubuntu 22.04 发布流水线使用真实 PostgreSQL 14 运行版本检查、全部迁移和集成测试，并从最终压缩包再次执行迁移；
 - 依赖审计：生产依赖 0 个已知漏洞；
@@ -1648,6 +1661,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v1.0.5` | 2026-08-11 | 修复 Linux 可信网关配置误判和双平台发布包 Prisma Client 缺失；构建、安装与 Linux 发布流水线增加生成及实际加载门禁。 |
 | `v1.0.6` | 2026-08-11 | 修复完全断网安装重复下载和 Linux Prisma 引擎目标不匹配；原生包只加载构建期客户端，并强制包含 Ubuntu 22.04.5/OpenSSL 3 引擎。 |
 | `v1.0.7` | 2026-08-11 | 补齐 Linux 离线迁移所需的 Prisma CLI 查询引擎和 Schema Engine，并以最终发布包对 PostgreSQL 14 实跑迁移。 |
+| `v1.1.0` | 2026-08-12 | 收口 PostgreSQL revision 读取缓存和历史结果写放大，移除历史报告 N+1 请求，增加赛题简介/Markdown 详情、空组织初始化、最新交付件下载、中文部门和运行中赛季选择。 |
 
 ## 18. 交接检查表
 
@@ -4262,7 +4276,11 @@ paths:
           required: false
           schema: { type: boolean, default: true }
       responses:
-        '200': { description: 能力画像与成绩历史 }
+        '200':
+          description: 能力画像与成绩历史
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
   /api/v1/profiles/{subjectId}/history:
     get:
       operationId: getProfileHistory
@@ -4531,12 +4549,29 @@ paths:
   /api/v1/submissions/{submissionId}/artifact:
     get:
       operationId: downloadSubmissionArtifact
-      description: 管理员下载指定提交的交付件，用于线下评测。
+      description: Worker 或审计流程下载指定不可变提交快照，不自动切换到其他提交。
       parameters:
         - $ref: '#/components/parameters/SubmissionId'
       responses:
         '200':
           description: 交付件文件
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { description: 交付件不存在 }
+  /api/v1/submissions/{submissionId}/latest-artifact:
+    get:
+      operationId: downloadLatestSubmissionArtifact
+      description: 管理员网页下载同一训战、同一学员最新一次已成功接收的 ZIP。
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+      responses:
+        '200':
+          description: 最新交付件文件
+          headers:
+            X-Submission-Id:
+              description: 实际下载的最新提交编号
+              schema: { type: string }
           content:
             application/octet-stream:
               schema: { type: string, format: binary }
@@ -5122,6 +5157,15 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Audit' }
         pageInfo: { $ref: '#/components/schemas/ListPageInfo' }
+    SubmissionResultSummary:
+      type: object
+      additionalProperties: false
+      required: [resultId, total, status, published]
+      properties:
+        resultId: { type: string }
+        total: { type: number }
+        status: { type: string }
+        published: { type: boolean, enum: [true] }
     Submission:
       type: object
       required: [eventId, subjectId, snapshot]
@@ -5133,6 +5177,7 @@ components:
         rubricVersionSnapshot: { type: string, readOnly: true }
         gradingAttempt: { type: integer, minimum: 1, readOnly: true }
         failureReason: { type: string, readOnly: true }
+        resultSummary: { $ref: '#/components/schemas/SubmissionResultSummary', readOnly: true }
     EventConfig:
       type: object
       required: [id, challengeVersion, submissionSource, trigger, reveal]
@@ -5353,7 +5398,9 @@ components:
         challengeId: { type: string }
         version: { type: integer, minimum: 1 }
         title: { type: string }
-        description: { type: string }
+        summary: { type: string, maxLength: 300 }
+        description: { type: string, description: 完整赛题详情；新版本使用 Markdown，旧版本可保留受控 HTML。 }
+        descriptionFormat: { type: string, enum: [MARKDOWN, HTML] }
         objectives: { type: array, items: { type: string } }
         requirements: { type: array, items: { type: string } }
         constraints: { type: array, items: { type: string } }
@@ -5611,6 +5658,28 @@ components:
         subjectId: { type: string, description: 仅管理员可见的用户标识 }
         name: { type: string, description: 仅管理员可见的真实姓名 }
         employeeNo: { type: string, description: 仅管理员可见的工号 }
+    ProfileSubject:
+      type: object
+      additionalProperties: true
+      required: [id, employeeNo, name, orgUnitId, orgPath, roles]
+      properties:
+        id: { type: string }
+        employeeNo: { type: string }
+        name: { type: string }
+        nickname: { type: string }
+        avatarDataUrl: { type: string }
+        orgUnitId: { type: string }
+        orgPath: { type: string, description: 组织权限计算使用的内部路径，不直接作为部门文案展示 }
+        departmentName: { type: string, description: 当前直属部门的正式名称，供终端界面展示 }
+        roles: { type: array, items: { type: string } }
+    Profile:
+      type: object
+      additionalProperties: false
+      required: [subject, stats, history]
+      properties:
+        subject: { $ref: '#/components/schemas/ProfileSubject' }
+        stats: { type: object, additionalProperties: true }
+        history: { type: array, items: { type: object, additionalProperties: true } }
     CapabilityProfile:
       type: object
       required: [subjectId, summary, dimensions, domains, skills, trend, capabilityCatalogVersion]
@@ -6598,7 +6667,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {

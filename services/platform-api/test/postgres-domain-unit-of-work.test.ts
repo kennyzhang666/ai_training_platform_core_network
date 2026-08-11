@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PrismaClient } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
-import { postgresTransactionTimeoutMs, runWithPostgresConflictRetry, SerialExecutionQueue } from '../src/postgres-domain-unit-of-work';
+import { postgresTransactionTimeoutMs, RevisionAwareStateCache, runWithPostgresConflictRetry, SerialExecutionQueue } from '../src/postgres-domain-unit-of-work';
 import { PrismaPlatformRepository } from '../src/prisma-platform-repository';
+import { mapSubmissionListItem } from '../src/prisma-domain-repository';
 import { SnapshotRevisionConflictError } from '../src/postgres-platform-store';
+import { compatibilitySnapshotState } from '../src/postgres-platform-store';
 
 test('the single-API PostgreSQL write queue serializes a one-hundred-request burst', async () => {
   const queue = new SerialExecutionQueue();
@@ -30,6 +32,57 @@ test('a failed PostgreSQL write does not poison later queued requests', async ()
   const queue = new SerialExecutionQueue();
   await assert.rejects(queue.run(async () => { throw new Error('expected failure'); }), /expected failure/);
   assert.equal(await queue.run(async () => 'next request committed'), 'next request committed');
+});
+
+test('a PostgreSQL revision burst loads one canonical state and reuses it until the revision changes', async () => {
+  const cache = new RevisionAwareStateCache<{ marker: string }>();
+  let loads = 0;
+  const load = async (revision: number) => {
+    loads += 1;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    return { revision, value: { marker: `revision-${revision}` } };
+  };
+
+  const firstBurst = await Promise.all(Array.from({ length: 100 }, () => cache.get(7, () => load(7))));
+  assert.equal(loads, 1);
+  assert.ok(firstBurst.every((value) => value.marker === 'revision-7'));
+
+  assert.equal((await cache.get(7, () => load(7))).marker, 'revision-7');
+  assert.equal(loads, 1);
+
+  const nextBurst = await Promise.all(Array.from({ length: 20 }, () => cache.get(8, () => load(8))));
+  assert.equal(loads, 2);
+  assert.ok(nextBurst.every((value) => value.marker === 'revision-8'));
+});
+
+test('the PostgreSQL compatibility envelope excludes normalized business history', () => {
+  const envelope = compatibilitySnapshotState({
+    events: [{ id: 'event-large' }], submissions: [{ id: 'submission-large' }], runs: [], evaluationBatches: [],
+    results: [{ resultId: 'result-large' }], orgUnits: [], users: [], challenges: [], seasons: [], audits: [{ id: 'audit-large' }],
+    announcements: [], participants: [], hardProblems: [{ id: 'legacy-problem' }],
+    codeAgentRuntimeConfig: { enabled: false }, localDemoSeedEnabled: false,
+  } as never);
+
+  assert.equal(envelope.events, undefined);
+  assert.equal(envelope.submissions, undefined);
+  assert.equal(envelope.results, undefined);
+  assert.equal(envelope.audits, undefined);
+  assert.deepEqual(envelope.hardProblems, [{ id: 'legacy-problem' }]);
+  assert.equal(envelope.localDemoSeedEnabled, false);
+});
+
+test('PostgreSQL submission pages expose scores only after the result is published', () => {
+  const row = {
+    id: 'submission-summary', eventId: 'event-summary', subjectId: 'employee-summary',
+    sourceType: 'UPLOAD', snapshotHash: 'a'.repeat(64), submittedAt: new Date('2026-08-01T10:00:00Z'),
+    state: 'SEALED', createdAt: new Date('2026-08-01T10:00:00Z'), gradingStatus: 'COMPLETED', gradingAttempt: 1,
+    currentGradingRunId: 'run-summary', currentResultId: 'result-summary', gradingRuns: [{ id: 'run-summary' }],
+    results: [{ id: 'result-summary', total: 88.5, status: 'COMPLETE' }], event: { reveal: 'ON_RELEASE' },
+  };
+  assert.equal(mapSubmissionListItem(row).resultSummary, undefined);
+  assert.deepEqual(mapSubmissionListItem({ ...row, state: 'REVEALED' }).resultSummary, {
+    resultId: 'result-summary', total: 88.5, status: 'COMPLETE', published: true,
+  });
 });
 
 test('a snapshot revision collision is retried without swallowing business conflicts', async () => {

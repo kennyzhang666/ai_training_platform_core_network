@@ -29,6 +29,20 @@ function isSnapshot(value: unknown): value is Partial<PlatformStateSnapshot> {
   return ['events', 'submissions', 'runs', 'evaluationBatches', 'results', 'orgUnits', 'users', 'challenges', 'seasons', 'audits', 'announcements', 'hardProblems', 'participants'].every((key) => state[key] === undefined || Array.isArray(state[key]));
 }
 
+/**
+ * Normalized tables are the production source of truth. Keep only fields that
+ * still lack a relational projection in the legacy envelope so every small
+ * mutation does not rewrite all submissions, evidence and audit history as a
+ * single large JSON value.
+ */
+export function compatibilitySnapshotState(state: PlatformStateSnapshot): Partial<PlatformStateSnapshot> {
+  return {
+    ...(state.hardProblems.length ? { hardProblems: state.hardProblems } : {}),
+    ...(state.codeAgentRuntimeConfig ? { codeAgentRuntimeConfig: state.codeAgentRuntimeConfig } : {}),
+    ...(state.localDemoSeedEnabled === false ? { localDemoSeedEnabled: false } : {}),
+  };
+}
+
 function jsonValue(value: unknown, fallback: Prisma.InputJsonValue | typeof Prisma.JsonNull = Prisma.JsonNull): Prisma.InputJsonValue | typeof Prisma.JsonNull {
   if (value === undefined || value === null) return fallback;
   return value as Prisma.InputJsonValue;
@@ -57,7 +71,9 @@ function versionData(version: Challenge['versions'][number]): Prisma.ChallengeVe
     challengeId: version.challengeId,
     version: version.version,
     title: version.title,
+    summary: version.summary ?? null,
     description: version.description ?? null,
+    descriptionFormat: version.descriptionFormat ?? 'MARKDOWN',
     objectives: jsonValue(version.objectives),
     requirements: jsonValue(version.requirements),
     constraints: jsonValue(version.constraints),
@@ -228,10 +244,13 @@ export async function synchronizeNormalized(db: Prisma.TransactionClient, state:
     const data = { submissionId: run.submissionId, triggerType: run.triggerType, triggeredBy: run.triggeredBy ?? null, status: run.status, idempotencyKey: run.idempotencyKey, graderVersion: null, attempt: run.attempt ?? null, failureReason: run.failureReason ?? null, leaseId: run.leaseId ?? null, leasedBy: run.leasedBy ?? null, leaseExpiresAt: dateValue(run.leaseExpiresAt), evaluationBatchId: run.evaluationBatchId ?? null };
     await db.gradingRun.upsert({ where: { id: run.id }, update: data, create: { id: run.id, createdAt: dateValue(run.createdAt) ?? new Date(), ...data } });
   }
+  const existingResultIds = new Set((await db.evaluationResult.findMany({ where: { id: { in: resultIds } }, select: { id: true } })).map((row) => row.id));
   for (const stored of state.results) {
+    // Results and their evidence projections are immutable. Re-evaluation
+    // creates a new result id, so an unrelated save must not delete and
+    // recreate every historical criterion and finding.
+    if (existingResultIds.has(stored.resultId)) continue;
     const result = stored.result ?? {};
-    await db.criterionResult.deleteMany({ where: { evaluationResultId: stored.resultId } });
-    await db.finding.deleteMany({ where: { evaluationResultId: stored.resultId } });
     const data = {
       gradingRunId: stored.gradingRunId,
       submissionId: stored.submissionId,
@@ -287,10 +306,10 @@ export async function synchronizeNormalized(db: Prisma.TransactionClient, state:
     await db.season.upsert({ where: { id: season.id }, update: { name: season.name, status: season.status }, create: { id: season.id, name: season.name, status: season.status } });
     for (const eventId of season.eventIds) await db.seasonEvent.create({ data: { seasonId: season.id, eventId, weight: 1 } });
   }
-  for (const audit of state.audits) {
-    const data = { actorId: audit.actorId, action: audit.action, target: audit.target, before: jsonValue(audit.before), after: jsonValue(audit.after), createdAt: dateValue(audit.createdAt) ?? new Date() };
-    await db.auditLog.upsert({ where: { id: audit.id }, update: data, create: { id: audit.id, ...data } });
-  }
+  if (state.audits.length) await db.auditLog.createMany({
+    data: state.audits.map((audit) => ({ id: audit.id, actorId: audit.actorId, action: audit.action, target: audit.target, before: jsonValue(audit.before), after: jsonValue(audit.after), createdAt: dateValue(audit.createdAt) ?? new Date() })),
+    skipDuplicates: true,
+  });
   for (const announcement of state.announcements) {
     const data = { title: announcement.title, summary: announcement.summary, tag: announcement.tag, publishedAt: dateValue(announcement.publishedAt) ?? new Date(), pinned: Boolean(announcement.pinned), orgPath: announcement.orgPath ?? null };
     await db.announcement.upsert({ where: { id: announcement.id }, update: data, create: { id: announcement.id, ...data } });
@@ -300,7 +319,8 @@ export async function synchronizeNormalized(db: Prisma.TransactionClient, state:
     update: { value: jsonValue(state.codeAgentRuntimeConfig, {}), updatedBy: state.codeAgentRuntimeConfig.updatedBy },
     create: { key: RUNTIME_SETTING_KEY, value: jsonValue(state.codeAgentRuntimeConfig, {}), updatedBy: state.codeAgentRuntimeConfig.updatedBy },
   });
-  await db.platformSnapshot.upsert({ where: { id: SNAPSHOT_ID }, update: { schemaVersion: SNAPSHOT_VERSION, revision, state: state as unknown as Prisma.InputJsonValue }, create: { id: SNAPSHOT_ID, schemaVersion: SNAPSHOT_VERSION, revision, state: state as unknown as Prisma.InputJsonValue } });
+  const compatibility = compatibilitySnapshotState(state) as Prisma.InputJsonValue;
+  await db.platformSnapshot.upsert({ where: { id: SNAPSHOT_ID }, update: { schemaVersion: SNAPSHOT_VERSION, revision, state: compatibility }, create: { id: SNAPSHOT_ID, schemaVersion: SNAPSHOT_VERSION, revision, state: compatibility } });
 }
 
 /** Read the canonical normalized graph for an API process startup. */

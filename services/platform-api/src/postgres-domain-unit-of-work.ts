@@ -1,6 +1,7 @@
 import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PlatformStore } from './store';
+import type { PlatformStateSnapshot } from './store';
 import { claimSnapshotRevision, loadNormalizedState, SnapshotRevisionConflictError, synchronizeNormalized } from './postgres-platform-store';
 
 const SNAPSHOT_ID = 'singleton';
@@ -67,6 +68,42 @@ export class SerialExecutionQueue {
 }
 
 /**
+ * Keep one detached canonical state per PostgreSQL revision. A page refresh
+ * can fan out into many HTTP reads; those reads should share one normalized
+ * graph load instead of each rebuilding the same graph from every table.
+ */
+export class RevisionAwareStateCache<T> {
+  private revision = -1;
+  private value?: T;
+  private refresh?: Promise<void>;
+
+  constructor(private readonly onSet?: (revision: number, value: T) => void) {}
+
+  peekExact(revision: number): T | undefined {
+    return this.revision === revision ? this.value : undefined;
+  }
+
+  set(revision: number, value: T): void {
+    if (revision < this.revision) return;
+    this.revision = revision;
+    this.value = value;
+    this.onSet?.(revision, value);
+  }
+
+  async get(minimumRevision: number, loader: () => Promise<{ revision: number; value: T }>): Promise<T> {
+    while (this.value === undefined || this.revision < minimumRevision) {
+      if (!this.refresh) {
+        this.refresh = loader()
+          .then((loaded) => this.set(loaded.revision, loaded.value))
+          .finally(() => { this.refresh = undefined; });
+      }
+      await this.refresh;
+    }
+    return this.value;
+  }
+}
+
+/**
  * Request-scoped PostgreSQL Unit of Work for domains that are still exposed
  * through the mature PlatformStore business rules.
  *
@@ -80,8 +117,12 @@ export class SerialExecutionQueue {
 export class PostgresDomainUnitOfWork implements OnModuleDestroy {
   private readonly client?: PrismaClient;
   private readonly writes = new SerialExecutionQueue();
+  private readonly states: RevisionAwareStateCache<PlatformStateSnapshot>;
 
   constructor(@Inject(PlatformStore) private readonly cache: PlatformStore) {
+    this.states = new RevisionAwareStateCache<PlatformStateSnapshot>((_revision, state) => {
+      this.cache.importState(JSON.parse(JSON.stringify(state)) as PlatformStateSnapshot);
+    });
     const mode = repositoryMode();
     if (mode === 'postgres') {
       if (!process.env.DATABASE_URL?.trim()) throw new Error('DATABASE_URL is required when PLATFORM_REPOSITORY=postgres');
@@ -95,7 +136,15 @@ export class PostgresDomainUnitOfWork implements OnModuleDestroy {
     return Boolean(this.client);
   }
 
-  private async workingStore(db: Prisma.TransactionClient): Promise<PlatformStore> {
+  private storeFromState(state: PlatformStateSnapshot): PlatformStore {
+    const working = new PlatformStore({ dataFile: ':memory:', seed: false });
+    // importState keeps object references; clone so lifecycle normalization in
+    // one request cannot mutate the shared revision cache.
+    working.importState(JSON.parse(JSON.stringify(state)) as PlatformStateSnapshot);
+    return working;
+  }
+
+  private async canonicalState(db: Prisma.TransactionClient): Promise<{ revision: number; state: PlatformStateSnapshot }> {
     const snapshot = await db.platformSnapshot.findUnique({ where: { id: SNAPSHOT_ID } });
     const normalized = await loadNormalizedState(db);
     const compatibility = snapshotState(snapshot?.state);
@@ -106,7 +155,15 @@ export class PostgresDomainUnitOfWork implements OnModuleDestroy {
     working.importState(normalized
       ? { ...normalized, ...(normalized.hardProblems?.length ? {} : compatibility?.hardProblems?.length ? { hardProblems: compatibility.hardProblems } : {}) }
       : compatibility ?? {});
-    return working;
+    return { revision: snapshot?.revision ?? 0, state: working.exportState() };
+  }
+
+  private async loadCanonicalState(): Promise<{ revision: number; value: PlatformStateSnapshot }> {
+    const loaded = await this.client!.$transaction(
+      (db) => this.canonicalState(db),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: postgresTransactionTimeoutMs() },
+    );
+    return { revision: loaded.revision, value: loaded.state };
   }
 
   async run<T>(operation: (store: PlatformStore) => T | Promise<T>): Promise<T> {
@@ -115,28 +172,33 @@ export class PostgresDomainUnitOfWork implements OnModuleDestroy {
     return this.writes.run(async () => {
       const committed = await runWithPostgresConflictRetry(() => this.client!.$transaction(async (db) => {
         const snapshot = await db.platformSnapshot.findUnique({ where: { id: SNAPSHOT_ID } });
-        const working = await this.workingStore(db);
+        const expectedRevision = snapshot?.revision ?? 0;
+        const cached = this.states.peekExact(expectedRevision);
+        const stateBeforeWrite = cached ?? (await this.canonicalState(db)).state;
+        const working = this.storeFromState(stateBeforeWrite);
 
-        const revision = await claimSnapshotRevision(db, snapshot?.revision ?? 0);
+        const revision = await claimSnapshotRevision(db, expectedRevision);
         const result = await operation(working);
         const state = working.exportState();
         await synchronizeNormalized(db, state, revision);
-        return { result, state };
+        return { result, state, revision };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: postgresTransactionTimeoutMs() }));
 
       // Keep this process's authorization and compatibility read cache aligned
       // with the committed canonical state. No persistence write is queued;
       // `noteExternalCommit` only advances the CAS cursor for the legacy writer.
-      this.cache.importState(committed.state);
+      this.states.set(committed.revision, committed.state);
       this.cache.noteExternalCommit();
       return committed.result;
     });
   }
 
-  /** Read the latest canonical graph without touching the process cache. */
+  /** Read through the revision-checked process cache; returned stores are detached. */
   async read<T>(operation: (store: PlatformStore) => T | Promise<T>): Promise<T> {
     if (!this.client) return operation(this.cache);
-    return this.client.$transaction(async (db) => operation(await this.workingStore(db)), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: postgresTransactionTimeoutMs() });
+    const snapshot = await this.client.platformSnapshot.findUnique({ where: { id: SNAPSHOT_ID }, select: { revision: true } });
+    const state = await this.states.get(snapshot?.revision ?? 0, () => this.loadCanonicalState());
+    return operation(this.storeFromState(state));
   }
 
   async onModuleDestroy(): Promise<void> {

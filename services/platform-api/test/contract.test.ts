@@ -65,6 +65,39 @@ test('OpenAPI fixes the users pagination envelope and query whitelist', () => {
   assert.match(openapi, /AdminCapabilityBundle:[\s\S]*eventId: \{ type: \[string, 'null'\] \}/);
 });
 
+test('challenge versions separate card summaries from Markdown details', () => {
+  const openapi = readFileSync(join(root, 'contracts', 'openapi.yaml'), 'utf8');
+  const schema = openapi.slice(openapi.indexOf('    ChallengeVersion:\n'), openapi.indexOf('    SubmissionContractDefinition:\n'));
+  assert.match(schema, /summary: \{ type: string, maxLength: 300 \}/);
+  assert.match(schema, /descriptionFormat: \{ type: string, enum: \[MARKDOWN, HTML\] \}/);
+});
+
+test('OpenAPI separates administrator latest-artifact download from immutable Worker snapshot download', () => {
+  const openapi = readFileSync(join(root, 'contracts', 'openapi.yaml'), 'utf8');
+  const exactPath = openapi.slice(openapi.indexOf('  /api/v1/submissions/{submissionId}/artifact:\n'), openapi.indexOf('  /api/v1/submissions/{submissionId}/latest-artifact:\n'));
+  const latestPath = openapi.slice(openapi.indexOf('  /api/v1/submissions/{submissionId}/latest-artifact:\n'), openapi.indexOf('  /api/v1/grading-results:import:\n'));
+  assert.match(exactPath, /指定不可变提交快照/);
+  assert.match(latestPath, /最新一次已成功接收的 ZIP/);
+  assert.match(latestPath, /X-Submission-Id/);
+});
+
+test('submission pages expose only a lightweight published result summary', () => {
+  const openapi = readFileSync(join(root, 'contracts', 'openapi.yaml'), 'utf8');
+  const submissionSchema = openapi.slice(openapi.indexOf('    Submission:\n'), openapi.indexOf('    EventConfig:\n'));
+  const summarySchema = openapi.slice(openapi.indexOf('    SubmissionResultSummary:\n'), openapi.indexOf('    Submission:\n'));
+  assert.match(submissionSchema, /resultSummary: \{ \$ref: '#\/components\/schemas\/SubmissionResultSummary'/);
+  assert.match(summarySchema, /required: \[resultId, total, status, published\]/);
+  assert.doesNotMatch(summarySchema, /criteria|findings|dimensions|evidence/);
+});
+
+test('profile contract exposes the current department display name instead of requiring org-path rendering', () => {
+  const openapi = readFileSync(join(root, 'contracts', 'openapi.yaml'), 'utf8');
+  const profilePath = openapi.slice(openapi.indexOf('  /api/v1/profiles/{subjectId}:\n'), openapi.indexOf('  /api/v1/profiles/{subjectId}/history:\n'));
+  const profileSubject = openapi.slice(openapi.indexOf('    ProfileSubject:\n'), openapi.indexOf('    CapabilityProfile:\n'));
+  assert.match(profilePath, /\$ref: '#\/components\/schemas\/Profile'/);
+  assert.match(profileSubject, /departmentName: \{ type: string/);
+});
+
 // The external-evaluation manifest is declared as a versioned contract but was
 // never checked against its own schema, so nothing stopped the platform from
 // leaking internal executor paths into it or drifting from the shape external

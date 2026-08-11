@@ -560,7 +560,11 @@ export interface ChallengeVersion {
   challengeId: string;
   version: number;
   title: string;
+  /** Short plain-text copy used by training cards and compact lists. */
+  summary?: string;
+  /** Full challenge statement. New versions use Markdown; HTML is legacy-only. */
   description?: string;
+  descriptionFormat?: 'MARKDOWN' | 'HTML';
   objectives?: string[];
   requirements?: string[];
   constraints?: string[];

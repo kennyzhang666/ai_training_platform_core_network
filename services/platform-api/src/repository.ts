@@ -57,8 +57,18 @@ export interface SubmissionListQuery {
   state?: SubmissionRecord['state'];
 }
 
+/** Compact list projection; full criteria, evidence and findings stay behind /reports/:submissionId. */
+export interface SubmissionResultSummary {
+  resultId: string;
+  total: number;
+  status: string;
+  published: true;
+}
+
+export type SubmissionListItem = SubmissionRecord & { resultSummary?: SubmissionResultSummary };
+
 export interface SubmissionPage {
-  items: SubmissionRecord[];
+  items: SubmissionListItem[];
   pageInfo: PageInfo;
 }
 

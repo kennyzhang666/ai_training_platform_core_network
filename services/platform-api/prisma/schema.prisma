@@ -121,7 +121,9 @@ model ChallengeVersion {
   challenge          Challenge @relation(fields: [challengeId], references: [id])
   version            Int
   title              String
+  summary            String?
   description        String?
+  descriptionFormat  String   @default("MARKDOWN")
   objectives         Json?
   requirements       Json?
   constraints        Json?

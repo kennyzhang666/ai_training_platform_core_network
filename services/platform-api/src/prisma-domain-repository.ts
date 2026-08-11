@@ -16,6 +16,7 @@ import {
   ChallengeRepository,
   EventRepository,
   SubmissionListQuery,
+  SubmissionListItem,
   SubmissionRepository,
 } from './repository';
 
@@ -41,7 +42,9 @@ export function mapVersion(row: any): ChallengeVersion {
     challengeId: row.challengeId,
     version: row.version,
     title: row.title,
+    ...(row.summary !== null ? { summary: row.summary } : {}),
     ...(row.description !== null ? { description: row.description } : {}),
+    descriptionFormat: row.descriptionFormat === 'HTML' ? 'HTML' : 'MARKDOWN',
     ...(stringArray(row.objectives) ? { objectives: stringArray(row.objectives) } : {}),
     ...(stringArray(row.requirements) ? { requirements: stringArray(row.requirements) } : {}),
     ...(stringArray(row.constraints) ? { constraints: stringArray(row.constraints) } : {}),
@@ -136,6 +139,25 @@ export function mapSubmission(row: any): SubmissionRecord {
   };
 }
 
+export function mapSubmissionListItem(row: any): SubmissionListItem {
+  const submission = mapSubmission(row);
+  if (!submission.resultId) return submission;
+  if (row.event?.reveal === 'ON_RELEASE' && submission.state !== 'REVEALED') return submission;
+  const result = row.results?.find((candidate: { id?: string }) => candidate.id === submission.resultId);
+  if (!result) return submission;
+  const total = Number(result.total);
+  if (!Number.isFinite(total)) return submission;
+  return {
+    ...submission,
+    resultSummary: {
+      resultId: result.id,
+      total,
+      status: typeof result.status === 'string' ? result.status : 'COMPLETE',
+      published: true,
+    },
+  };
+}
+
 export function mapRun(row: any): GradingRun {
   return {
     id: row.id,
@@ -212,7 +234,9 @@ function versionData(version: ChallengeVersion): Omit<Prisma.ChallengeVersionUnc
     id: version.id,
     version: version.version,
     title: version.title,
+    summary: version.summary ?? null,
     description: version.description ?? null,
+    descriptionFormat: version.descriptionFormat ?? 'MARKDOWN',
     objectives: jsonValue(version.objectives),
     requirements: jsonValue(version.requirements),
     constraints: jsonValue(version.constraints),
@@ -500,7 +524,11 @@ export class PrismaSubmissionRepository implements SubmissionRepository {
     const rows = pageKeys.length
       ? await this.db.submission.findMany({
         where: { id: { in: pageKeys.map((key) => key.id) } },
-        include: { gradingRuns: { orderBy: [{ createdAt: 'desc' }], take: 1 }, results: { orderBy: [{ createdAt: 'desc' }], take: 1 } },
+        include: {
+          gradingRuns: { orderBy: [{ createdAt: 'desc' }], take: 1 },
+          results: { orderBy: [{ createdAt: 'desc' }], take: 1, select: { id: true, total: true, status: true } },
+          event: { select: { reveal: true } },
+        },
       })
       : [];
     const rowById = new Map(rows.map((row) => [row.id, row] as const));
@@ -510,7 +538,7 @@ export class PrismaSubmissionRepository implements SubmissionRepository {
       // keyset order so equal timestamps cannot move between pages.
       items: pageKeys.flatMap((key) => {
         const row = rowById.get(key.id);
-        return row ? [mapSubmission(row)] : [];
+        return row ? [mapSubmissionListItem(row)] : [];
       }),
       pageInfo: { page, pageSize, total, totalPages, hasNext: totalPages > 0 && page < totalPages, hasPrevious: totalPages > 0 && page > 1 },
     };

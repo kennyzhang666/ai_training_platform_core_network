@@ -289,6 +289,32 @@ test('manual upload can be triggered and imported results are idempotent', async
     const deniedDownload = await fetch(`${baseUrl}/api/v1/submissions/${submission.id}/artifact`, { headers: { 'x-employee-id': 'w00124' } });
     assert.equal(deniedDownload.status, 403);
 
+    const latestBytes = Buffer.from(ZIP_FIXTURES.second, 'base64');
+    const latestUpload = await fetch(`${baseUrl}/api/v1/events/event-local/submissions:upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        subjectId: 'w00123',
+        artifactBase64: latestBytes.toString('base64'),
+        fileName: 'submission-latest.zip',
+        snapshot: { sourceType: 'UPLOAD', submittedAt: '2026-08-01T10:01:00Z' },
+      }),
+    });
+    assert.equal(latestUpload.status, 201);
+    const latestSubmission = await latestUpload.json() as { id: string };
+
+    // The administrator-facing download follows the participant/event pair
+    // to the newest successfully received ZIP, even when the page still holds
+    // an older row. The exact endpoint remains immutable for Worker grading.
+    const latestDownloaded = await fetch(`${baseUrl}/api/v1/submissions/${submission.id}/latest-artifact`, { headers: { 'x-employee-id': 'w00123' } });
+    assert.equal(latestDownloaded.status, 200);
+    assert.equal(latestDownloaded.headers.get('x-submission-id'), latestSubmission.id);
+    assert.equal(latestDownloaded.headers.get('content-disposition'), 'attachment; filename*=UTF-8\'\'submission-latest.zip');
+    assert.deepEqual(Buffer.from(await latestDownloaded.arrayBuffer()), latestBytes);
+
+    const exactDownloadedAgain = await fetch(`${baseUrl}/api/v1/submissions/${submission.id}/artifact`, { headers: { 'x-employee-id': 'w00123' } });
+    assert.deepEqual(Buffer.from(await exactDownloadedAgain.arrayBuffer()), uploadedBytes);
+
     const uploaded = await fetch(`${baseUrl}/api/v1/events/event-local/submissions:upload`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -313,7 +339,7 @@ test('manual upload can be triggered and imported results are idempotent', async
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         subjectId: 'w00123',
-        artifactBase64: ZIP_FIXTURES.second,
+        artifactBase64: ZIP_FIXTURES.allowlisted,
         fileName: 'submission-v2.zip',
         snapshot: { sourceType: 'UPLOAD', submittedAt: '2026-08-01T10:01:00Z' },
       }),
@@ -364,6 +390,22 @@ test('manual upload can be triggered and imported results are idempotent', async
     assert.equal(firstBody.accepted, true);
     assert.equal(secondBody.stored.resultId, firstBody.stored.resultId);
     assert.deepEqual(firstBody.stored.result.subject, { kind: 'person', id: 'w00124', name: '本地学员 A', orgPath: '/1/12/125/' });
+    const summarizedPageResponse = await fetch(`${baseUrl}/api/v1/submissions?eventId=event-import&page=1&pageSize=20`, {
+      headers: { 'x-employee-id': 'w00124' },
+    });
+    assert.equal(summarizedPageResponse.status, 200);
+    const summarizedPage = await summarizedPageResponse.json() as {
+      items: Array<{ id: string; resultSummary?: { resultId: string; total: number; status: string; published: boolean; dimensions?: unknown; findings?: unknown } }>;
+    };
+    const summarizedSubmission = summarizedPage.items.find((item) => item.resultSummary?.resultId === firstBody.stored.resultId);
+    assert.deepEqual(summarizedSubmission?.resultSummary, {
+      resultId: firstBody.stored.resultId,
+      total: 60,
+      status: 'COMPLETE',
+      published: true,
+    });
+    assert.equal(summarizedSubmission?.resultSummary?.dimensions, undefined);
+    assert.equal(summarizedSubmission?.resultSummary?.findings, undefined);
     const reusedRun = { ...fixture, resultId: 'result-import-run-reuse', idempotencyKey: 'efefefefefefefefefefefefefefefef', subject: { kind: 'person', id: 'w00124' } };
     const rejectedRunReuse = await fetch(`${baseUrl}/api/v1/grading-results:import`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ result: reusedRun, eventId: 'event-import', subjectId: 'w00124' }),
@@ -819,9 +861,11 @@ test('local grading executor runs the reference challenge without GitLab', async
 
     const profileWithoutHistoryResponse = await fetch(`${baseUrl}/api/v1/profiles/w00123?includeHistory=false`);
     assert.equal(profileWithoutHistoryResponse.status, 200);
-    const profileWithoutHistory = await profileWithoutHistoryResponse.json() as { history: unknown[]; stats: { graded: number } };
+    const profileWithoutHistory = await profileWithoutHistoryResponse.json() as { subject: { departmentName?: string; orgPath: string }; history: unknown[]; stats: { graded: number } };
     assert.deepEqual(profileWithoutHistory.history, []);
     assert.equal(profileWithoutHistory.stats.graded, 1);
+    assert.equal(profileWithoutHistory.subject.departmentName, 'AI 工程团队');
+    assert.equal(profileWithoutHistory.subject.orgPath, '/1/12/125/');
 
     const profileHistoryResponse = await fetch(`${baseUrl}/api/v1/profiles/w00123/history?page=1&pageSize=1`);
     assert.equal(profileHistoryResponse.status, 200);
@@ -998,6 +1042,17 @@ test('administrator workspace endpoints manage challenge versions and announceme
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description: '<p><img src="https://example.com/remote.png"></p>' }),
     });
     assert.equal(unsafeDescription.status, 400);
+    const oversizedSummary = await fetch(`${baseUrl}/api/v1/challenges/admin-api-demo/versions/admin-api-demo@1`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ summary: '题'.repeat(301) }),
+    });
+    assert.equal(oversizedSummary.status, 400);
+    const markdownDescription = await fetch(`${baseUrl}/api/v1/challenges/admin-api-demo/versions/admin-api-demo@1`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ summary: '用于训战卡片的简短介绍', description: '# 输入输出\n\n```json\n{"token":"***"}\n```', descriptionFormat: 'MARKDOWN' }),
+    });
+    assert.equal(markdownDescription.status, 200);
+    const markdownBody = await markdownDescription.json() as { summary?: string; descriptionFormat?: string };
+    assert.equal(markdownBody.summary, '用于训战卡片的简短介绍');
+    assert.equal(markdownBody.descriptionFormat, 'MARKDOWN');
     const reclassified = await fetch(`${baseUrl}/api/v1/challenges/admin-api-demo`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ category: 'COMPETITION' }),
     });

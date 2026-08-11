@@ -737,8 +737,10 @@ test('profiles and report statistics do not depend on the seeded local account',
 
     assert.equal(store.systemSubmissions().length, 2);
     assert.equal(store.systemSubmissions('event-local').length, 2);
-    const profile = store.profile('e10001') as { stats: { submissions: number } };
+    const profile = store.profile('e10001') as { subject: { departmentName?: string; orgPath: string }; stats: { submissions: number } };
     assert.equal(profile.stats.submissions, 1);
+    assert.equal(profile.subject.departmentName, 'AI 工程团队');
+    assert.equal(profile.subject.orgPath, '/1/12/125/');
     assert.equal((store.profile('e10002') as { stats: { submissions: number } }).stats.submissions, 1);
     assert.equal(store.getSubmission(first.id).subjectId, 'e10001');
   } finally {

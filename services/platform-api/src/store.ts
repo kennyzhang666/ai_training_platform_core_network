@@ -46,7 +46,7 @@ import {
   CAPABILITY_ITEMS,
   CAPABILITY_ITEM_BY_KEY,
 } from './capability-catalog';
-import type { AuditListQuery, AuditPage, SortOrder, SubmissionListQuery, SubmissionPage, UserListQuery, UserPage, UserSortField } from './repository';
+import type { AuditListQuery, AuditPage, SortOrder, SubmissionListItem, SubmissionListQuery, SubmissionPage, UserListQuery, UserPage, UserSortField } from './repository';
 import { hasGlobalAdminAccess } from './access-control';
 
 export type { UserListQuery, UserPage } from './repository';
@@ -1141,7 +1141,7 @@ export class PlatformStore {
     const publisherId = actor?.id ?? challenge.ownerOrgPath;
     const publisherName = actor?.name ?? challenge.ownerOrgPath;
     const departmentName = actor ? this.orgUnits.get(actor.orgUnitId)?.name : undefined;
-    const description = plainText(version?.description);
+    const description = version?.summary?.trim() || plainText(version?.description);
     const timestamp = now();
     const approved = actor ? this.isAdmin(actorId) : actorId === 'admin-local';
     return {
@@ -2505,8 +2505,9 @@ export class PlatformStore {
     const pointsByEvent = new Map<string, number>();
     for (const eventId of runningSeason?.eventIds ?? []) pointsByEvent.set(eventId, this.eventRanking(eventId).get(subjectId)?.points ?? 0);
     const totalPoints = [...pointsByEvent.values()].reduce((sum, value) => sum + value, 0);
+    const departmentName = user.orgUnitId ? this.orgUnits.get(user.orgUnitId)?.name : undefined;
     return {
-      subject: user,
+      subject: { ...user, ...(departmentName ? { departmentName } : {}) },
       stats: { submissions: submissions.length, graded: visible.length, average: scores.length ? Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(4)) : null, best: scores.length ? Math.max(...scores) : null, totalPoints },
       history: options.includeHistory === false ? [] : visible.map((submission) => ({ submissionId: submission.id, eventId: submission.eventId, total: Number((this.results.get(submission.resultId!)?.result as { total?: number } | undefined)?.total ?? 0), points: pointsByEvent.get(submission.eventId) ?? 0, resultId: submission.resultId, createdAt: submission.createdAt })),
     };
@@ -3557,6 +3558,24 @@ export class PlatformStore {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  /**
+   * Resolve the administrator download button to the newest ZIP that the
+   * platform successfully accepted for the same participant and event. The
+   * exact submission artifact endpoint remains separate for Worker grading.
+   */
+  latestSuccessfulUploadSubmission(submissionId: string, actorId = 'w00123'): SubmissionRecord {
+    this.assertCanViewSubmission(actorId, submissionId);
+    const reference = this.getSubmission(submissionId);
+    const latest = this.listSubmissions(reference.eventId, actorId)
+      .filter((candidate) => candidate.subjectId === reference.subjectId
+        && candidate.snapshot.sourceType === 'UPLOAD'
+        && Boolean(candidate.snapshot.artifactUri)
+        && Boolean(candidate.snapshot.artifactHash))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))[0];
+    if (!latest) throw new NotFoundException('该学员暂无可下载的交付件');
+    return latest;
+  }
+
   listSubmissionsPage(query: SubmissionListQuery = {}, actorId = 'w00123'): SubmissionPage {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
@@ -3565,7 +3584,25 @@ export class PlatformStore {
     const items = this.listSubmissions(query.eventId, actorId)
       .filter((item) => (!query.subjectId || item.subjectId === query.subjectId) && (!query.state || item.state === query.state))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));
-    return { items: items.slice((page - 1) * pageSize, page * pageSize), pageInfo: pageInfo(page, pageSize, items.length) };
+    const pageItems = items.slice((page - 1) * pageSize, page * pageSize).map((submission): SubmissionListItem => {
+      if (!submission.resultId) return submission;
+      const event = this.getEvent(submission.eventId);
+      if (event.reveal === 'ON_RELEASE' && submission.state !== 'REVEALED') return submission;
+      const stored = this.results.get(submission.resultId);
+      const result = stored?.result as { total?: unknown; recalculatedTotal?: unknown; status?: unknown } | undefined;
+      const total = typeof result?.recalculatedTotal === 'number' ? result.recalculatedTotal : result?.total;
+      if (!stored || typeof total !== 'number' || !Number.isFinite(total)) return submission;
+      return {
+        ...submission,
+        resultSummary: {
+          resultId: stored.resultId,
+          total,
+          status: typeof result?.status === 'string' ? result.status : 'COMPLETE',
+          published: true,
+        },
+      };
+    });
+    return { items: pageItems, pageInfo: pageInfo(page, pageSize, items.length) };
   }
 
   startGrading(submissionId: string, actorId: string): GradingRun {
