@@ -7,6 +7,7 @@ import { challengeCardSummary, ChallengeDescriptionFormat, markdownToSafeHtml } 
 import { Icon } from './icons';
 import { submissionSourceAvailability, type SubmissionSource } from './submission-source';
 import { preferredSeasonId, type SeasonSummary } from './season';
+import { participantHasEvaluationInProgress } from './submission-evaluation-lock';
 import { departmentDisplayName } from './user-identity';
 import webPackage from '../package.json';
 
@@ -365,13 +366,7 @@ function eventWindowMessage(event?: EventConfig, currentTime = Date.now()): stri
   return eventWindowState(event, currentTime) === 'BEFORE' ? '训战尚未到开放时间' : '训战提交时间已结束';
 }
 
-function submissionEvaluationInProgress(submission: Submission): boolean {
-  return submission.gradingStatus === 'QUEUED'
-    || submission.gradingStatus === 'RUNNING'
-    || (submission.state === 'QUEUED' && Boolean(submission.gradingRunId));
-}
-
-const submissionEvaluationLockMessage = '该训战已有提交正在评测，请等待评测完成后再提交新的作品';
+const submissionEvaluationLockMessage = '你在该训战中的提交正在评测，请等待评测完成后再提交新的作品';
 
 function eventTitle(event: EventConfig, challenges: Challenge[]): string {
   return challenges.flatMap((challenge) => challenge.versions).find((version) => version.id === event.challengeVersion)?.title ?? event.challengeVersion;
@@ -492,9 +487,9 @@ function App() {
   const selectedEvent = useMemo(() => {
     const event = events.find((item) => item.id === eventId);
     if (!event) return event;
-    const locked = submissions.some((submission) => submission.eventId === event.id && submissionEvaluationInProgress(submission));
+    const locked = participantHasEvaluationInProgress(submissions, event.id, subjectId);
     return locked ? { ...event, status: 'LOCKED' } : event;
-  }, [events, eventId, submissions]);
+  }, [events, eventId, subjectId, submissions]);
   const availableSubmissionSources = submissionSourceAvailability(selectedEvent?.submissionSource);
   const selectedEventLockKey = selectedEvent?.status === 'LOCKED' ? selectedEvent.id : '';
   const selectedVersion = useMemo(() => challenges.flatMap((challenge) => challenge.versions).find((version) => version.id === challengeVersionId) ?? (selectedEvent && challenges.flatMap((challenge) => challenge.versions).find((version) => version.id === selectedEvent.challengeVersion)), [challenges, challengeVersionId, selectedEvent]);
@@ -775,7 +770,7 @@ function App() {
       return;
     }
     const currentTime = Date.now();
-    if (submissions.some((submission) => submission.eventId === selectedEvent.id && submissionEvaluationInProgress(submission))) {
+    if (participantHasEvaluationInProgress(submissions, selectedEvent.id, subjectId)) {
       setMessage(submissionEvaluationLockMessage);
       setEvaluationLockNoticeVisible(true);
       return;

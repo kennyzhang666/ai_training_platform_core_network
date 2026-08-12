@@ -179,6 +179,12 @@ test('a participant cannot submit another snapshot while an evaluation is queued
 
   const run = store.startGrading(replacementBeforeEvaluation.id, 'admin-1');
   assert.equal(run.status, 'QUEUED');
+  const otherParticipantSubmission = store.createSubmission('event-local', 'w00125', {
+    ...uploadSnapshot,
+    snapshotHash: '3333333333333333333333333333333333333333333333333333333333333333',
+    artifactHash: '4444444444444444444444444444444444444444444444444444444444444444',
+  });
+  assert.equal(otherParticipantSubmission.state, 'WAITING_TRIGGER');
   assert.throws(
     () => store.createSubmission('event-local', 'w00124', {
       ...uploadSnapshot,
