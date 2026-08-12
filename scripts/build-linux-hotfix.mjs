@@ -11,6 +11,8 @@ for (let index = 2; index < process.argv.length; index += 2) args.set(process.ar
 const version = args.get('--version') ?? JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version;
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`invalid hotfix version: ${version}`);
 const releaseRoot = resolve(args.get('--output-root') ?? join(root, 'release'));
+const apiDist = resolve(args.get('--api-dist') ?? join(root, 'services', 'platform-api', 'dist'));
+const webDist = resolve(args.get('--web-dist') ?? join(root, 'apps', 'web', 'dist'));
 const directory = join(releaseRoot, `ai-training-platform-${version}-hotfix-linux-x64`);
 const archive = `${directory}.tar.gz`;
 
@@ -19,8 +21,8 @@ await rm(archive, { force: true });
 await rm(`${archive}.sha256`, { force: true });
 await mkdir(join(directory, 'payload', 'services', 'platform-api'), { recursive: true });
 await mkdir(join(directory, 'payload', 'apps', 'web'), { recursive: true });
-await cp(join(root, 'services', 'platform-api', 'dist'), join(directory, 'payload', 'services', 'platform-api', 'dist'), { recursive: true });
-await cp(join(root, 'apps', 'web', 'dist'), join(directory, 'payload', 'apps', 'web', 'dist'), { recursive: true });
+await cp(apiDist, join(directory, 'payload', 'services', 'platform-api', 'dist'), { recursive: true });
+await cp(webDist, join(directory, 'payload', 'apps', 'web', 'dist'), { recursive: true });
 
 for (const name of ['apply-hotfix.sh', 'HOTFIX_GUIDE.md']) {
   const source = await readFile(join(root, 'deploy', 'hotfix', name), 'utf8');

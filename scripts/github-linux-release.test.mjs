@@ -20,6 +20,8 @@ test('GitHub workflow builds tagged releases and a verified Linux hotfix on nati
   assert.match(workflow, /node --test scripts\/single-node-deployment\.test\.mjs/);
   assert.doesNotMatch(workflow, /pnpm deployment:test/);
   assert.match(workflow, /cp tooling\/scripts\/build-single-node-release\.mjs source\/scripts\/build-single-node-release\.mjs/);
+  assert.match(workflow, /cp tooling\/scripts\/build-linux-hotfix\.mjs source\/scripts\/build-linux-hotfix\.mjs/);
+  assert.match(workflow, /cp tooling\/scripts\/linux-hotfix\.test\.mjs source\/scripts\/linux-hotfix\.test\.mjs/);
   assert.match(workflow, /RELEASE_TOOLING_SHA/);
   assert.match(workflow, /mkdir -p release/);
   assert.match(workflow, /pnpm release:build \\\n/);

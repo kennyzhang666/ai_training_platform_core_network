@@ -67,6 +67,8 @@ jobs:
             scripts/prepare-linux-release-runtime.sh
             scripts/build-single-node-release.mjs
             scripts/archive-release.py
+            scripts/build-linux-hotfix.mjs
+            scripts/linux-hotfix.test.mjs
           sparse-checkout-cone-mode: false
 
       - name: Checkout tagged source
@@ -100,6 +102,8 @@ jobs:
           set -euo pipefail
           cp tooling/scripts/build-single-node-release.mjs source/scripts/build-single-node-release.mjs
           cp tooling/scripts/archive-release.py source/scripts/archive-release.py
+          cp tooling/scripts/build-linux-hotfix.mjs source/scripts/build-linux-hotfix.mjs
+          cp tooling/scripts/linux-hotfix.test.mjs source/scripts/linux-hotfix.test.mjs
           printf 'RELEASE_TOOLING_SHA=%s\n' "$(git -C tooling rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Set up Node.js

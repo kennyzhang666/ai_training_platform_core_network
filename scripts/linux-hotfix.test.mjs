@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
@@ -20,7 +20,16 @@ test('Linux hotfix is self-checking, reversible and does not touch platform data
 test('Linux hotfix builder emits the archive, checksum and operator guide', async () => {
   const output = await mkdtemp(join(tmpdir(), 'ai-training-hotfix-test-'));
   try {
-    execFileSync(process.execPath, [join(root, 'scripts', 'build-linux-hotfix.mjs'), '--version', '1.1.3', '--output-root', output], { cwd: root, stdio: 'pipe' });
+    const apiDist = join(output, 'fixture-api-dist');
+    const webDist = join(output, 'fixture-web-dist');
+    await mkdir(apiDist, { recursive: true });
+    await mkdir(webDist, { recursive: true });
+    await writeFile(join(apiDist, 'main.js'), 'fixture api\n', 'utf8');
+    await writeFile(join(webDist, 'index.html'), '<!doctype html>\n', 'utf8');
+    execFileSync(process.execPath, [
+      join(root, 'scripts', 'build-linux-hotfix.mjs'), '--version', '1.1.3', '--output-root', output,
+      '--api-dist', apiDist, '--web-dist', webDist,
+    ], { cwd: root, stdio: 'pipe' });
     const directory = join(output, 'ai-training-platform-1.1.3-hotfix-linux-x64');
     assert.equal((await stat(join(directory, 'apply-hotfix.sh'))).isFile(), true);
     assert.equal((await stat(join(directory, 'HOTFIX_GUIDE.md'))).isFile(), true);
