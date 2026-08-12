@@ -224,8 +224,18 @@ export class EvaluationBatchService {
   /** PostgreSQL request path: batch selection, lease and every run transition share one UoW. */
   async leasePersistent(workerId: string, limit = 1, executorIds: string[] = [], actorId = 'w00123'): Promise<EvaluationBatchTask[]> {
     if (!this.domainUnitOfWork?.isPostgres) return this.lease(workerId, limit, executorIds, actorId);
+    if (!workerId.trim()) throw new BadRequestException({ code: 'WORKER_ID_REQUIRED', message: '评测环境必须声明 workerId' });
+    // An evaluation worker polls this endpoint every few seconds whether or
+    // not the platform has work. Opening the write unit of work regardless
+    // meant an idle platform still claimed a snapshot revision and rewrote the
+    // normalized graph on every poll. Look for leasable work on the read path
+    // first; the write path below re-checks inside its own transaction.
+    const leasable = await this.domainUnitOfWork.read((store) => store.systemEvaluationBatches().some((batch) => (
+      batch.status === 'QUEUED'
+      || (batch.status === 'RUNNING' && Boolean(batch.leaseExpiresAt) && Date.parse(batch.leaseExpiresAt!) <= Date.now())
+    )));
+    if (!leasable) return [];
     return this.domainUnitOfWork.run((store) => {
-      if (!workerId.trim()) throw new BadRequestException({ code: 'WORKER_ID_REQUIRED', message: '评测环境必须声明 workerId' });
       const current = Date.now();
       for (const batch of store.systemEvaluationBatches()) {
         if (batch.status === 'RUNNING' && batch.leaseExpiresAt && Date.parse(batch.leaseExpiresAt) <= current) {

@@ -96,9 +96,13 @@ export class RevisionAwareStateCache<T> {
 
   set(revision: number, value: T): void {
     if (revision < this.revision) return;
+    // A write that changed nothing still advances the revision. Re-publishing
+    // the identical object would make the listener rebuild its own copy for
+    // no reason, so only notify when the value itself moved on.
+    const replaced = this.value !== value;
     this.revision = revision;
     this.value = value;
-    this.onSet?.(revision, value);
+    if (replaced) this.onSet?.(revision, value);
   }
 
   async get(minimumRevision: number, loader: () => Promise<{ revision: number; value: T }>): Promise<T> {
@@ -188,8 +192,17 @@ export class PostgresDomainUnitOfWork implements OnModuleDestroy {
         const stateBeforeWrite = cached ?? (await this.canonicalState(db)).state;
         const working = this.storeFromState(stateBeforeWrite);
 
+        // Claim before the operation: taking the snapshot row first is what
+        // keeps a consistent lock order and prevents the deadlocks this
+        // transaction used to hit under concurrent writers.
         const revision = await claimSnapshotRevision(db, expectedRevision);
+        const mutationsBefore = working.mutationCount;
         const result = await operation(working);
+        // Not every `run()` caller mutates: an idle worker poll and a
+        // heartbeat with nothing to extend are read-shaped. Re-synchronizing
+        // the whole normalized graph for those rewrote every row of every
+        // table on a fixed interval, for no change at all.
+        if (working.mutationCount === mutationsBefore) return { result, state: stateBeforeWrite, revision };
         const state = working.exportState();
         await synchronizeNormalized(db, state, revision);
         return { result, state, revision };

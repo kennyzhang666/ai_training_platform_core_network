@@ -18,7 +18,7 @@ export interface UserDirectoryRepository {
   deleteOrgUnit(id: string, actorId: string): Promise<void>;
   list(query: NormalizedUserListQuery): Promise<UserPage>;
   updateWithAudit(id: string, patch: UserPatch, audit: AuditAppendInput): Promise<AppUser>;
-  syncSsoIdentity(identity: import('./domain').SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }>;
+  syncSsoIdentity(identity: import('./domain').SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean; changed?: boolean }>;
   close?(): Promise<void>;
 }
 
@@ -137,9 +137,9 @@ export class PrismaUserDirectoryRepository implements UserDirectoryRepository {
     }).then(() => { this.store.noteExternalCommit(); });
   }
   list(query: NormalizedUserListQuery): Promise<UserPage> { return this.repository.users.list(query); }
-  async syncSsoIdentity(identity: import('./domain').SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }> {
+  async syncSsoIdentity(identity: import('./domain').SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean; changed?: boolean }> {
     const result = await this.repository.users.syncSsoIdentity(identity);
-    this.store.noteExternalCommit();
+    if (result.changed !== false) this.store.noteExternalCommit();
     return result;
   }
   close(): Promise<void> { return this.repository.close(); }

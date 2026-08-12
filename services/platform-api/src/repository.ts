@@ -163,7 +163,8 @@ export interface UserRepository {
   getById(id: string): Promise<AppUser | undefined>;
   getByEmployeeNo(employeeNo: string): Promise<AppUser | undefined>;
   update(id: string, patch: UserPatch): Promise<AppUser>;
-  syncSsoIdentity(identity: SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }>;
+  /** `changed` is false when a periodic refresh matched the stored identity. */
+  syncSsoIdentity(identity: SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean; changed?: boolean }>;
 }
 
 export interface AuditRepository {

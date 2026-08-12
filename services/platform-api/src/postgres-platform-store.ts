@@ -10,6 +10,8 @@ import { isSingleNodeProduction } from './deployment-profile';
 const SNAPSHOT_ID = 'singleton';
 const SNAPSHOT_VERSION = 1;
 const RUNTIME_SETTING_KEY = 'code-agent-runtime';
+/** How much audit history the in-process snapshot keeps for `adminOverview`. */
+const AUDIT_SNAPSHOT_LIMIT = 200;
 
 /** A compare-and-set collision is safe to retry because the surrounding
  * transaction has rolled back and the next attempt reloads canonical state. */
@@ -122,7 +124,6 @@ export async function synchronizeNormalized(db: Prisma.TransactionClient, state:
   const challengeIds = ids(state.challenges);
   const versionIds = state.challenges.flatMap((challenge) => challenge.versions.map((version) => version.id));
   const seasonIds = ids(state.seasons);
-  const auditIds = ids(state.audits);
   const announcementIds = ids(state.announcements);
 
   // Remove stale rows in dependency order. Role bindings and composite join
@@ -149,7 +150,9 @@ export async function synchronizeNormalized(db: Prisma.TransactionClient, state:
   const staleOrgUnits = await db.orgUnit.findMany({ where: { id: { notIn: orgUnitIds } }, select: { id: true, level: true } });
   for (const unit of sortedByLevel(staleOrgUnits, -1)) await db.orgUnit.delete({ where: { id: unit.id } });
   await db.season.deleteMany({ where: { id: { notIn: seasonIds } } });
-  await db.auditLog.deleteMany({ where: { id: { notIn: auditIds } } });
+  // The audit log is append-only history and the process snapshot now holds
+  // only a recent window of it, so it must never be reconciled against that
+  // window: doing so would delete every record older than the window.
   await db.announcement.deleteMany({ where: { id: { notIn: announcementIds } } });
 
   for (const unit of sortedByLevel(state.orgUnits, 1)) {
@@ -337,7 +340,12 @@ export async function loadNormalizedState(client: NormalizedDb): Promise<Platfor
     client.evaluationBatch.findMany(),
     client.evaluationResult.findMany({ include: { submission: { select: { eventId: true } } } }),
     client.season.findMany({ include: { eventLinks: true } }),
-    client.auditLog.findMany({ orderBy: { createdAt: 'asc' } }),
+    // Only the most recent window. The audit table is append-only history and
+    // the paginated repository serves `GET /audits`; the process snapshot needs
+    // it solely for `adminOverview.recentAudits`. Loading the whole table put
+    // every historical record into a structure that is deep-cloned on each
+    // request, so a few hundred rows dominated request latency.
+    client.auditLog.findMany({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: AUDIT_SNAPSHOT_LIMIT }),
     client.announcement.findMany(),
     client.systemSetting.findUnique({ where: { key: RUNTIME_SETTING_KEY } }),
   ]);
@@ -364,7 +372,10 @@ export async function loadNormalizedState(client: NormalizedDb): Promise<Platfor
     users: userRows.map(mapUser),
     challenges: challengeRows.map(mapChallenge),
     seasons: seasonRows.map((row) => ({ id: row.id, name: row.name, status: row.status === 'RUNNING' ? 'RUNNING' : row.status === 'FINISHED' ? 'FINISHED' : 'DRAFT', eventIds: row.eventLinks.map((link) => link.eventId) } as Season)),
-    audits: auditRows.map((row) => ({ id: row.id, actorId: row.actorId, action: row.action, target: row.target, ...(row.before !== null ? { before: row.before } : {}), ...(row.after !== null ? { after: row.after } : {}), createdAt: row.createdAt.toISOString() })),
+    // Restore ascending order: the window is fetched newest-first so the
+    // database can stop at AUDIT_SNAPSHOT_LIMIT, but the domain snapshot has
+    // always been chronological.
+    audits: auditRows.slice().reverse().map((row) => ({ id: row.id, actorId: row.actorId, action: row.action, target: row.target, ...(row.before !== null ? { before: row.before } : {}), ...(row.after !== null ? { after: row.after } : {}), createdAt: row.createdAt.toISOString() })),
     announcements: announcementRows.map((row) => ({ id: row.id, title: row.title, summary: row.summary, tag: row.tag as never, publishedAt: row.publishedAt.toISOString(), ...(row.pinned ? { pinned: true } : {}), ...(row.orgPath ? { orgPath: row.orgPath } : {}) })),
     hardProblems: [],
     participants: participantRows.map((row) => ({ eventId: row.eventId, subjectId: row.subjectId, orgPathSnapshot: row.orgPathSnapshot, importedAt: row.importedAt.toISOString() })),

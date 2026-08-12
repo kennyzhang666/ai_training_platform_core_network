@@ -48,6 +48,7 @@ import {
 } from './capability-catalog';
 import type { AuditListQuery, AuditPage, SortOrder, SubmissionListItem, SubmissionListQuery, SubmissionPage, UserListQuery, UserPage, UserSortField } from './repository';
 import { hasGlobalAdminAccess } from './access-control';
+import { redactAuditPayload } from './audit-payload';
 
 export type { UserListQuery, UserPage } from './repository';
 
@@ -315,6 +316,7 @@ export class PlatformStore {
   private readonly participants = new Map<string, ParticipantRecord>();
   private codeAgentRuntimeConfig: CodeAgentRuntimeConfig = defaultCodeAgentRuntimeConfig();
   private localDemoSeedEnabled = true;
+  private mutations = 0;
   private readonly dataFile: string;
   private persistence?: PlatformStatePersistence;
 
@@ -1022,7 +1024,17 @@ export class PlatformStore {
     // snapshot.
   }
 
+  /**
+   * Monotonic count of domain mutations. Every mutating method funnels through
+   * `persist()`, so a caller can compare this before and after an operation to
+   * learn whether the operation changed anything at all.
+   */
+  get mutationCount(): number {
+    return this.mutations;
+  }
+
   private persist(): void {
+    this.mutations += 1;
     const state = this.exportState();
     if (this.persistence) {
       void this.persistence.write(state);
@@ -1040,7 +1052,10 @@ export class PlatformStore {
   }
 
   private audit(actorId: string, action: string, target: string, before?: unknown, after?: unknown): void {
-    const clone = <T>(value: T): T => value === undefined ? value : JSON.parse(JSON.stringify(value)) as T;
+    // Snapshot the value (the caller may keep mutating it) and strip bulk
+    // fields, so one avatar or an image-bearing challenge description cannot
+    // make this record — and therefore every later state clone — huge.
+    const clone = <T>(value: T): T => value === undefined ? value : redactAuditPayload(JSON.parse(JSON.stringify(value)) as T);
     const record: AuditRecord = { id: `audit-${randomUUID()}`, actorId, action, target, before: clone(before), after: clone(after), createdAt: now() };
     this.audits.set(record.id, record);
   }
@@ -1071,7 +1086,7 @@ export class PlatformStore {
       }
       const auditActor = this.users.get(item.actorId);
       return Boolean((auditActor ?? actor) && adminAccess.scopeOrgPaths.some((scope) => this.orgPathIncludes(scope, (auditActor ?? actor)!.orgPath)));
-    }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    }).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
   }
 
   listAnnouncements(actorId = 'w00123'): Announcement[] {

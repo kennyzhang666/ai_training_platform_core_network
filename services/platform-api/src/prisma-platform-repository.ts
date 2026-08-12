@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { AppUser, AuditRecord, OrgUnit, SsoIdentity } from './domain';
 import { hasGlobalAdminAccess } from './access-control';
+import { redactAuditPayload } from './audit-payload';
 import {
   AuditAppendInput,
   AuditRepository,
@@ -312,7 +313,7 @@ class PrismaUserRepository implements UserRepository {
     }
   }
 
-  async syncSsoIdentity(identity: SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }> {
+  async syncSsoIdentity(identity: SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean; changed: boolean }> {
     const employeeNo = identity.employeeNo?.trim();
     const name = identity.name?.trim();
     const department = identity.department?.trim() || undefined;
@@ -345,7 +346,7 @@ class PrismaUserRepository implements UserRepository {
         },
         include: { roleBindings: true },
       });
-      return { user: mapUser(row), firstLogin: true, departmentMatched: Boolean(matchedUnit) };
+      return { user: mapUser(row), firstLogin: true, departmentMatched: Boolean(matchedUnit), changed: true };
     }
     const data: Prisma.AppUserUpdateInput = {
       name,
@@ -378,12 +379,34 @@ class PrismaUserRepository implements UserRepository {
         },
       };
     }
+    // A periodic identity refresh is the common case and normally changes
+    // nothing. Updating anyway rewrote a row that carries the base64 avatar,
+    // and the caller then wrote an audit record of the same size, every
+    // SSO_IDENTITY_SYNC_INTERVAL_SECONDS. Resolve what the update would
+    // produce and skip the write entirely when it matches the current row.
+    const relation = data.orgUnit as { connect?: { id: string }; disconnect?: boolean } | undefined;
+    const targetOrgUnitId = relation === undefined ? existingRow.orgUnitId : relation.connect?.id ?? null;
+    const targetOrgPath = data.orgPath === undefined ? existingRow.orgPath : (data.orgPath as string | null);
+    const targetDepartmentSource = data.departmentSource === undefined ? existingRow.departmentSource : (data.departmentSource as string | null);
+    const targetDepartmentHint = data.departmentHint === undefined ? existingRow.departmentHint : (data.departmentHint as string | null);
+    const bootstrapSettled = !bootstrapGlobalAdmin || (
+      JSON.stringify(existingRow.roles) === JSON.stringify(['global_admin'])
+      && existingRow.roleBindings.some((binding) => binding.role === 'global_admin' && binding.scopeOrgPath === '/')
+    );
+    const unchanged = existingRow.name === name
+      && targetOrgUnitId === existingRow.orgUnitId
+      && targetOrgPath === existingRow.orgPath
+      && targetDepartmentSource === existingRow.departmentSource
+      && targetDepartmentHint === existingRow.departmentHint
+      && bootstrapSettled;
+    if (unchanged) return { user: mapUser(existingRow), firstLogin: false, departmentMatched: Boolean(matchedUnit), changed: false };
     const row = await this.db.appUser.update({ where: { id: existingRow.id }, data, include: { roleBindings: true } });
-    return { user: mapUser(row), firstLogin: false, departmentMatched: Boolean(matchedUnit) };
+    return { user: mapUser(row), firstLogin: false, departmentMatched: Boolean(matchedUnit), changed: true };
   }
 }
 
-class PrismaAuditRepository implements AuditRepository {
+/** Exported so the audit-redaction choke point can be tested directly. */
+export class PrismaAuditRepository implements AuditRepository {
   constructor(private readonly db: PrismaExecutor) {}
 
   private scopedList(query: { target?: string; page: number; pageSize: number; scopeOrgPaths: readonly string[]; viewerId?: string }): Promise<{ items: AuditRecord[]; pageInfo: PageInfo }> {
@@ -502,14 +525,20 @@ class PrismaAuditRepository implements AuditRepository {
   }
 
   async append(input: AuditAppendInput): Promise<AuditRecord> {
+    // Redact here rather than at each call site: this is the only way a
+    // repository-side audit reaches the table, so a future caller cannot
+    // reintroduce an avatar or an image-bearing description by forgetting to
+    // trim its payload. Callers that already summarise a field (see
+    // UserDirectoryService.updateProfile) are unaffected — redaction is
+    // idempotent for values that are already small.
     const row = await this.db.auditLog.create({
       data: {
         id: input.id || randomUUID(),
         actorId: input.actorId,
         action: input.action,
         target: input.target,
-        before: input.before as Prisma.InputJsonValue | undefined,
-        after: input.after as Prisma.InputJsonValue | undefined,
+        before: redactAuditPayload(input.before) as Prisma.InputJsonValue | undefined,
+        after: redactAuditPayload(input.after) as Prisma.InputJsonValue | undefined,
         createdAt: new Date(input.createdAt),
       },
     });
@@ -555,18 +584,31 @@ class PrismaAuditRepository implements AuditRepository {
   }
 }
 
+type SsoIdentitySyncResult = { user: AppUser; firstLogin: boolean; departmentMatched: boolean; changed?: boolean };
+
+/**
+ * Rolling back is the only safe no-op path here: the transaction must claim
+ * PlatformSnapshot before it reads AppUser to preserve the global lock order,
+ * but an unchanged refresh must not commit that provisional revision claim.
+ */
+class UnchangedSsoIdentityRollback extends Error {
+  constructor(readonly result: SsoIdentitySyncResult) {
+    super('unchanged SSO identity');
+  }
+}
+
 class AtomicRootUserRepository implements UserRepository {
   constructor(private readonly base: PrismaUserRepository, private readonly owner: PrismaPlatformRepository) {}
-  private readonly syncFlights = new Map<string, Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }>>();
+  private readonly syncFlights = new Map<string, Promise<SsoIdentitySyncResult>>();
   list(query: NormalizedUserListQuery): Promise<UserPage> { return this.base.list(query); }
   getById(id: string): Promise<AppUser | undefined> { return this.base.getById(id); }
   getByEmployeeNo(employeeNo: string): Promise<AppUser | undefined> { return this.base.getByEmployeeNo(employeeNo); }
   update(id: string, patch: UserPatch): Promise<AppUser> { return this.base.update(id, patch); }
-  syncSsoIdentity(identity: SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }> {
+  syncSsoIdentity(identity: SsoIdentity): Promise<SsoIdentitySyncResult> {
     const employeeNo = identity.employeeNo?.trim();
     if (!employeeNo) return this.syncSsoIdentityOnce(identity);
     const pending = this.syncFlights.get(employeeNo);
-    if (pending) return pending.then((result) => ({ ...result, firstLogin: false }));
+    if (pending) return pending.then((result) => ({ ...result, firstLogin: false, changed: false }));
     const operation = this.syncSsoIdentityOnce({ ...identity, employeeNo }).finally(() => {
       if (this.syncFlights.get(employeeNo) === operation) this.syncFlights.delete(employeeNo);
     });
@@ -574,19 +616,30 @@ class AtomicRootUserRepository implements UserRepository {
     return operation;
   }
 
-  private syncSsoIdentityOnce(identity: SsoIdentity): Promise<{ user: AppUser; firstLogin: boolean; departmentMatched: boolean }> {
-    const run = () => this.owner.transaction(async (transaction) => {
-      const result = await transaction.users.syncSsoIdentity(identity);
-      await transaction.audits.append({
-        id: randomUUID(),
-        actorId: result.user.id,
-        action: result.firstLogin ? 'sso.user-provision' : 'sso.user-sync',
-        target: `user:${result.user.id}`,
-        after: result.user,
-        createdAt: new Date().toISOString(),
-      });
-      return result;
-    });
+  private syncSsoIdentityOnce(identity: SsoIdentity): Promise<SsoIdentitySyncResult> {
+    const run = async () => {
+      try {
+        return await this.owner.transaction(async (transaction) => {
+          const result = await transaction.users.syncSsoIdentity(identity);
+          // The revision was claimed before reading the employee row to keep
+          // the lock order stable. Abort the transaction when nothing changed
+          // so that provisional claim is rolled back as well.
+          if (!result.firstLogin && result.changed === false) throw new UnchangedSsoIdentityRollback(result);
+          await transaction.audits.append({
+            id: randomUUID(),
+            actorId: result.user.id,
+            action: result.firstLogin ? 'sso.user-provision' : 'sso.user-sync',
+            target: `user:${result.user.id}`,
+            after: result.user,
+            createdAt: new Date().toISOString(),
+          });
+          return result;
+        });
+      } catch (error) {
+        if (error instanceof UnchangedSsoIdentityRollback) return error.result;
+        throw error;
+      }
+    };
     // The in-process single-flight above handles the normal browser burst.
     // Keep database retries as a safety net for another API instance or a
     // worker that provisions the same identity at the same time.

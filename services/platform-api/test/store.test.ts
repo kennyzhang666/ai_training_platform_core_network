@@ -710,6 +710,19 @@ test('administrator overview and announcements expose operational state', () => 
   assert.equal(store.listAnnouncements().some((item) => item.id === announcement.id), false);
 });
 
+test('administrator overview returns the newest audit operations first', () => {
+  const store = new PlatformStore(':memory:');
+  const state = store.exportState();
+  state.audits.push(
+    { id: 'audit-sort-a', actorId: 'admin-test', action: 'sort.older', target: 'sort:a', createdAt: '2099-01-01T00:00:00.000Z' },
+    { id: 'audit-sort-z', actorId: 'admin-test', action: 'sort.newer', target: 'sort:z', createdAt: '2099-01-01T00:00:00.000Z' },
+  );
+  store.importState(state);
+  const overview = store.adminOverview('admin-test') as { recentAudits: Array<{ id: string; action: string }> };
+  assert.equal(overview.recentAudits[0]?.id, 'audit-sort-z');
+  assert.equal(overview.recentAudits[0]?.action, 'sort.newer');
+});
+
 // Aggregation used to run through listSubmissions() with its `w00123` default
 // actor. On a deployment whose accounts come from SSO that account does not
 // exist, so the authorization filter fell through to "only w00123's own rows"

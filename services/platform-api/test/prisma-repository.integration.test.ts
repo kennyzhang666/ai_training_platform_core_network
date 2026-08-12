@@ -79,6 +79,15 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
     assert.deepEqual(bootstrapped.user.roles, ['global_admin']);
     assert.deepEqual(bootstrapped.user.roleBindings, [{ role: 'global_admin', scopeOrgPath: '/' }]);
     assert.equal((await repository.audits.list({ target: `user:${bootstrapEmployeeNo}`, page: 1, pageSize: 10 })).pageInfo.total, 1);
+    const revisionBeforeUnchangedIdentity = (await client.platformSnapshot.findUnique({ where: { id: 'singleton' }, select: { revision: true } }))?.revision;
+    const unchangedIdentity = await repository.users.syncSsoIdentity({
+      employeeNo: bootstrapEmployeeNo,
+      name: 'Integration Bootstrap Admin',
+    });
+    const revisionAfterUnchangedIdentity = (await client.platformSnapshot.findUnique({ where: { id: 'singleton' }, select: { revision: true } }))?.revision;
+    assert.equal(unchangedIdentity.changed, false);
+    assert.equal(revisionAfterUnchangedIdentity, revisionBeforeUnchangedIdentity, 'an unchanged SSO refresh must not invalidate the platform state cache');
+    assert.equal((await repository.audits.list({ target: `user:${bootstrapEmployeeNo}`, page: 1, pageSize: 10 })).pageInfo.total, 1);
     if (previousBootstrapAdmin === undefined) delete process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO;
     else process.env.PLATFORM_BOOTSTRAP_GLOBAL_ADMIN_EMPLOYEE_NO = previousBootstrapAdmin;
 
