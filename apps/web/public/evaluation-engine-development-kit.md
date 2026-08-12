@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：1.1.1。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：1.1.2。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -1125,11 +1125,11 @@ AI 能力画像
 
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v1.1.1`
+> 当前发布版本：`v1.1.2`
 > 更新日期：2026-08-12
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。`v1.1.1` 面向内网单服务器长期运行继续降低无效写入：空闲 Worker 不再反复同步完整业务图；无变化的 SSO 刷新不会更新员工、写审计或递增平台 revision；进程快照只保留最近审计，并在统一入口裁剪头像和超长富文本，完整审计历史仍由 PostgreSQL 分页查询。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；Linux 兼容基线仍为 Ubuntu 22.04 x64 + PostgreSQL 14，完整离线包不访问外网。Windows Server x64 断网包继续沿用上一版，自动化离线 Upgrade、诊断包和目标机 UAT 仍是后续工作。
+企业内部 AI 训战、交付评测和能力复盘平台。`v1.1.2` 修复 PostgreSQL 14 发布门禁在无变化 SSO 并发刷新时错误推进 revision 游标的问题；`v1.1.1` 的空闲 Worker、SSO 无效写入和审计快照优化保持不变。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；Linux 兼容基线仍为 Ubuntu 22.04 x64 + PostgreSQL 14，完整离线包不访问外网。Windows Server x64 断网包继续沿用上一版，自动化离线 Upgrade、诊断包和目标机 UAT 仍是后续工作。
 
 平台级文档只保留三个入口：
 
@@ -1511,7 +1511,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v1.1.1 已验证基线
+### 12.2 v1.1.2 已验证基线
 
 - Workspace：182 项，181 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web：11/11；
@@ -1665,6 +1665,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v1.0.7` | 2026-08-11 | 补齐 Linux 离线迁移所需的 Prisma CLI 查询引擎和 Schema Engine，并以最终发布包对 PostgreSQL 14 实跑迁移。 |
 | `v1.1.0` | 2026-08-12 | 收口 PostgreSQL revision 读取缓存和历史结果写放大，移除历史报告 N+1 请求，增加赛题简介/Markdown 详情、空组织初始化、最新交付件下载、中文部门和运行中赛季选择。 |
 | `v1.1.1` | 2026-08-12 | 空闲 Worker 和无变化 SSO 刷新不再制造整图同步或 revision 缓存失效；审计快照限制为最近窗口并统一裁剪头像与超长载荷，完整历史继续通过 PostgreSQL 分页查询。 |
+| `v1.1.2` | 2026-08-12 | 修复 PostgreSQL 14 发布门禁在无变化 SSO 并发刷新时错误推进 revision 游标、导致后续提交被误判为版本冲突的问题。 |
 
 ## 18. 交接检查表
 
@@ -6670,7 +6671,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {

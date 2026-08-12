@@ -251,7 +251,7 @@ test('PostgreSQL integration requires an explicit opt-in and DATABASE_URL', { sk
           // Production identity synchronization notifies the shared store after
           // every canonical repository commit. Mirror that path here while the
           // test deliberately overlaps 20 identity refreshes with submissions.
-          normalizedStore.noteExternalCommit();
+          if (synced.changed !== false) normalizedStore.noteExternalCommit();
           return synced;
         }))),
       ]);
