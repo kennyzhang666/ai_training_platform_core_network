@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to package, for example v1.1.2
+        description: Existing version tag to package, for example v1.1.3
         required: true
-        default: v1.1.2
+        default: v1.1.3
         type: string
       publish:
         description: Create or update the GitHub Release assets
@@ -165,6 +165,7 @@ jobs:
             --wheelhouse "$WHEELHOUSE_ROOT" \
             --version "$RELEASE_VERSION" \
             --source-date-epoch "$SOURCE_DATE_EPOCH"
+          node scripts/build-linux-hotfix.mjs --version "$RELEASE_VERSION"
 
       - name: Verify archive and packaged runtimes
         shell: bash
@@ -199,6 +200,20 @@ jobs:
           test -f "$unpacked/runtime/runtime-provenance.json"
           test ! -e "$unpacked/deploy/single-node/.env"
 
+          hotfix="$GITHUB_WORKSPACE/source/release/ai-training-platform-${RELEASE_VERSION}-hotfix-linux-x64.tar.gz"
+          hotfix_checksum="${hotfix}.sha256"
+          test -f "$hotfix"
+          test -f "$hotfix_checksum"
+          (cd "$(dirname "$hotfix")" && sha256sum --check "$(basename "$hotfix_checksum")")
+          hotfix_unpacked="$RUNNER_TEMP/hotfix-smoke"
+          mkdir "$hotfix_unpacked"
+          tar -xzf "$hotfix" --directory "$hotfix_unpacked"
+          bash -n "$hotfix_unpacked/apply-hotfix.sh"
+          (cd "$hotfix_unpacked" && sha256sum --check SHA256SUMS)
+          test -f "$hotfix_unpacked/HOTFIX_GUIDE.md"
+          test -f "$hotfix_unpacked/payload/services/platform-api/dist/main.js"
+          test -f "$hotfix_unpacked/payload/apps/web/dist/index.html"
+
       - name: Publish GitHub Release assets
         if: github.event_name == 'push' || inputs.publish
         shell: bash
@@ -211,6 +226,8 @@ jobs:
           set -euo pipefail
           archive="$GITHUB_WORKSPACE/source/release/ai-training-platform-${RELEASE_VERSION}-linux-x64.tar.gz"
           checksum="${archive}.sha256"
+          hotfix="$GITHUB_WORKSPACE/source/release/ai-training-platform-${RELEASE_VERSION}-hotfix-linux-x64.tar.gz"
+          hotfix_checksum="${hotfix}.sha256"
           notes="$RUNNER_TEMP/release-notes.md"
           cat > "$notes" <<EOF
           Ubuntu 22.04 x64 单服务器离线发布包，源码固定为 ${RELEASE_TAG}。
@@ -219,12 +236,13 @@ jobs:
 
           下载后请先按同目录 SHA-256 文件校验，再依据包内 DEPLOYMENT.html 部署。
           该构建已在 GitHub Ubuntu 22.04 原生环境使用 PostgreSQL 14 完成迁移与集成检查；目标内网服务器仍需执行上线验收。
+          同一 Release 还提供应用热补丁包；适用版本、自动备份和回滚步骤以热补丁内 HOTFIX_GUIDE.md 为准。
           EOF
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$archive" "$checksum" --clobber
+            gh release upload "$RELEASE_TAG" "$archive" "$checksum" "$hotfix" "$hotfix_checksum" --clobber
           else
-            gh release create "$RELEASE_TAG" "$archive" "$checksum" \
+            gh release create "$RELEASE_TAG" "$archive" "$checksum" "$hotfix" "$hotfix_checksum" \
               --verify-tag \
               --title "$RELEASE_TAG" \
               --notes-file "$notes"

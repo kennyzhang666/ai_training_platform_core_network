@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('GitHub workflow builds tagged releases on native Ubuntu 22.04 and publishes both assets', async () => {
+test('GitHub workflow builds tagged releases and a verified Linux hotfix on native Ubuntu 22.04', async () => {
   const workflow = await readFile(join(root, '.github', 'workflows', 'release-linux-ubuntu-22.04.yml'), 'utf8');
 
   assert.match(workflow, /workflow_dispatch:/);
@@ -23,6 +23,10 @@ test('GitHub workflow builds tagged releases on native Ubuntu 22.04 and publishe
   assert.match(workflow, /RELEASE_TOOLING_SHA/);
   assert.match(workflow, /mkdir -p release/);
   assert.match(workflow, /pnpm release:build \\\n/);
+  assert.match(workflow, /node scripts\/build-linux-hotfix\.mjs --version "\$RELEASE_VERSION"/);
+  assert.match(workflow, /hotfix-linux-x64\.tar\.gz/);
+  assert.match(workflow, /bash -n "\$hotfix_unpacked\/apply-hotfix\.sh"/);
+  assert.match(workflow, /sha256sum --check SHA256SUMS/);
   assert.doesNotMatch(workflow, /pnpm release:build -- \\\n/);
   assert.doesNotMatch(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /checksum="\$\{archive\}\.sha256"/);

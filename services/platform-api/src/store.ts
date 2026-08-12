@@ -3627,6 +3627,11 @@ export class PlatformStore {
     if (event.trigger !== 'MANUAL') {
       throw new BadRequestException(`manual trigger is not allowed for ${event.trigger} event`);
     }
+    // A failed run remains immutable history. Starting it again with the same
+    // attempt would reproduce its idempotency key and violate PostgreSQL's
+    // (submissionId, idempotencyKey) uniqueness constraint. Treat the legacy
+    // one-click retry as a real regrade before creating the replacement run.
+    if (submission.gradingStatus === 'FAILED' || submission.failureReason) this.regradeSubmission(submissionId, actorId);
     if (!['WAITING_TRIGGER', 'RECEIVED'].includes(submission.state)) {
       if (submission.gradingRunId) return this.getRun(submission.gradingRunId);
       throw new ConflictException(`submission cannot be graded from state ${submission.state}`);
@@ -3659,7 +3664,7 @@ export class PlatformStore {
     const submission = this.getSubmission(submissionId);
     const event = this.getEvent(submission.eventId);
     this.assertAdminEventScope(event, actorId);
-    if (!submission.resultId && !submission.failureReason) {
+    if (!submission.resultId && !submission.failureReason && submission.gradingStatus !== 'FAILED') {
       throw new ConflictException('只有已完成或失败的提交可以重新评估');
     }
     const previousResultId = submission.resultId;

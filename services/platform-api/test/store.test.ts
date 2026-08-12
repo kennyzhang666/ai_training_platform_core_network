@@ -273,6 +273,9 @@ test('a failed manual run can be retried without losing the failed run history',
   assert.equal(store.getSubmission(submission.id).state, 'RECEIVED');
   const retry = store.startGrading(submission.id, 'admin-1');
   assert.notEqual(retry.id, first.id);
+  assert.notEqual(retry.idempotencyKey, first.idempotencyKey);
+  assert.equal(retry.attempt, 2);
+  assert.equal(store.getSubmission(submission.id).gradingAttempt, 2);
   assert.equal(store.getSubmission(submission.id).gradingRunId, retry.id);
 });
 
