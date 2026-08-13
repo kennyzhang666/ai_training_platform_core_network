@@ -38,6 +38,10 @@ test('GitHub workflow builds tagged releases and a verified Linux hotfix on nati
   assert.match(workflow, /PRISMA_SCHEMA_ENGINE_BINARY/);
   assert.match(workflow, /schema-engine-debian-openssl-3\.0\.x/);
   assert.match(workflow, /migrate deploy/);
+  assert.match(workflow, /bash -n "\$unpacked\/upgrade\.sh"/);
+  assert.match(workflow, /offline-upgrade-helper\.py/);
+  assert.match(workflow, /database-backup --environment-file/);
+  assert.match(workflow, /database-restore --environment-file/);
   assert.match(workflow, /gh release (?:create|upload)/);
   assert.match(workflow, /GH_REPO: \$\{\{ github\.repository \}\}/);
   assert.match(workflow, /--verify-tag/);

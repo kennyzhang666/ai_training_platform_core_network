@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -16,6 +16,8 @@ import {
   resolvePnpmInvocation,
   verifyReleaseLayout,
 } from './build-single-node-release.mjs';
+
+const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 async function put(root, path, content = path) {
   const target = join(root, ...path.split('/'));
@@ -39,6 +41,7 @@ async function fixture(root) {
     'scripts/evaluation-worker.mjs',
     'scripts/log-redaction.mjs',
     'scripts/safe-archive-extract.py',
+    'scripts/offline-upgrade-helper.py',
     'scripts/code-agent-executable.mjs',
     'scripts/prepare-single-node-environment.mjs',
     'services/ldap3-gateway/ldap3_gateway.py',
@@ -47,13 +50,27 @@ async function fixture(root) {
     'deploy/single-node/manage.ps1',
     'deploy/single-node/manage.cmd',
     'deploy/single-node/manage.sh',
+    'deploy/single-node/upgrade.ps1',
+    'deploy/single-node/upgrade.sh',
     'deploy/single-node/nginx-http.conf.template',
     'deploy/release/windows.env.example',
     'deploy/release/linux.env.example',
     'install.cmd',
     'install.sh',
+    'upgrade.cmd',
+    'upgrade.sh',
     'DEPLOYMENT.html',
   ]) await put(sourceRoot, path);
+  await put(sourceRoot, 'upgrade-manifest.template.json', JSON.stringify({
+    schemaVersion: '1.0',
+    product: 'ai-training-platform',
+    target: '__TARGET__',
+    targetVersion: '__VERSION__',
+    supportedSourceVersions: ['1.1.4'],
+    minimumPostgresMajor: 14,
+    migrationStrategy: 'prisma-migrate-deploy-with-native-postgres-rollback',
+    requiresSameFilesystem: true,
+  }));
   await put(sourceRoot, 'executors/drill-grader/engine.json', JSON.stringify({
     schemaVersion: '1.0',
     id: 'drill-grader',
@@ -111,6 +128,18 @@ test('release contract supports Windows x64 and Linux x64 with platform runtimes
   assert.equal(RELEASE_TARGETS['win32-x64'].prismaEngine, 'query_engine-windows.dll.node');
   assert.equal(RELEASE_TARGETS['linux-x64'].prismaSchemaEngine, 'schema-engine-debian-openssl-3.0.x');
   assert.equal(RELEASE_TARGETS['win32-x64'].prismaSchemaEngine, 'schema-engine-windows.exe');
+});
+
+test('every complete release carries a platform upgrader and a verified upgrade policy', () => {
+  const builder = readFileSync(join(projectRoot, 'scripts', 'build-single-node-release.mjs'), 'utf8');
+  assert.match(builder, /offline-upgrade-helper\.py/);
+  assert.match(builder, /upgrade-manifest\.template\.json/);
+  assert.match(builder, /upgrade\.ps1/);
+  assert.match(builder, /upgrade\.sh/);
+  const policy = JSON.parse(readFileSync(join(projectRoot, 'upgrade-manifest.template.json'), 'utf8'));
+  assert.equal(policy.product, 'ai-training-platform');
+  assert.equal(policy.minimumPostgresMajor, 14);
+  assert.ok(policy.supportedSourceVersions.includes('1.1.4'));
 });
 
 test('Prisma schema pins the Ubuntu 22.04 OpenSSL 3 query engine', async () => {
@@ -211,6 +240,8 @@ for (const target of ['win32-x64', 'linux-x64']) {
       assert.ok(manifest.files.some((file) => file.path === 'scripts/code-agent-executable.mjs'));
       assert.ok(manifest.files.some((file) => file.path === 'scripts/log-redaction.mjs'));
       assert.ok(manifest.files.some((file) => file.path === 'scripts/safe-archive-extract.py'));
+      assert.ok(manifest.files.some((file) => file.path === 'scripts/offline-upgrade-helper.py'));
+      assert.ok(manifest.files.some((file) => file.path === 'upgrade-manifest.json'));
       assert.ok(manifest.files.some((file) => file.path === 'scripts/prepare-single-node-environment.mjs'));
       assert.ok(manifest.files.some((file) => file.path === RELEASE_TARGETS[target].runtimeFiles[0].replace(/^/, 'runtime/')));
       assert.ok(manifest.files.some((file) => file.path === 'DEPLOYMENT.html'));
@@ -218,15 +249,21 @@ for (const target of ['win32-x64', 'linux-x64']) {
       if (target === 'win32-x64') {
         assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', 'manage.cmd')));
         assert.ok(existsSync(join(outputRoot, 'install.cmd')));
+        assert.ok(existsSync(join(outputRoot, 'upgrade.cmd')));
+        assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', 'upgrade.ps1')));
         assert.equal(existsSync(join(outputRoot, 'install.sh')), false);
       }
       if (target === 'linux-x64') {
         assert.ok(existsSync(join(outputRoot, 'install.sh')));
+        assert.ok(existsSync(join(outputRoot, 'upgrade.sh')));
+        assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', 'upgrade.sh')));
         assert.equal(existsSync(join(outputRoot, 'install.cmd')), false);
       }
       if (target === 'linux-x64' && process.platform !== 'win32') {
         assert.equal(manifest.files.find((file) => file.path === 'deploy/single-node/manage.sh')?.mode, 0o755);
         assert.equal(manifest.files.find((file) => file.path === 'install.sh')?.mode, 0o755);
+        assert.equal(manifest.files.find((file) => file.path === 'upgrade.sh')?.mode, 0o755);
+        assert.equal(manifest.files.find((file) => file.path === 'deploy/single-node/upgrade.sh')?.mode, 0o755);
       }
       assert.equal(existsSync(join(outputRoot, '.env')), false);
       assert.equal(existsSync(join(outputRoot, 'services', 'platform-api', 'src')), false);

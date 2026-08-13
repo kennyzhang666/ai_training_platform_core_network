@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to package, for example v1.1.3
+        description: Existing version tag to package, for example v1.1.5
         required: true
-        default: v1.1.3
+        default: v1.1.5
         type: string
       publish:
         description: Create or update the GitHub Release assets
@@ -203,6 +203,24 @@ jobs:
           "$unpacked/runtime/nginx/sbin/nginx" -v
           test -f "$unpacked/runtime/runtime-provenance.json"
           test ! -e "$unpacked/deploy/single-node/.env"
+          test -x "$unpacked/upgrade.sh"
+          test -x "$unpacked/deploy/single-node/upgrade.sh"
+          bash -n "$unpacked/upgrade.sh"
+          bash -n "$unpacked/deploy/single-node/upgrade.sh"
+          "$unpacked/runtime/python/bin/python3" "$unpacked/scripts/offline-upgrade-helper.py" \
+            verify-release --release-root "$unpacked"
+          upgrade_environment="$RUNNER_TEMP/offline-upgrade.env"
+          printf '%s\n' 'DATABASE_URL=postgresql://ai_training:integration-only@127.0.0.1:5432/ai_training_ci?schema=public' > "$upgrade_environment"
+          chmod 600 "$upgrade_environment"
+          recovery_dump="$RUNNER_TEMP/offline-upgrade-before.dump"
+          "$unpacked/runtime/python/bin/python3" "$unpacked/scripts/offline-upgrade-helper.py" \
+            database-check --environment-file "$upgrade_environment"
+          "$unpacked/runtime/python/bin/python3" "$unpacked/scripts/offline-upgrade-helper.py" \
+            database-backup --environment-file "$upgrade_environment" --output "$recovery_dump"
+          "$unpacked/runtime/python/bin/python3" "$unpacked/scripts/offline-upgrade-helper.py" \
+            database-restore --environment-file "$upgrade_environment" --source "$recovery_dump" --confirm
+          test -s "$recovery_dump"
+          test -s "${recovery_dump}.sha256"
 
           hotfix="$GITHUB_WORKSPACE/source/release/ai-training-platform-${RELEASE_VERSION}-hotfix-linux-x64.tar.gz"
           hotfix_checksum="${hotfix}.sha256"
@@ -238,8 +256,9 @@ jobs:
 
           发布打包工具提交：${RELEASE_TOOLING_SHA}
 
-          下载后请先按同目录 SHA-256 文件校验，再依据包内 DEPLOYMENT.html 部署。
+          下载后请先按同目录 SHA-256 文件校验，再依据包内 DEPLOYMENT.html 部署或运行根目录 upgrade.sh 离线升级。
           该构建已在 GitHub Ubuntu 22.04 原生环境使用 PostgreSQL 14 完成迁移与集成检查；目标内网服务器仍需执行上线验收。
+          完整包内置发布清单校验、升级前恢复点、同盘目录切换、健康检查和失败自动回滚；自动升级仅支持同机 PostgreSQL public schema。
           同一 Release 还提供应用热补丁包；适用版本、自动备份和回滚步骤以热补丁内 HOTFIX_GUIDE.md 为准。
           EOF
 

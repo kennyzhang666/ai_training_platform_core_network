@@ -266,6 +266,7 @@ export async function assembleReleaseLayout(options) {
     await copyFile(join(sourceRoot, 'scripts', 'code-agent-executable.mjs'), join(outputRoot, 'scripts', 'code-agent-executable.mjs'), 'Code Agent executable resolver');
     await copyFile(join(sourceRoot, 'scripts', 'log-redaction.mjs'), join(outputRoot, 'scripts', 'log-redaction.mjs'), 'Worker log redaction');
     await copyFile(join(sourceRoot, 'scripts', 'safe-archive-extract.py'), join(outputRoot, 'scripts', 'safe-archive-extract.py'), 'safe archive extractor');
+    await copyFile(join(sourceRoot, 'scripts', 'offline-upgrade-helper.py'), join(outputRoot, 'scripts', 'offline-upgrade-helper.py'), 'offline upgrade helper');
     await copyFile(join(sourceRoot, 'scripts', 'prepare-single-node-environment.mjs'), join(outputRoot, 'scripts', 'prepare-single-node-environment.mjs'), 'environment bootstrap');
     await copyFile(join(sourceRoot, 'services', 'ldap3-gateway', 'ldap3_gateway.py'), join(outputRoot, 'services', 'ldap3-gateway', 'ldap3_gateway.py'), 'LDAP3 gateway');
     await copyFile(join(sourceRoot, 'services', 'ldap3-gateway', 'requirements.txt'), join(outputRoot, 'services', 'ldap3-gateway', 'requirements.txt'), 'LDAP3 requirements');
@@ -277,9 +278,13 @@ export async function assembleReleaseLayout(options) {
     await copyFile(join(apiDeployRoot, 'package.json'), join(outputRoot, 'services', 'platform-api', 'package.json'), 'API package manifest');
 
     await copyFile(join(sourceRoot, 'deploy', 'single-node', descriptor.manager), join(outputRoot, 'deploy', 'single-node', descriptor.manager), `${target} manager`);
+    await copyFile(join(sourceRoot, 'deploy', 'single-node', descriptor.platform === 'win32' ? 'upgrade.ps1' : 'upgrade.sh'), join(outputRoot, 'deploy', 'single-node', descriptor.platform === 'win32' ? 'upgrade.ps1' : 'upgrade.sh'), `${target} upgrade manager`);
     await copyFile(join(sourceRoot, descriptor.installer), join(outputRoot, descriptor.installer), `${target} one-command installer`);
+    await copyFile(join(sourceRoot, descriptor.platform === 'win32' ? 'upgrade.cmd' : 'upgrade.sh'), join(outputRoot, descriptor.platform === 'win32' ? 'upgrade.cmd' : 'upgrade.sh'), `${target} one-command upgrader`);
     if (descriptor.platform === 'linux') await chmod(join(outputRoot, 'deploy', 'single-node', descriptor.manager), 0o755);
+    if (descriptor.platform === 'linux') await chmod(join(outputRoot, 'deploy', 'single-node', 'upgrade.sh'), 0o755);
     if (descriptor.platform === 'linux') await chmod(join(outputRoot, descriptor.installer), 0o755);
+    if (descriptor.platform === 'linux') await chmod(join(outputRoot, 'upgrade.sh'), 0o755);
     if (descriptor.platform === 'win32') {
       await copyFile(join(sourceRoot, 'deploy', 'single-node', 'manage.cmd'), join(outputRoot, 'deploy', 'single-node', 'manage.cmd'), 'Windows manager launcher');
     }
@@ -294,6 +299,9 @@ export async function assembleReleaseLayout(options) {
       await writeFile(join(outputRoot, path, '.keep'), '');
     }
     await writeFile(join(outputRoot, 'VERSION'), `${version}\n`, 'utf8');
+    const upgradeManifestTemplate = await readFile(join(sourceRoot, 'upgrade-manifest.template.json'), 'utf8');
+    const upgradeManifest = JSON.parse(upgradeManifestTemplate.replaceAll('__TARGET__', target).replaceAll('__VERSION__', version));
+    await writeFile(join(outputRoot, 'upgrade-manifest.json'), `${JSON.stringify(upgradeManifest, null, 2)}\n`, 'utf8');
 
     const files = await listReleaseFiles(outputRoot);
     if (descriptor.platform === 'win32') {

@@ -1,6 +1,6 @@
 # AI 评测引擎开发资料包
 
-> 版本：1.1.4。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
+> 版本：1.1.5。此文件是自包含的开发上下文，不是可直接运行的源码仓库。它嵌入了指南、真实契约、样例和参考实现；要运行测试，仍需取得项目源码并按 README 配置环境。
 
 ## 使用方式
 
@@ -1125,11 +1125,11 @@ AI 能力画像
 
 # AI 能力训战平台开发手册
 
-> 当前发布版本：`v1.1.4`
-> 更新日期：2026-08-12
+> 当前发布版本：`v1.1.5`
+> 更新日期：2026-08-13
 > 适用范围：平台开发、接口契约、测试、发布和后续 Codex 交接
 
-企业内部 AI 训战、交付评测和能力复盘平台。`v1.1.4` 修复员工端把管理员可见范围内任意一人的排队/评测中提交错误提升为整场训战锁定的问题；提交锁现在始终限定为同一训战中的当前员工，其他员工可以继续交付。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；Linux 兼容基线仍为 Ubuntu 22.04 x64 + PostgreSQL 14，完整离线包不访问外网。自动化离线 Upgrade、诊断包和目标机 UAT 仍是后续工作。
+企业内部 AI 训战、交付评测和能力复盘平台。`v1.1.5` 在 `v1.1.4` 人员级评测锁修复之上，为 Windows x64 与 Ubuntu 22.04 x64 完整离线包新增全自动 `Upgrade`：先校验包和来源版本，等待运行中评测结束，创建平台备份与 PostgreSQL 原生恢复点，再同卷切换目录、迁移、启动和检查；普通失败会自动恢复数据库、持久目录、旧版本和原运行状态。公司 Code Agent 默认使用 `codeagent -p "{{prompt}}"` 非交互命令；单服务器自动升级限定同机 PostgreSQL 14+ 的 `public` schema，完整离线包不访问外网。
 
 平台级文档只保留三个入口：
 
@@ -1511,7 +1511,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 受影响模块至少运行对应测试。发布版本必须运行完整检查；涉及 UI 时还要用浏览器验证不同角色、分页固定高度、空状态和窄屏布局。
 
-### 12.2 v1.1.4 已验证基线
+### 12.2 v1.1.5 已验证基线
 
 - Workspace：185 项，184 通过，1 项 PostgreSQL 集成按显式配置跳过；
 - Web：14/14；
@@ -1519,8 +1519,8 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - Python grader：18/18；
 - LDAP 网关：21/21；
 - 评测资料包：2/2；
-- 离线发布与热补丁：14/14；
-- 部署门禁：33 项中 32 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并由 Ubuntu 22.04 发布流水线执行；
+- 离线发布、升级与热补丁：23/23；
+- 部署门禁：41 项中 40 项通过，Linux Bash 原生语法项在 Windows 测试进程中按平台跳过，并由 Ubuntu 22.04 发布流水线执行；
 - PostgreSQL 14：Ubuntu 22.04 发布流水线使用真实 PostgreSQL 14 运行版本检查、全部迁移和集成测试，并从最终压缩包再次执行迁移；
 - 依赖审计：生产依赖 0 个已知漏洞；
 - 100 人名册、20 人并发身份访问、20 人一组混合身份/提交写入与有界评测队列：通过；
@@ -1589,6 +1589,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - 难题审核、待揭榜、揭榜成功、解决方案提交和公开控制；
 - Windows x64/Linux x64 离线发布布局、双平台管理命令和一致性备份恢复；
 - Windows/Linux `Install` / `Uninstall`、随机密钥生成和开机自启注册；
+- Windows/Linux 完整离线包内置 `Upgrade`、升级清单、逐文件校验、运行中评测排空、恢复点、同卷切换、健康门禁和普通失败自动回滚；Linux 优先通过 systemd 恢复服务，systemd 不可用或启动失败时会清理残留并由升级器以 root 直接拉起四个业务进程；
 - 公司内网 LDAP 地址、搜索根、域前缀和用户属性已经固化为双平台发布包默认值；
 - Ubuntu 22.04 x64 原生 GitHub Actions 构建、SHA-256 校验、运行时冒烟和 Release 附件发布；
 - SDD 运维日志脱敏综合训战的真实角色端到端验收，以及版本化 v2 进阶赛题的 24 项隐藏强度用例。
@@ -1597,7 +1598,8 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 
 - Windows Server x64 与 Linux x64 真实断网目标机 UAT 尚未完成；
 - 一键安装与开机自启已通过脚本和发布布局门禁，但尚未在两台干净断网目标服务器完成 UAT；
-- 自动备份、离线升级、诊断包和进程异常退出后的自动拉起尚未实现；
+- 定时自动备份、诊断包和进程异常退出后的自动拉起尚未实现；
+- 离线升级普通错误会自动回滚；断电、强制结束升级进程后的事务日志恢复仍需在双平台目标机完成故障演练，恢复材料不会被自动删除；
 - 单服务器档固定一个 API 实例；标准模式的多实例容量和故障切换尚未形成生产证据；
 - 真实 GitLab 取件与 GitLab CI 自动评测适配器按产品决策后置；
 - 真实 Agent 沙箱、凭据、网络和资源限制由部署环境提供，当前本地 bridge 不是生产沙箱；
@@ -1616,7 +1618,7 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 2. 在断网目标机验证 `Install` / `Uninstall`、随机密钥、目录权限、LDAP、数据库和 Agent 自检；
 3. 在现有 Windows 开机任务和 Linux systemd 基础上补进程异常退出自动拉起；
 4. 定时备份、校验、轮转和低磁盘预警；
-5. 离线 `Upgrade`、升级前恢复点与失败回退；
+5. 对离线 `Upgrade` 做断电/强制结束恢复演练、旧版本与恢复点轮转和磁盘预警；
 6. 脱敏诊断包和日志轮转；
 7. 100 人真实名册、20 人同时访问和分批提交、Code Agent 评测、备份恢复与故障演练。
 
@@ -1668,6 +1670,7 @@ GitLab CI 作为新的 `GradingExecutor` 或 Worker 适配器接入，继续输�
 | `v1.1.2` | 2026-08-12 | 修复 PostgreSQL 14 发布门禁在无变化 SSO 并发刷新时错误推进 revision 游标、导致后续提交被误判为版本冲突的问题。 |
 | `v1.1.3` | 2026-08-12 | 修复失败提交重新评测的重复幂等键与 PostgreSQL 500，新增保留提交和历史记录的 Linux 应用热补丁、自动备份及失败回滚。 |
 | `v1.1.4` | 2026-08-12 | 修复评测锁前端作用域错误；只锁定同一训战中当前员工正在评测的提交，其他员工不受影响。 |
+| `v1.1.5` | 2026-08-13 | Windows/Linux 完整离线包新增全自动升级：包与版本门禁、评测排空、双恢复点、同卷目录切换、健康检查和失败自动回滚。 |
 
 ## 18. 交接检查表
 
@@ -6673,7 +6676,7 @@ validates imported results and recomputes score consistency before persistence.
 
 {
   "name": "ai-training-platform",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "engines": {
@@ -6687,8 +6690,8 @@ validates imported results and recomputes score consistency before persistence.
     "test": "pnpm -r test",
     "kit:test": "node --test scripts/evaluation-engine-kit.test.mjs",
     "ldap3:test": "python services/ldap3-gateway/test_ldap3_gateway.py",
-    "deployment:test": "node --test scripts/single-node-deployment.test.mjs scripts/code-agent-executable.test.mjs scripts/log-redaction.test.mjs scripts/safe-archive-extract.test.mjs scripts/postgres-version.test.mjs",
-    "release:test": "node --test scripts/single-node-release.test.mjs scripts/github-linux-release.test.mjs scripts/linux-hotfix.test.mjs",
+    "deployment:test": "node --test scripts/single-node-deployment.test.mjs scripts/offline-upgrade.test.mjs scripts/code-agent-executable.test.mjs scripts/log-redaction.test.mjs scripts/safe-archive-extract.test.mjs scripts/postgres-version.test.mjs",
+    "release:test": "node --test scripts/single-node-release.test.mjs scripts/github-linux-release.test.mjs scripts/linux-hotfix.test.mjs scripts/offline-upgrade.test.mjs",
     "release:build": "node scripts/build-single-node-release.mjs",
     "contract:test": "pnpm --filter @ai-training/platform-api contract:test",
     "grader:test": "node scripts/run-grader-tests.mjs",
