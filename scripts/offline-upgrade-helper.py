@@ -402,7 +402,7 @@ def database_restore(environment_file: Path, source: Path, confirm: bool) -> Non
         if psql.stdin is None:
             fail("无法启动 PostgreSQL 恢复事务")
         try:
-            psql.stdin.write(b"BEGIN;\nDROP OWNED BY CURRENT_USER CASCADE;\nCREATE SCHEMA IF NOT EXISTS public;\n")
+            psql.stdin.write(b"BEGIN;\nDROP SCHEMA public CASCADE;\nCREATE SCHEMA public AUTHORIZATION CURRENT_USER;\n")
             psql.stdin.flush()
             restore = subprocess.Popen(restore_command, env=environment, stdout=psql.stdin, stderr=subprocess.PIPE)
             _, restore_errors = restore.communicate()

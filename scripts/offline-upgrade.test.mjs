@@ -128,6 +128,8 @@ test('upgrade launchers and helper are parseable and shipped as safe entrypoints
   assert.match(linux, /root 兜底启动后仍未完整拉起四个业务进程/);
   const helperSource = readFileSync(join(projectRoot, 'scripts', 'offline-upgrade-helper.py'), 'utf8');
   assert.match(helperSource, /reject_casefold_collisions = manifest\.get\("target"\) == "win32-x64"/);
+  assert.doesNotMatch(helperSource, /DROP OWNED BY CURRENT_USER/);
+  assert.match(helperSource, /DROP SCHEMA public CASCADE;\\nCREATE SCHEMA public AUTHORIZATION CURRENT_USER/);
   assert.match(helperSource, /pg_get_userbyid\(datdba\) = current_user/);
   assert.match(helperSource, /DATABASE_URL 用户是当前专用数据库的所有者/);
   if (process.platform !== 'win32') {
