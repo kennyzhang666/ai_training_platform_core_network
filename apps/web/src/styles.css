@@ -1349,6 +1349,19 @@ footer { padding: 14px; border-color: var(--lc-line); background: var(--lc-panel
 .grading-submission-detail dd { overflow: hidden; margin: 0; color: var(--ui-text); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .grading-submission-detail .mono-value { font-family: var(--ui-mono); }
 .grading-failure-note { padding: 7px 9px; margin: 10px 0 0; border: 1px solid #F0CACA; border-radius: 4px; color: var(--ui-red); background: var(--ui-red-soft); font-size: 9px; line-height: 1.5; }
+.grading-score { display: inline-flex; align-items: baseline; gap: 1px; padding: 3px 7px; border-radius: 5px; color: #14815d; background: #E2F8ED; font-size: 12px; font-weight: 900; letter-spacing: -.03em; white-space: nowrap; }
+.grading-score small { color: #57917C; font-size: 8px; font-weight: 700; }
+.grading-score-panel { padding: 11px 12px; margin: 11px 0 0; border: 1px solid var(--ui-line); border-radius: 5px; background: #fff; }
+.grading-score-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.grading-score-heading h4 { margin: 4px 0 0; color: var(--ui-ink); font-size: 14px; letter-spacing: -.035em; }
+.grading-score-heading small { color: var(--ui-muted); font-size: 9px; }
+.grading-score-dimensions { display: grid; gap: 7px; }
+.grading-score-dimension { display: grid; grid-template-columns: 62px minmax(0, 1fr) 58px; gap: 9px; align-items: center; }
+.grading-score-dimension span { color: var(--ui-muted); font-size: 9px; }
+.grading-score-dimension i { height: 5px; border-radius: 100px; background: var(--ui-line); }
+.grading-score-dimension i b { display: block; height: 100%; border-radius: 100px; background: linear-gradient(90deg, #5FA8EE, #226DBB); }
+.grading-score-dimension strong { color: var(--ui-text); font-size: 9px; text-align: right; }
+.grading-score-note { padding: 9px 0 0; margin: 0; color: var(--ui-muted); font-size: 9px; }
 .admin-grading-grid { display: block; }
 .grading-selection-card { min-height: 420px; }
 .grading-event-detail { padding-top: 0; }

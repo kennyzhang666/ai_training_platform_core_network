@@ -109,7 +109,20 @@ type ChallengeVersion = {
 
 type Challenge = { id: string; ownerOrgPath: string; origin: string; category?: ChallengeCategory; status: ChallengeStatus; archivedFrom?: Exclude<ChallengeStatus, 'ARCHIVED'>; board?: { type: 'HARD_PROBLEM'; status: 'OPEN' | 'RESOLVED'; reviewStatus?: HardProblemReviewStatus; solutionVisibility?: 'PUBLIC' | 'HIDDEN'; solutionSubmissionId?: string; reviewedAt?: string; reviewedBy?: string; reviewComment?: string; submissionEventId?: string; publisherType: 'DEPARTMENT' | 'EMPLOYEE'; publisherName: string; departmentName?: string; difficulty: 'HIGH' | 'MEDIUM' | 'LOW'; resolvedBy?: string; resolvedByName?: string; solverId?: string; solverName?: string }; versions: ChallengeVersion[] };
 type EventConfig = { id: string; challengeVersion: string; purpose?: 'TRAINING' | 'HARD_PROBLEM'; submissionSource: Source; trigger: Trigger; reveal: 'IMMEDIATE' | 'ON_RELEASE'; status: 'OPEN' | 'CLOSED' | 'RELEASED'; mode?: 'LIVE' | 'WINDOW'; startsAt?: string; endsAt?: string; participantMode?: 'OPEN' | 'ALLOWLIST'; accessPolicy?: { mode: 'OPEN' | 'RESTRICTED'; subjectIds?: string[]; departmentIds?: string[]; mentorIds?: string[] }; deliveryConfig?: { repository?: string; branchTemplate?: string; pinAt?: 'SUBMIT' | 'DEADLINE'; allowedFormats?: string[]; maxBytes?: number; maxFiles?: number } };
-type Submission = { id: string; eventId: string; subjectId: string; state: string; createdAt: string; gradingRunId?: string; resultId?: string; gradingStatus?: string; failureReason?: string; snapshot: { sourceType: Source; snapshotHash?: string; artifactHash?: string; artifactUri?: string; artifactPath?: string; artifactName?: string; workspacePath?: string; repository?: string; branch?: string; commitSha?: string; submittedAt?: string } };
+/** `resultSummary` is the compact score projection GET /submissions already
+ * returns; the full criteria and evidence stay behind /reports/:submissionId. */
+type SubmissionResultSummary = { resultId: string; total: number; status: string; published: true };
+type Submission = { id: string; eventId: string; subjectId: string; state: string; createdAt: string; gradingRunId?: string; resultId?: string; gradingStatus?: string; failureReason?: string; resultSummary?: SubmissionResultSummary; snapshot: { sourceType: Source; snapshotHash?: string; artifactHash?: string; artifactUri?: string; artifactPath?: string; artifactName?: string; workspacePath?: string; repository?: string; branch?: string; commitSha?: string; submittedAt?: string } };
+type SubmissionReport = {
+  result: {
+    total?: number;
+    recalculatedTotal?: number;
+    status?: string;
+    graderVersion?: string;
+    finishedAt?: string;
+    dimensions?: Record<string, { score: number | null; max?: number; evaluated?: boolean }>;
+  };
+};
 type SubmissionPage = { items: Submission[]; pageInfo: { page: number; pageSize: number; total: number; totalPages: number; hasNext: boolean; hasPrevious: boolean } };
 type EvaluationInputBatch = { schemaVersion: '1.0'; generatedAt: string; event: { id: string; challengeVersion: string; rubricVersion: string; trigger: 'IMPORT'; submissionSource: Source; reveal: 'IMMEDIATE' | 'ON_RELEASE' }; challenge: { id: string; title: string; version: number; evaluationEngine: EvaluationEngineConfig }; submissions: Array<{ submissionId: string; subject: { id: string; name: string; orgPath: string }; snapshot: Submission['snapshot']; grading: { runId: string; idempotencyKey: string; triggerType: 'IMPORT' } }> };
 type Announcement = { id: string; title: string; summary: string; tag: '平台通知' | '训战提醒' | '规则更新'; publishedAt: string; pinned?: boolean };
@@ -400,6 +413,11 @@ function eventDisplayLabel(event: EventConfig, currentTime = Date.now()): string
 
 function statusLabel(value: string): string {
   return ({ DRAFT: '草稿', PUBLISHED: '已发布', ARCHIVED: '垃圾箱', OPEN: '进行中', CLOSED: '已结束', RELEASED: '已公布', WAITING_TRIGGER: '等待处理', WAITING_IMPORT: '等待结果', RECEIVED: '已提交', QUEUED: '等待开始', RUNNING: '处理中', GRADED: '已完成', FAILED: '需要重试', ACTIVE: '在职', DISABLED: '已停用' } as Record<string, string>)[value] ?? (value && !/^[A-Z][A-Z0-9_]*$/.test(value) ? value : '—');
+}
+
+/** The four rubric dimensions, named as the employee report names them. */
+function dimensionLabel(key?: string): string {
+  return ({ verify: '验证能力', spec: '规格能力', code: '工程能力', collab: '协作能力' } as Record<string, string>)[key ?? ''] ?? key ?? '能力维度';
 }
 
 function organizationLevelLabel(level: number): string {
@@ -2021,8 +2039,62 @@ function GradingSection({ submissions, events, challenges, users, queue, selecte
     }
   };
   const statusText = (submission: Submission) => submission.resultId ? '已完成' : submission.gradingStatus === 'FAILED' || submission.failureReason ? '评测失败' : submission.gradingStatus === 'RUNNING' ? '评测中' : submission.gradingStatus === 'QUEUED' ? '排队中' : statusLabel(submission.state);
+
+  // A graded submission carries its total in the list projection. A sealed
+  // event withholds it until the results are released, which is a legitimate
+  // state to show rather than an error.
+  const scoreText = (submission: Submission): string | null => {
+    if (!submission.resultId) return null;
+    if (submission.resultSummary) return String(submission.resultSummary.total);
+    return '未公布';
+  };
+
+  // Dimension detail is not part of the list projection; fetch it lazily when
+  // an administrator expands one submission, and keep it for this session.
+  const [reports, setReports] = useState<Record<string, SubmissionReport>>({});
+  const [reportErrors, setReportErrors] = useState<Record<string, string>>({});
+  const [reportLoadingId, setReportLoadingId] = useState('');
+  const loadReport = async (submissionId: string) => {
+    if (reports[submissionId] || reportErrors[submissionId]) return;
+    setReportLoadingId(submissionId);
+    try {
+      const report = await request<SubmissionReport>(`/reports/${encodeURIComponent(submissionId)}`);
+      setReports((current) => ({ ...current, [submissionId]: report }));
+    } catch (error) {
+      setReportErrors((current) => ({ ...current, [submissionId]: error instanceof Error ? error.message : '评分详情加载失败' }));
+    } finally {
+      setReportLoadingId('');
+    }
+  };
+  const toggleSubmissionDetails = (submission: Submission) => {
+    const next = expandedSubmissionId === submission.id ? '' : submission.id;
+    setExpandedSubmissionId(next);
+    if (next && submission.resultId) void loadReport(submission.id);
+  };
   const subjectFor = (submission: Submission) => users.find((user) => user.id === submission.subjectId);
   const submissionDate = (submission: Submission) => formatDate(submission.snapshot.submittedAt ?? submission.createdAt);
+  const renderSubmissionScore = (submission: Submission) => {
+    if (reportLoadingId === submission.id) return <p className="grading-score-note">正在加载评分详情…</p>;
+    const failure = reportErrors[submission.id];
+    if (failure) return <p className="grading-score-note">评分详情不可用：{failure}</p>;
+    const report = reports[submission.id];
+    if (!report) return null;
+    const total = typeof report.result.recalculatedTotal === 'number' ? report.result.recalculatedTotal : report.result.total;
+    const dimensions = Object.entries(report.result.dimensions ?? {});
+    return <div className="grading-score-panel">
+      <div className="grading-score-heading">
+        <div><p className="kicker">评测结果</p><h4>总分 {total ?? '—'} / 100</h4></div>
+        <small>{report.result.finishedAt ? `完成于 ${formatDate(report.result.finishedAt)}` : ''}{report.result.graderVersion ? ` · ${report.result.graderVersion}` : ''}</small>
+      </div>
+      {dimensions.length > 0 && <div className="grading-score-dimensions">
+        {dimensions.map(([key, dimension]) => <div className="grading-score-dimension" key={key}>
+          <span>{dimensionLabel(key)}</span>
+          <i><b style={{ width: `${dimension.evaluated === false || dimension.score === null ? 0 : ((dimension.score ?? 0) / (dimension.max || 25)) * 100}%` }} /></i>
+          <strong>{dimension.evaluated === false ? '待补充' : `${dimension.score ?? '—'} / ${dimension.max ?? '—'}`}</strong>
+        </div>)}
+      </div>}
+    </div>;
+  };
   const renderSubmissionDetails = (submission: Submission) => {
     const snapshot = submission.snapshot;
     const subject = subjectFor(submission);
@@ -2038,6 +2110,7 @@ function GradingSection({ submissions, events, challenges, users, queue, selecte
         {snapshot.commitSha && <div><dt>提交版本</dt><dd className="mono-value">{snapshot.commitSha}</dd></div>}
         {snapshot.snapshotHash && <div><dt>版本快照</dt><dd className="mono-value">{snapshot.snapshotHash}</dd></div>}
       </dl>
+      {submission.resultId && renderSubmissionScore(submission)}
       {submission.failureReason && <p className="grading-failure-note">失败原因：{submission.failureReason}</p>}
     </div>;
   };
@@ -2050,7 +2123,7 @@ function GradingSection({ submissions, events, challenges, users, queue, selecte
         <div className="grading-detail-heading"><div><p className="kicker">赛题评测</p><h3>{versionTitle(event.challengeVersion, challenges)}</h3><small>{eventScheduleLabel(event)}</small></div><span className={`status-badge status-${eventDisplayStatus(event, now).toLowerCase()}`}>{eventDisplayLabel(event, now)}</span></div>
         <div className="grading-detail-facts"><span>赛制：{modeLabel(event.mode)}</span><span>提交：{sourceLabel(event.submissionSource)}</span><span>评测方式：{triggerLabel(event.trigger)}</span><span>{rows.length} 份提交</span></div>
         <div className="grading-event-actions"><button className="quiet" disabled={busy || !rows.length} onClick={() => onSelectEvent(event.id)}>全选</button><button className="quiet" disabled={busy || !selectedCount} onClick={() => onClearEvent(event.id)}>清除</button>{event.trigger === 'MANUAL' && <button className="primary compact" disabled={busy || !selectedActionCount} onClick={() => onStartSelected(event.id)}>发起评测</button>}{event.trigger === 'IMPORT' && <button className="primary compact" disabled={busy || !selectedActionCount} onClick={() => onPrepareInput(event.id)}>导出评测任务</button>}<button className="secondary-button compact" disabled={busy} onClick={() => setResultImportOpen((current) => !current)}>{resultImportOpen ? '收起结果导入' : '导入评测结果'}</button><span className="grading-selected-count">已选 {selectedCount}/{rows.length}</span></div>
-        <div className="grading-submission-list">{rows.map((submission) => { const subject = subjectFor(submission); const expanded = expandedSubmissionId === submission.id; const failed = submission.gradingStatus === 'FAILED' || Boolean(submission.failureReason) || submission.state === 'FAILED'; return <div className="grading-submission-block" key={submission.id}><div className="grading-row"><label className="grading-check"><input type="checkbox" checked={selectedSet.has(submission.id)} onChange={() => onToggle(submission.id)} /><span className="grading-avatar">{(subject?.name ?? submission.subjectId).slice(-2)}</span></label><div><strong>{displayPersonName(subject?.name ?? submission.subjectId)}</strong><small>{subject?.employeeNo ?? submission.subjectId} · {sourceLabel(submission.snapshot.sourceType)} · {submissionDate(submission)}</small></div><span className={`status-badge status-${submission.state.toLowerCase()}`}>{statusText(submission)}</span><div className="row-actions"><button className="small" onClick={() => setExpandedSubmissionId(expanded ? '' : submission.id)}>{expanded ? '收起详情' : '查看提交'}</button>{submission.snapshot.artifactUri && <button className="small" disabled={busy} onClick={() => onDownload(submission)}>下载交付件</button>}{submission.resultId && <button className="small" disabled={busy} onClick={() => onRegrade(submission)}>重新评测</button>}{event.trigger === 'MANUAL' && !submission.resultId && (failed ? <button className="small" disabled={busy} onClick={() => onSubmission(submission)}>重新评测</button> : !failed && ['WAITING_TRIGGER', 'RECEIVED'].includes(submission.state) && <button className="small" disabled={busy} onClick={() => onSubmission(submission)}>发起评测</button>)}</div></div>{expanded && renderSubmissionDetails(submission)}</div>; })}{!rows.length && <div className="empty">暂无提交记录</div>}</div>
+        <div className="grading-submission-list">{rows.map((submission) => { const subject = subjectFor(submission); const expanded = expandedSubmissionId === submission.id; const failed = submission.gradingStatus === 'FAILED' || Boolean(submission.failureReason) || submission.state === 'FAILED'; return <div className="grading-submission-block" key={submission.id}><div className="grading-row"><label className="grading-check"><input type="checkbox" checked={selectedSet.has(submission.id)} onChange={() => onToggle(submission.id)} /><span className="grading-avatar">{(subject?.name ?? submission.subjectId).slice(-2)}</span></label><div><strong>{displayPersonName(subject?.name ?? submission.subjectId)}</strong><small>{subject?.employeeNo ?? submission.subjectId} · {sourceLabel(submission.snapshot.sourceType)} · {submissionDate(submission)}</small></div><span className={`status-badge status-${submission.state.toLowerCase()}`}>{statusText(submission)}</span>{scoreText(submission) && <span className="grading-score" title="评测总分">{scoreText(submission)}<small>/100</small></span>}<div className="row-actions"><button className="small" onClick={() => toggleSubmissionDetails(submission)}>{expanded ? '收起详情' : '查看提交'}</button>{submission.snapshot.artifactUri && <button className="small" disabled={busy} onClick={() => onDownload(submission)}>下载交付件</button>}{submission.resultId && <button className="small" disabled={busy} onClick={() => onRegrade(submission)}>重新评测</button>}{event.trigger === 'MANUAL' && !submission.resultId && (failed ? <button className="small" disabled={busy} onClick={() => onSubmission(submission)}>重新评测</button> : !failed && ['WAITING_TRIGGER', 'RECEIVED'].includes(submission.state) && <button className="small" disabled={busy} onClick={() => onSubmission(submission)}>发起评测</button>)}</div></div>{expanded && renderSubmissionDetails(submission)}</div>; })}{!rows.length && <div className="empty">暂无提交记录</div>}</div>
         {resultImportOpen && <section className="grading-result-import" aria-label="导入评测结果">
           <div className="grading-result-import-heading"><div><p className="kicker">评测结果</p><h4>导入评测结果</h4></div><button className="quiet" onClick={closeResultImport}>取消</button></div>
           <div className="grading-result-import-body">
