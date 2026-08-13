@@ -26,7 +26,21 @@ esac
 
 (cd "$script_root" && sha256sum --check SHA256SUMS) || fail '文件校验失败，请重新下载热补丁'
 
-installed_version="$($project_root/runtime/node/bin/node -p "require('$project_root/package.json').version" 2>/dev/null || true)"
+# A release package writes VERSION at its root and ships no root package.json
+# (scripts/build-single-node-release.mjs). Reading the latter resolved to an
+# empty string on every real deployment, so the gate below rejected every host
+# with "当前版本  不在本热补丁支持范围". Read VERSION first, exactly like
+# deploy/single-node/manage.sh does; the API manifest covers a layout that
+# predates VERSION, and a root package.json only exists in a source checkout.
+installed_version=''
+if [[ -f "$project_root/VERSION" ]]; then
+  installed_version="$(tr -d ' \r\n' <"$project_root/VERSION")"
+elif [[ -f "$project_root/services/platform-api/package.json" ]]; then
+  installed_version="$("$project_root/runtime/node/bin/node" -p "require('$project_root/services/platform-api/package.json').version" 2>/dev/null || true)"
+elif [[ -f "$project_root/package.json" ]]; then
+  installed_version="$("$project_root/runtime/node/bin/node" -p "require('$project_root/package.json').version" 2>/dev/null || true)"
+fi
+[[ -n "$installed_version" ]] || fail "无法确定当前平台版本：$project_root 下没有 VERSION 或 services/platform-api/package.json"
 case "$installed_version" in
   1.1.0|1.1.1|1.1.2|1.1.3) ;;
   *) fail "当前版本 $installed_version 不在本热补丁支持范围（1.1.0–1.1.3）" ;;
@@ -37,7 +51,7 @@ backup_root="$project_root/runtime-state/hotfix-backups/v${hotfix_version}-$stam
 mkdir -p -- "$backup_root"
 tar -C "$project_root" -czf "$backup_root/application-dist-before.tar.gz" \
   services/platform-api/dist apps/web/dist
-cp -- "$project_root/package.json" "$backup_root/package.json.before"
+printf '%s\n' "$installed_version" >"$backup_root/version.before"
 
 rollback_required='false'
 rollback() {

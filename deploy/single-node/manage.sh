@@ -186,6 +186,8 @@ runtime_python=""
 runtime_gateway_python=""
 runtime_nginx=""
 runtime_mode=""
+# Set by assert_preflight; start_all skips the evaluation Worker when false.
+code_agent_ready=""
 
 ensure_layout() {
   mkdir -p -- "$data_root" "$artifact_root" "$engine_package_root" "$engine_cache_root" "$pip_cache_root" \
@@ -251,7 +253,17 @@ assert_preflight() {
   [[ "$pip_help" == *'--python'* ]] || die '平台 Python 的 pip 不支持 --python，无法创建隔离依赖环境'
   "$runtime_python" -c 'import jsonschema, yaml' >/dev/null 2>&1 || die '平台 Python 缺少 jsonschema 或 PyYAML'
   "$runtime_gateway_python" -c 'import ldap3' >/dev/null 2>&1 || die 'LDAP 网关 Python 缺少 ldap3'
-  "$runtime_node" "$project_root/scripts/evaluation-worker.mjs" --check-config >/dev/null
+  # Only the evaluation Worker needs a Code Agent. Treating it as a hard
+  # precondition meant an unresolvable CODE_AGENT_COMMAND also stopped the API,
+  # the web tier and the LDAP gateway, so a Code Agent problem became a total
+  # platform outage. Degrade instead: report it, skip the Worker in start_all,
+  # and leave evaluation work queued until an operator fixes the command.
+  code_agent_ready='true'
+  if ! "$runtime_node" "$project_root/scripts/evaluation-worker.mjs" --check-config >/dev/null 2>&1; then
+    code_agent_ready='false'
+    printf '警告：Code Agent 配置不可用，评测 Worker 不会启动；平台 API、网页和 LDAP 网关照常运行。\n' >&2
+    printf '      评测任务会留在队列中。修好 CODE_AGENT_COMMAND 后重新执行 Start 即可拉起 Worker。\n' >&2
+  fi
   assert_port_available '平台 API' "$api_port" api
   assert_port_available 'LDAP 网关' "$ldap_port" ldap3
   assert_port_available '平台入口' "$listen_port" nginx
@@ -480,12 +492,16 @@ start_all() {
   [[ "$started_process" == 'false' ]] || started+=(ldap3)
   wait_health '平台 API' "$api_health_uri"
   wait_health 'LDAP 网关' "$ldap_health_uri"
-  start_managed worker "$project_root" "$runtime_node" "$project_root/scripts/evaluation-worker.mjs" \
-    --api "$(env_value PLATFORM_API "http://$api_host:$api_port/api/v1")" \
-    --employee "$(env_value EVALUATION_WORKER_EMPLOYEE_NO)" \
-    --worker "$(env_value EVALUATION_WORKER_ID single-node-worker)" \
-    --batch-root "$batch_root" --cache "$engine_cache_root"
-  [[ "$started_process" == 'false' ]] || started+=(worker)
+  if [[ "$code_agent_ready" == 'true' ]]; then
+    start_managed worker "$project_root" "$runtime_node" "$project_root/scripts/evaluation-worker.mjs" \
+      --api "$(env_value PLATFORM_API "http://$api_host:$api_port/api/v1")" \
+      --employee "$(env_value EVALUATION_WORKER_EMPLOYEE_NO)" \
+      --worker "$(env_value EVALUATION_WORKER_ID single-node-worker)" \
+      --batch-root "$batch_root" --cache "$engine_cache_root"
+    [[ "$started_process" == 'false' ]] || started+=(worker)
+  else
+    printf '%s\n' '已跳过评测 Worker：Code Agent 配置不可用，评测任务将留在队列中等待。' >&2
+  fi
   local nginx_home
   nginx_home="$(cd "$(dirname "$runtime_nginx")/.." && pwd -P)"
   start_managed nginx "$nginx_home" "$runtime_nginx" -p "$nginx_home/" -c "$nginx_runtime_config"

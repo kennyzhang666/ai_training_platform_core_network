@@ -53,6 +53,23 @@ test('single-node deployment certifies PostgreSQL 14 and checks it before migrat
   assert.doesNotMatch(guide, /PostgreSQL 16\/17/);
 });
 
+// A Code Agent that cannot be resolved used to abort assert_preflight, which
+// stopped the API, the web tier and the LDAP gateway even though none of them
+// need it. Only the evaluation Worker does, so the managers must degrade.
+test('an unavailable Code Agent skips only the evaluation Worker', () => {
+  const bash = readFileSync(join(deploy, 'manage.sh'), 'utf8');
+  assert.match(bash, /code_agent_ready='false'/, 'the Bash manager must record the degraded state');
+  assert.doesNotMatch(bash, /^\s*"\$runtime_node" "\$project_root\/scripts\/evaluation-worker\.mjs" --check-config >\/dev\/null$/m, 'the check must no longer abort the preflight');
+  assert.match(bash, /if \[\[ "\$code_agent_ready" == 'true' \]\]; then\s*\n\s*start_managed worker/, 'the Worker must start only when the Code Agent resolves');
+  assert.match(bash, /已跳过评测 Worker/, 'skipping the Worker must be reported to the operator');
+
+  const powershell = readFileSync(join(deploy, 'manage.ps1'), 'utf8');
+  assert.match(powershell, /\$codeAgentReady = \$LASTEXITCODE -eq 0/, 'the PowerShell manager must record the same state');
+  assert.doesNotMatch(powershell, /throw "Code Agent 配置检查失败/, 'the check must no longer throw');
+  assert.match(powershell, /if \(\$runtime\.CodeAgentReady\)/, 'the Worker must start only when the Code Agent resolves');
+  assert.match(powershell, /已跳过评测 Worker/, 'skipping the Worker must be reported to the operator');
+});
+
 test('Windows release launcher uses the bundled PowerShell runtime', () => {
   const launcher = readFileSync(join(deploy, 'manage.cmd'), 'utf8');
   assert.match(launcher, /runtime\\powershell\\pwsh\.exe/i);

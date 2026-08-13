@@ -17,6 +17,22 @@ test('Linux hotfix is self-checking, reversible and does not touch platform data
   assert.doesNotMatch(script, /prisma|DATABASE_URL|data\/artifacts|engine-packages/);
 });
 
+// A release package writes VERSION at its root and deliberately ships no root
+// package.json (scripts/build-single-node-release.mjs). Reading the latter made
+// the version gate resolve to an empty string on every real deployment, so the
+// installer rejected every host with "当前版本  不在本热补丁支持范围".
+test('Linux hotfix reads the version a release actually ships', async () => {
+  const script = await readFile(join(root, 'deploy', 'hotfix', 'apply-hotfix.sh'), 'utf8');
+  const gate = script.slice(script.indexOf("installed_version=''"), script.indexOf('stamp='));
+  assert.ok(gate, 'the version gate must be present');
+  const versionAt = gate.indexOf('$project_root/VERSION');
+  const manifestAt = gate.indexOf('package.json');
+  assert.ok(versionAt >= 0, 'the gate must consult the VERSION file a release writes');
+  assert.ok(manifestAt < 0 || versionAt < manifestAt, 'a package.json manifest may only be a fallback after VERSION');
+  assert.match(script, /\[\[ -n "\$installed_version" \]\] \|\| fail/, 'an undetectable version must fail loudly, not silently');
+  assert.doesNotMatch(script, /cp -- "\$project_root\/package\.json"/, 'a release has no root package.json to back up');
+});
+
 test('Linux hotfix builder emits the archive, checksum and operator guide', async () => {
   const output = await mkdtemp(join(tmpdir(), 'ai-training-hotfix-test-'));
   try {

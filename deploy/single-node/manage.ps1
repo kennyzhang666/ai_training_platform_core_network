@@ -266,13 +266,19 @@ function Assert-Preflight {
     $gatewayPython = Resolve-Executable (Env 'LDAP_GATEWAY_PYTHON' 'services/ldap3-gateway/.venv/Scripts/python.exe') 'LDAP 网关 Python'
     & $gatewayPython -c 'import ldap3' 2>$null
     if ($LASTEXITCODE -ne 0) { throw 'LDAP 网关 Python 缺少 ldap3，请使用离线 wheelhouse 安装 services/ldap3-gateway/requirements.txt' }
+    # Only the evaluation Worker needs a Code Agent; failing here used to stop
+    # the API, the web tier and the LDAP gateway as well. Degrade instead.
     $workerCheck = & $node (Join-Path $projectRoot 'scripts\evaluation-worker.mjs') --check-config 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) { throw "Code Agent 配置检查失败：$($workerCheck.Trim())" }
+    $codeAgentReady = $LASTEXITCODE -eq 0
+    if (-not $codeAgentReady) {
+        Write-Warning "Code Agent 配置不可用，评测 Worker 不会启动；平台 API、网页和 LDAP 网关照常运行：$($workerCheck.Trim())"
+        Write-Warning '评测任务会留在队列中。修好 CODE_AGENT_COMMAND 后重新执行 Start 即可拉起 Worker。'
+    }
     $nginx = Resolve-Executable (Env 'NGINX_EXE') 'Nginx'
     Assert-PortAvailable '平台 API' $apiPort 'api'
     Assert-PortAvailable 'LDAP 网关' $ldapPort 'ldap3'
     Assert-PortAvailable '平台入口' $listenPort 'nginx'
-    return @{ Node = $node; Python = $python; GatewayPython = $gatewayPython; Nginx = $nginx; Pnpm = $pnpm; RuntimeMode = $runtimeMode }
+    return @{ Node = $node; Python = $python; GatewayPython = $gatewayPython; Nginx = $nginx; Pnpm = $pnpm; RuntimeMode = $runtimeMode; CodeAgentReady = $codeAgentReady }
 }
 
 function Invoke-PlatformPackage([string[]]$Arguments) {
@@ -504,14 +510,18 @@ function Start-All {
         if (Start-ManagedProcess 'ldap3' $runtime.GatewayPython @((Quote-Argument (Join-Path $projectRoot 'services\ldap3-gateway\ldap3_gateway.py'))) (Join-Path $projectRoot 'services\ldap3-gateway')) { $started.Add('ldap3') }
         Wait-Health '平台 API' $apiHealthUri
         Wait-Health 'LDAP 网关' $ldapHealthUri
-        if (Start-ManagedProcess 'worker' $node @(
-            (Quote-Argument (Join-Path $projectRoot 'scripts\evaluation-worker.mjs')),
-            '--api', (Env 'PLATFORM_API' "http://${apiHost}:${apiPort}/api/v1"),
-            '--employee', (Env 'EVALUATION_WORKER_EMPLOYEE_NO'),
-            '--worker', (Env 'EVALUATION_WORKER_ID' 'single-node-worker'),
-            '--batch-root', (Quote-Argument $batchRoot),
-            '--cache', (Quote-Argument $engineCacheRoot)
-        ) $projectRoot) { $started.Add('worker') }
+        if ($runtime.CodeAgentReady) {
+            if (Start-ManagedProcess 'worker' $node @(
+                (Quote-Argument (Join-Path $projectRoot 'scripts\evaluation-worker.mjs')),
+                '--api', (Env 'PLATFORM_API' "http://${apiHost}:${apiPort}/api/v1"),
+                '--employee', (Env 'EVALUATION_WORKER_EMPLOYEE_NO'),
+                '--worker', (Env 'EVALUATION_WORKER_ID' 'single-node-worker'),
+                '--batch-root', (Quote-Argument $batchRoot),
+                '--cache', (Quote-Argument $engineCacheRoot)
+            ) $projectRoot) { $started.Add('worker') }
+        } else {
+            Write-Warning '已跳过评测 Worker：Code Agent 配置不可用，评测任务将留在队列中等待。'
+        }
         $nginxPrefix = (Split-Path -Parent $runtime.Nginx) + [System.IO.Path]::DirectorySeparatorChar
         if (Start-ManagedProcess 'nginx' $runtime.Nginx @('-p', (Quote-Argument $nginxPrefix), '-c', (Quote-Argument $nginxRuntimeConfig)) (Split-Path -Parent $runtime.Nginx)) { $started.Add('nginx') }
         Write-Host "单服务器平台已启动：http://127.0.0.1:${listenPort}/"
