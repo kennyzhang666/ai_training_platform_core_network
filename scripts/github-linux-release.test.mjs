@@ -40,6 +40,7 @@ test('GitHub workflow builds tagged releases and a verified Linux hotfix on nati
   assert.match(workflow, /migrate deploy/);
   assert.match(workflow, /bash -n "\$unpacked\/upgrade\.sh"/);
   assert.match(workflow, /offline-upgrade-helper\.py/);
+  assert.match(workflow, /cp tooling\/scripts\/offline-upgrade-helper\.py source\/scripts\/offline-upgrade-helper\.py/);
   assert.match(workflow, /database-backup --environment-file/);
   assert.match(workflow, /database-restore --environment-file/);
   assert.match(workflow, /gh release (?:create|upload)/);

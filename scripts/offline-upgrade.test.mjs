@@ -23,7 +23,13 @@ function fixture({ sourceVersion = '1.1.4', targetVersion = '1.1.5', target = pr
   writeFileSync(join(source, 'VERSION'), `${sourceVersion}\n`);
   writeFileSync(join(release, 'VERSION'), `${targetVersion}\n`);
   writeFileSync(join(release, 'upgrade-manifest.json'), `${JSON.stringify({ schemaVersion: '1.0', product: 'ai-training-platform', target, targetVersion, supportedSourceVersions: ['1.1.4'], minimumPostgresMajor: 14, migrationStrategy: 'prisma-migrate-deploy-with-native-postgres-rollback', requiresSameFilesystem: true }, null, 2)}\n`);
-  const files = ['VERSION', 'upgrade-manifest.json'].map((path) => {
+  const paths = ['VERSION', 'upgrade-manifest.json'];
+  if (target === 'linux-x64' && process.platform !== 'win32') {
+    writeFileSync(join(release, 'LICENSE'), 'upper-case path\n');
+    writeFileSync(join(release, 'license'), 'lower-case path\n');
+    paths.push('LICENSE', 'license');
+  }
+  const files = paths.map((path) => {
     const bytes = readFileSync(join(release, path));
     return { path, type: 'file', size: bytes.length, sha256: sha256(bytes), mode: process.platform === 'win32' ? 438 : 420 };
   });
@@ -119,6 +125,7 @@ test('upgrade launchers and helper are parseable and shipped as safe entrypoints
   assert.match(linux, /systemd 单元异常且平台进程不完整；将由 root 清理残留并在升级后直接恢复业务进程/);
   assert.match(linux, /root 兜底启动后仍未完整拉起四个业务进程/);
   const helperSource = readFileSync(join(projectRoot, 'scripts', 'offline-upgrade-helper.py'), 'utf8');
+  assert.match(helperSource, /reject_casefold_collisions = manifest\.get\("target"\) == "win32-x64"/);
   assert.match(helperSource, /pg_get_userbyid\(datdba\) = current_user/);
   assert.match(helperSource, /DATABASE_URL 用户是当前专用数据库的所有者/);
   if (process.platform !== 'win32') {

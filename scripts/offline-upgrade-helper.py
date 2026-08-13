@@ -102,6 +102,7 @@ def verify_release(release_root: Path, source_root: Path | None = None) -> dict:
 
     expected: dict[str, dict] = {}
     expected_casefolded: set[str] = set()
+    reject_casefold_collisions = manifest.get("target") == "win32-x64"
     files = manifest.get("files")
     if not isinstance(files, list):
         fail("发布清单文件列表无效")
@@ -112,10 +113,11 @@ def verify_release(release_root: Path, source_root: Path | None = None) -> dict:
         key = relative.as_posix()
         if key in expected:
             fail("发布清单包含重复路径")
-        folded = key.casefold()
-        if folded in expected_casefolded:
-            fail("发布清单包含大小写冲突路径")
-        expected_casefolded.add(folded)
+        if reject_casefold_collisions:
+            folded = key.casefold()
+            if folded in expected_casefolded:
+                fail("发布清单包含大小写冲突路径")
+            expected_casefolded.add(folded)
         if item.get("type") not in {"file", "symlink"}:
             fail("发布清单包含不支持的文件类型")
         if (

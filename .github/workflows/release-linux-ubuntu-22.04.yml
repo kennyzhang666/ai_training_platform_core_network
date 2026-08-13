@@ -66,6 +66,7 @@ jobs:
           sparse-checkout: |
             scripts/prepare-linux-release-runtime.sh
             scripts/build-single-node-release.mjs
+            scripts/offline-upgrade-helper.py
             scripts/archive-release.py
             scripts/build-linux-hotfix.mjs
             scripts/linux-hotfix.test.mjs
@@ -101,6 +102,7 @@ jobs:
         run: |
           set -euo pipefail
           cp tooling/scripts/build-single-node-release.mjs source/scripts/build-single-node-release.mjs
+          cp tooling/scripts/offline-upgrade-helper.py source/scripts/offline-upgrade-helper.py
           cp tooling/scripts/archive-release.py source/scripts/archive-release.py
           cp tooling/scripts/build-linux-hotfix.mjs source/scripts/build-linux-hotfix.mjs
           cp tooling/scripts/linux-hotfix.test.mjs source/scripts/linux-hotfix.test.mjs
