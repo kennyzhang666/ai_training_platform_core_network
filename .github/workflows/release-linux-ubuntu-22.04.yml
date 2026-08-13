@@ -67,6 +67,8 @@ jobs:
             scripts/prepare-linux-release-runtime.sh
             scripts/build-single-node-release.mjs
             scripts/offline-upgrade-helper.py
+            deploy/single-node/upgrade.sh
+            deploy/single-node/upgrade.ps1
             scripts/archive-release.py
             scripts/build-linux-hotfix.mjs
             scripts/linux-hotfix.test.mjs
@@ -103,6 +105,8 @@ jobs:
           set -euo pipefail
           cp tooling/scripts/build-single-node-release.mjs source/scripts/build-single-node-release.mjs
           cp tooling/scripts/offline-upgrade-helper.py source/scripts/offline-upgrade-helper.py
+          cp tooling/deploy/single-node/upgrade.sh source/deploy/single-node/upgrade.sh
+          cp tooling/deploy/single-node/upgrade.ps1 source/deploy/single-node/upgrade.ps1
           cp tooling/scripts/archive-release.py source/scripts/archive-release.py
           cp tooling/scripts/build-linux-hotfix.mjs source/scripts/build-linux-hotfix.mjs
           cp tooling/scripts/linux-hotfix.test.mjs source/scripts/linux-hotfix.test.mjs
@@ -177,6 +181,7 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          PYTHONDONTWRITEBYTECODE: '1'
         run: |
           set -euo pipefail
           archive="$GITHUB_WORKSPACE/source/release/ai-training-platform-${RELEASE_VERSION}-linux-x64.tar.gz"

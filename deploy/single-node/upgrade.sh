@@ -69,6 +69,7 @@ deploy_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 release_root="$(cd "$deploy_root/../.." && pwd -P)"
 helper="$release_root/scripts/offline-upgrade-helper.py"
 package_python="$release_root/runtime/python/bin/python3"
+export PYTHONDONTWRITEBYTECODE=1
 [[ -f "$helper" ]] || die "完整离线包缺少升级辅助工具：$helper"
 [[ -x "$package_python" ]] || die "完整离线包缺少可执行 Python：$package_python"
 

@@ -17,6 +17,7 @@ $packageRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptRoot '..\..'))
 $packagePython = Join-Path $packageRoot 'runtime\python\python.exe'
 $packagePowerShell = Join-Path $packageRoot 'runtime\powershell\pwsh.exe'
 $packageHelper = Join-Path $packageRoot 'scripts\offline-upgrade-helper.py'
+$env:PYTHONDONTWRITEBYTECODE = '1'
 $managedServices = @('api', 'ldap3', 'worker', 'nginx')
 $directorySeparator = [System.IO.Path]::DirectorySeparatorChar
 $script:upgradeLockStream = $null

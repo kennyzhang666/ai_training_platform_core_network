@@ -291,7 +291,7 @@ export async function assembleReleaseLayout(options) {
     await copyFile(join(sourceRoot, 'deploy', 'single-node', 'nginx-http.conf.template'), join(outputRoot, 'deploy', 'single-node', 'nginx-http.conf.template'), 'Nginx template');
     await copyFile(join(sourceRoot, 'deploy', 'release', descriptor.environmentTemplate), join(outputRoot, 'deploy', 'single-node', '.env.example'), `${target} environment template`);
     await copyFile(join(sourceRoot, 'DEPLOYMENT.html'), join(outputRoot, 'DEPLOYMENT.html'), 'single-page deployment guide');
-    await copyDirectory(runtimeRoot, join(outputRoot, 'runtime'), `${target} runtime assets`);
+    await copyDirectory(runtimeRoot, join(outputRoot, 'runtime'), `${target} runtime assets`, portablePythonSource);
     await copyDirectory(wheelhouseRoot, join(outputRoot, 'deploy', 'single-node', 'wheelhouse'), 'offline wheelhouse');
 
     for (const path of ['data', 'runtime-state', 'backups']) {

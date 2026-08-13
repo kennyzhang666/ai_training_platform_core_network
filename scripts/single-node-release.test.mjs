@@ -113,6 +113,8 @@ async function fixture(root) {
 async function runtimeFixture(root, target) {
   const runtimeRoot = join(root, `runtime-${target}`);
   for (const path of RELEASE_TARGETS[target].runtimeFiles) await put(runtimeRoot, path, path);
+  await put(runtimeRoot, 'python/lib/python3.11/re/__pycache__/_constants.cpython-311.pyc', 'mutable bytecode cache');
+  await put(runtimeRoot, 'python/lib/python3.11/re/legacy.pyo', 'mutable optimized bytecode cache');
   return runtimeRoot;
 }
 
@@ -244,6 +246,9 @@ for (const target of ['win32-x64', 'linux-x64']) {
       assert.ok(manifest.files.some((file) => file.path === 'upgrade-manifest.json'));
       assert.ok(manifest.files.some((file) => file.path === 'scripts/prepare-single-node-environment.mjs'));
       assert.ok(manifest.files.some((file) => file.path === RELEASE_TARGETS[target].runtimeFiles[0].replace(/^/, 'runtime/')));
+      assert.equal(manifest.files.some((file) => /(?:^|\/)__pycache__(?:\/|$)|\.(?:pyc|pyo)$/.test(file.path)), false);
+      assert.equal(existsSync(join(outputRoot, 'runtime', 'python', 'lib', 'python3.11', 're', '__pycache__')), false);
+      assert.equal(existsSync(join(outputRoot, 'runtime', 'python', 'lib', 'python3.11', 're', 'legacy.pyo')), false);
       assert.ok(manifest.files.some((file) => file.path === 'DEPLOYMENT.html'));
       assert.ok(existsSync(join(outputRoot, 'deploy', 'single-node', RELEASE_TARGETS[target].manager)));
       if (target === 'win32-x64') {

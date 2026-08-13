@@ -113,6 +113,8 @@ test('upgrade launchers and helper are parseable and shipped as safe entrypoints
   assert.match(readFileSync(join(projectRoot, 'upgrade.sh'), 'utf8'), /deploy\/single-node\/upgrade\.sh/);
   const windows = readFileSync(join(projectRoot, 'deploy', 'single-node', 'upgrade.ps1'), 'utf8');
   const linux = readFileSync(join(projectRoot, 'deploy', 'single-node', 'upgrade.sh'), 'utf8');
+  assert.match(windows, /PYTHONDONTWRITEBYTECODE/);
+  assert.match(linux, /PYTHONDONTWRITEBYTECODE/);
   assert.match(windows, /--source-root/);
   assert.match(windows, /database-active-evaluations/);
   assert.match(windows, /database-restore/);
