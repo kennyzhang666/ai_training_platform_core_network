@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.1", "root": {"mode": "ARCHIVE_ROOT"},
+  "required": [
+    {"path": "tests/test_quote.py", "type": "source"},
+    {"path": "DEFECTS.md", "type": "markdown", "minSections": 1, "minChars": 200, "notTemplate": true},
+    {"path": "TEST_PLAN.md", "type": "markdown", "minSections": 5, "minChars": 800, "notTemplate": true},
+    {"path": "AI_WORKLOG.md", "type": "markdown", "minSections": 4, "minChars": 800, "notTemplate": true}
+  ],
+  "optional": [], "forbidden": ["**/.env", "**/.git/**", "**/__pycache__/**", "**/*.pyc"],
+  "languageEntry": {"python": "tests/test_quote.py"},
+  "allowedPaths": ["tests/test_quote.py", "DEFECTS.md", "TEST_PLAN.md", "AI_WORKLOG.md"],
+  "allowAdditionalPaths": false, "maxDepth": 2, "maxFiles": 8
+}

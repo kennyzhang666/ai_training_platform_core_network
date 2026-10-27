@@ -1,0 +1,46 @@
+schemaVersion: "1.0"
+id: coupon-stacking
+version: 1
+title: 超市叠加优惠测试实战：用 AI 写出能发现问题的测试
+description: >-
+  根据计价规格、澄清与变更记录，为现成的超市计价程序编写 unittest 测试。
+  核验 AI 生成的期望值，判断失败来自测试还是实现，并维护旧版测试。
+objectives:
+  - 从规格推导期望值，核对 AI 生成的断言
+  - 设计金额、时间、会员价与优惠叠加的边界和组合
+  - 用可复现测试定位缺陷，区分实现错误与过时测试
+  - 记录澄清、变更影响、AI 核验与小步迭代
+requirements:
+  - 阅读 SPEC.md、CLARIFICATIONS.md、CHANGE.md 与遗留测试
+  - 仅交付 tests/test_quote.py、DEFECTS.md、TEST_PLAN.md、AI_WORKLOG.md
+  - 测试期望依据规格与澄清，不得录制当前实现输出作为答案
+  - 保留有价值的旧测试并修正过时断言
+constraints:
+  - Python 3.11 或更高版本，仅使用标准库 unittest
+  - 不提交或修改被测实现，不依赖外网、文件读取或第三方包
+  - 不跳过测试、不标记预期失败、不吞断言异常
+  - 不读取被测模块私有信息，可依据规格编写自己的计算器
+deliverables: [tests/test_quote.py, DEFECTS.md, TEST_PLAN.md, AI_WORKLOG.md]
+tags: [AI辅助测试, unittest, 测试设计, 边界分析, 需求变更, Python]
+estimatedMinutes: 120
+origin: official
+zone: yellow
+languagePolicy:
+  mode: fixed
+  languages: [python]
+deliveryPolicy:
+  allowedSources: [UPLOAD]
+  upload:
+    formats: [zip]
+    maxBytes: 5242880
+    maxFiles: 8
+    allowResubmit: true
+rubricVersion: "1.0"
+submissionContract: submission-contract.json
+resources:
+  starter: starter
+resourceLimits:
+  timeoutSeconds: 240
+  memoryMb: 512
+  maxOutputBytes: 2097152
+visibility: ORG

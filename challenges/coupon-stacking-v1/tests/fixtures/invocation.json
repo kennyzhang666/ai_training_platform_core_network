@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0", "generatedAt": "2026-10-27T00:00:00Z",
+  "engine": {"id": "coupon-stacking-evaluator", "version": "1.0.0", "packageHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "packageRoot": "engine"},
+  "challenge": {"id": "coupon-stacking", "challengeVersion": "coupon-stacking@1", "rubricVersion": "1.0", "zone": "YELLOW"},
+  "grading": {"runId": "run-synthetic-coupon", "idempotencyKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "triggerType": "MANUAL", "attempt": 1},
+  "subject": {"id": "synthetic-learner"},
+  "submission": {"id": "submission-synthetic-coupon", "sourceType": "UPLOAD", "snapshotHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "artifactHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "submittedAt": "2026-10-27T00:00:00Z"},
+  "workspace": "engine/assets/oracle", "outputPath": "tmp/result.json"
+}

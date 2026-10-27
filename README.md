@@ -469,7 +469,13 @@ pnpm --filter @ai-training/platform-api test:integration:postgres
 - Ubuntu 22.04 x64 原生 GitHub Actions 构建、SHA-256 校验、运行时冒烟和 Release 附件发布；
 - SDD 运维日志脱敏综合训战的真实角色端到端验收，以及版本化 v2 进阶赛题的 24 项隐藏强度用例。
 
-### 15.2 当前限制
+### 15.2 赛题资产补充（开发分支）
+
+`challenges/coupon-stacking-v1/` 新增超市叠加优惠测试训战：提供后台填写资料、学员材料、四文件交付目录规范、标准库 PACKAGED 引擎、参考交付件和九组校准件。引擎通过正确实现三次运行确认测试有效性，再以旧规则、规则误读、四个独立缺陷和 40 个冻结变异版本进行 16 点确定性评分。批次适配器自动写索引与结果路径，复用现有 Worker 和结果录入流程。
+
+该资产依据 `docs/challenges/coupon-stacking-v1.md` 实现，生成、测试和打包命令见赛题目录 README。当前属于赛题源文件交付，不改变平台 `v1.1.5` 发布版本；上线前还需在公司 Code Agent 上用参考提交验收。
+
+### 15.3 当前限制
 
 - Windows Server x64 与 Linux x64 真实断网目标机 UAT 尚未完成；
 - 一键安装与开机自启已通过脚本和发布布局门禁，但尚未在两台干净断网目标服务器完成 UAT；

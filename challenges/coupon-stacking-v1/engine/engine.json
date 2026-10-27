@@ -1,0 +1,11 @@
+{
+  "schemaVersion":"1.1", "id":"coupon-stacking-evaluator", "version":"1.0.0",
+  "title":"超市叠加优惠测试训战评测引擎",
+  "description":"核对学员测试的规格有效性，执行 40 个冻结变异版本，并按 16 个评分点确定性评分。",
+  "runtime":{"type":"python","entrypoint":"judge.py","pythonVersion":">=3.11"},
+  "agent":{"instruction":"instruction.md","skills":["skills/evaluation"]},
+  "limits":{"wallClockSeconds":240,"memoryMB":512,"outputBytes":2097152},
+  "assets":{"submissionContract":"assets/submission-contract.json","testsDir":"assets/variants","referenceDir":"assets/oracle"},
+  "selfCheck":{"expectMinTotal":100,"expectStatus":"COMPLETE"},
+  "metadata":{"rubric":"V1-V4/S1-S4/C1-C4/P1-P4","mutants":40,"framework":"unittest","grading":"deterministic"}
+}

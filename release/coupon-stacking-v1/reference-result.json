@@ -1,0 +1,742 @@
+{
+  "total": 100.0,
+  "dimensions": {
+    "verify": {
+      "score": 40.0,
+      "max": 40,
+      "evaluated": true
+    },
+    "spec": {
+      "score": 25.0,
+      "max": 25,
+      "evaluated": true
+    },
+    "code": {
+      "score": 20.0,
+      "max": 20,
+      "evaluated": true
+    },
+    "collab": {
+      "score": 15.0,
+      "max": 15,
+      "evaluated": true
+    }
+  },
+  "criteria": [
+    {
+      "key": "V1",
+      "dim": "verify",
+      "name": "主流程验证",
+      "max": 8,
+      "level": "A",
+      "score": 8.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "11/11 项通过。",
+      "evidenceType": "test",
+      "evidence": {
+        "primaryPath": "tests/test_quote.py",
+        "checks": [
+          {
+            "description": "R2 运算类测试",
+            "passed": 2,
+            "total": 2
+          },
+          {
+            "description": "R5 删除类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R7 常量类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R8 运算类测试",
+            "passed": 2,
+            "total": 2
+          },
+          {
+            "description": "R3 删除类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R7 运算类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R4 条件类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R1 删除类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "没有其它规格误读",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 11,
+        "total": 11
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "V2",
+      "dim": "verify",
+      "name": "异常与边界验证",
+      "max": 12,
+      "level": "A",
+      "score": 12.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "14/14 项通过。",
+      "evidenceType": "test",
+      "evidence": {
+        "primaryPath": "tests/test_quote.py",
+        "checks": [
+          {
+            "description": "R1 条件类测试",
+            "passed": 2,
+            "total": 2
+          },
+          {
+            "description": "R1 边界类测试",
+            "passed": 5,
+            "total": 5
+          },
+          {
+            "description": "R1 删除类测试",
+            "passed": 5,
+            "total": 5
+          },
+          {
+            "description": "R5 常量类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R3 边界类测试",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 14,
+        "total": 14
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "V3",
+      "dim": "verify",
+      "name": "需求澄清与规则验证",
+      "max": 12,
+      "level": "A",
+      "score": 12.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "11/11 项通过。",
+      "evidenceType": "test",
+      "evidence": {
+        "primaryPath": "tests/test_quote.py",
+        "checks": [
+          {
+            "description": "G1 删除类测试",
+            "passed": 2,
+            "total": 2
+          },
+          {
+            "description": "G2 常量类测试",
+            "passed": 2,
+            "total": 2
+          },
+          {
+            "description": "G3 常量类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "G3 条件类测试",
+            "passed": 2,
+            "total": 2
+          },
+          {
+            "description": "G1 运算类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "澄清记录得到正确应用",
+            "passed": 3,
+            "total": 3
+          }
+        ],
+        "passed": 11,
+        "total": 11
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "V4",
+      "dim": "verify",
+      "name": "变更回归验证",
+      "max": 8,
+      "level": "A",
+      "score": 8.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "10/10 项通过。",
+      "evidenceType": "test",
+      "evidence": {
+        "primaryPath": "tests/test_quote.py",
+        "checks": [
+          {
+            "description": "CH1 运算类测试",
+            "passed": 3,
+            "total": 3
+          },
+          {
+            "description": "R6 删除类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "CH2 条件类测试",
+            "passed": 2,
+            "total": 2
+          },
+          {
+            "description": "CH2 删除类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "CH2 运算类测试",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "旧断言已更新",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "断言没有固化实现缺陷",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 10,
+        "total": 10
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "S1",
+      "dim": "spec",
+      "name": "需求澄清",
+      "max": 6,
+      "level": "A",
+      "score": 6.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "5/5 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "TEST_PLAN.md",
+        "checks": [
+          {
+            "description": "澄清记录得到正确应用",
+            "passed": 3,
+            "total": 3
+          },
+          {
+            "description": "规格空白至少三条",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "引用澄清记录",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 5,
+        "total": 5
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "S2",
+      "dim": "spec",
+      "name": "验收用例设计",
+      "max": 8,
+      "level": "A",
+      "score": 8.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "8/8 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "tests/test_quote.py",
+        "checks": [
+          {
+            "description": "发现待测实现中的缺陷",
+            "passed": 4,
+            "total": 4
+          },
+          {
+            "description": "缺陷报告关联条款与有效测试",
+            "passed": 4,
+            "total": 4
+          }
+        ],
+        "passed": 8,
+        "total": 8
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "S3",
+      "dim": "spec",
+      "name": "异常与边界覆盖",
+      "max": 6,
+      "level": "A",
+      "score": 6.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "8/8 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "tests/test_quote.py",
+        "checks": [
+          {
+            "description": "R1 有有效回归用例",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R2 有有效回归用例",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R3 有有效回归用例",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R4 有有效回归用例",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R5 有有效回归用例",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R6 有有效回归用例",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R7 有有效回归用例",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "R8 有有效回归用例",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 8,
+        "total": 8
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "S4",
+      "dim": "spec",
+      "name": "变更影响定位",
+      "max": 5,
+      "level": "A",
+      "score": 5.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "5/5 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "TEST_PLAN.md",
+        "checks": [
+          {
+            "description": "旧选择规则已更新",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "遗留舍入断言已处理",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "变更影响说明点名原测试",
+            "passed": 3,
+            "total": 3
+          }
+        ],
+        "passed": 5,
+        "total": 5
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "C1",
+      "dim": "code",
+      "name": "业务常量管理",
+      "max": 5,
+      "level": "A",
+      "score": 5.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "3/3 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "tests/test_quote.py",
+        "checks": [
+          {
+            "description": "至少一半测试采用数据表",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "至少一半测试引用规格条款",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "没有被同名方法覆盖的测试",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 3,
+        "total": 3
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "C2",
+      "dim": "code",
+      "name": "异常与边界处理",
+      "max": 5,
+      "level": "A",
+      "score": 5.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "4/4 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "tests/test_quote.py",
+        "checks": [
+          {
+            "description": "每个测试都有明确断言",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "没有低信息断言",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "不吞断言异常",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "没有跳过或预期失败",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 4,
+        "total": 4
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "C3",
+      "dim": "code",
+      "name": "类型与精度安全",
+      "max": 5,
+      "level": "A",
+      "score": 5.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "3/3 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "tests/test_quote.py",
+        "checks": [
+          {
+            "description": "断言不用浮点字面量",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "不用近似相等掩盖金额差异",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "不调用银行家舍入",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 3,
+        "total": 3
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "C4",
+      "dim": "code",
+      "name": "变更友好设计",
+      "max": 5,
+      "level": "A",
+      "score": 5.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "3/3 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "tests/test_quote.py",
+        "checks": [
+          {
+            "description": "不同种子与顺序下结果稳定",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "不读取模块私有信息",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "参考实现单次运行不超过五秒",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 3,
+        "total": 3
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "P1",
+      "dim": "collab",
+      "name": "需求与验收先行",
+      "max": 4,
+      "level": "A",
+      "score": 4.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "2/2 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "AI_WORKLOG.md",
+        "checks": [
+          {
+            "description": "至少两条有测试名的失败判定",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "测试设计章节完整",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 2,
+        "total": 2
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "P2",
+      "dim": "collab",
+      "name": "小步迭代",
+      "max": 3,
+      "level": "A",
+      "score": 3.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "1/1 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "AI_WORKLOG.md",
+        "checks": [
+          {
+            "description": "至少三次迭代记录",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 1,
+        "total": 1
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "P3",
+      "dim": "collab",
+      "name": "提示词设计",
+      "max": 4,
+      "level": "A",
+      "score": 4.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "2/2 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "AI_WORKLOG.md",
+        "checks": [
+          {
+            "description": "保留原始约束内容",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "指定规格与澄清为依据",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 2,
+        "total": 2
+      },
+      "ruleVersion": "1.0"
+    },
+    {
+      "key": "P4",
+      "dim": "collab",
+      "name": "变更定位与验证",
+      "max": 4,
+      "level": "A",
+      "score": 4.0,
+      "source": "auto",
+      "rule": "按本评分点检查项通过比例分档：全过 A，至少 75% 为 B，至少 50% 为 C，其余 D。",
+      "rationale": "2/2 项通过。",
+      "evidenceType": "diagnostic",
+      "evidence": {
+        "primaryPath": "AI_WORKLOG.md",
+        "checks": [
+          {
+            "description": "至少两条核验记录引用条款",
+            "passed": 1,
+            "total": 1
+          },
+          {
+            "description": "核验涉及已发现缺陷或澄清",
+            "passed": 1,
+            "total": 1
+          }
+        ],
+        "passed": 2,
+        "total": 2
+      },
+      "ruleVersion": "1.0"
+    }
+  ],
+  "findings": [],
+  "validationDiagnostics": [],
+  "verifyDetail": {
+    "validTests": [
+      "test_quote.QuoteTests.test_CH2_member_excluded_from_percent_R5",
+      "test_quote.QuoteTests.test_G1_threshold_after_reductions_R7",
+      "test_quote.QuoteTests.test_G2_aggregate_rounding_R5",
+      "test_quote.QuoteTests.test_G3_actual_off_and_zero_R8",
+      "test_quote.QuoteTests.test_R1_all_money_fields_are_integer",
+      "test_quote.QuoteTests.test_R1_invalid_coupons",
+      "test_quote.QuoteTests.test_R1_invalid_items",
+      "test_quote.QuoteTests.test_R1_validation_order_and_dates",
+      "test_quote.QuoteTests.test_R2_member_prices_CH2",
+      "test_quote.QuoteTests.test_R3_not_yet_active",
+      "test_quote.QuoteTests.test_R3_starts_inclusive",
+      "test_quote.QuoteTests.test_R3_validity_half_open",
+      "test_quote.QuoteTests.test_R4_only_one_each",
+      "test_quote.QuoteTests.test_R5_cap_and_zero",
+      "test_quote.QuoteTests.test_R5_excluded_and_case",
+      "test_quote.QuoteTests.test_R5_rounding",
+      "test_quote.QuoteTests.test_R6_selection_CH1",
+      "test_quote.QuoteTests.test_R7_thresholds",
+      "test_quote.QuoteTests.test_R8_complete_examples",
+      "test_quote.QuoteTests.test_R8_published_examples"
+    ],
+    "invalidTests": [],
+    "unstableTests": [],
+    "defectsFound": 4,
+    "mutation": {
+      "killed": 40,
+      "total": 40,
+      "byTier": {
+        "basic": {
+          "passed": 10,
+          "total": 10
+        },
+        "boundary": {
+          "passed": 14,
+          "total": 14
+        },
+        "clarification": {
+          "passed": 8,
+          "total": 8
+        },
+        "change": {
+          "passed": 8,
+          "total": 8
+        }
+      }
+    },
+    "referenceRuns": 3,
+    "timeout": false
+  },
+  "metrics": {
+    "testMethods": 20,
+    "validTests": 20,
+    "outdatedAssertions": 0,
+    "fixedBugAssertions": 0,
+    "misreadGaps": 0,
+    "referenceMaxDurationMs": 146
+  },
+  "schemaVersion": "1.0",
+  "resultId": "result-cd2fb8eeeed5d5798f5d088c",
+  "gradingRunId": "standalone-run-001",
+  "challengeVersion": "standalone-sample:1",
+  "rubricVersion": "1.0",
+  "graderVersion": "coupon-stacking-evaluator@1.0.0",
+  "idempotencyKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "triggerType": "MANUAL",
+  "status": "COMPLETE",
+  "submission": {
+    "sourceType": "UPLOAD",
+    "snapshotHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "artifactHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "submittedAt": "2026-10-27T07:33:21.855Z"
+  },
+  "gradedBy": "ci",
+  "startedAt": "2026-10-27T07:33:21.947Z",
+  "finishedAt": "2026-10-27T07:33:28.827Z",
+  "durationMs": 6880
+}

@@ -1,0 +1,419 @@
+{
+  "schemaVersion": "1.0",
+  "variants": [
+    {
+      "id": "reference",
+      "type": "reference",
+      "path": "reference.py",
+      "sha256": "2a5243aeedd9a4fb0bb30070c94b47056899bebf47cfcb8bba51248634ec4a6c"
+    },
+    {
+      "id": "v1_reference",
+      "type": "previous",
+      "path": "v1_reference.py",
+      "sha256": "a9db042100a856766e58d8db57667510f4410bc227ff4b8b7e21eb43cd95b340"
+    },
+    {
+      "id": "G1",
+      "type": "interpretation",
+      "path": "interpretations/G1.py",
+      "sha256": "5a6917cd8a4cda550f0e286a3a6f5fc71899ddc98e3b485572a86298f2bcd9ae"
+    },
+    {
+      "id": "G2",
+      "type": "interpretation",
+      "path": "interpretations/G2.py",
+      "sha256": "32250532ea31baef99b0768392b74e8fe8e77d0b38658304b6049ab661d923cb"
+    },
+    {
+      "id": "G3",
+      "type": "interpretation",
+      "path": "interpretations/G3.py",
+      "sha256": "26f11fc3167b6c5cdc5fe7313a66ce4568177d18ec74505bccae84e9e9ef2cfa"
+    },
+    {
+      "id": "B1",
+      "type": "bug",
+      "path": "bugs/B1.py",
+      "sha256": "772756f3ab921ba12fc9dfa169c9971f8d0b96107ca04ed4e3897569c44df134"
+    },
+    {
+      "id": "B2",
+      "type": "bug",
+      "path": "bugs/B2.py",
+      "sha256": "82319625af675d364008c1196ff24151bf82537446f0bd25bf332765c57a11da"
+    },
+    {
+      "id": "B3",
+      "type": "bug",
+      "path": "bugs/B3.py",
+      "sha256": "9a460b9a2a4ffff12c09b23cc77aece8b58f0731c58fd6a9780680ed1588b2b3"
+    },
+    {
+      "id": "B4",
+      "type": "bug",
+      "path": "bugs/B4.py",
+      "sha256": "32e9dd7533590c58bbba6ee314249142f5cbcb6eef1b87ec7fcbaa83f022c151"
+    },
+    {
+      "id": "M01",
+      "type": "mutant",
+      "clause": "R2",
+      "tier": "basic",
+      "category": "运算",
+      "path": "mutants/M01.py",
+      "sha256": "42701552f0e32be2fdfbf74c5bf35480358021463a4982f5926ed346c5180ab5"
+    },
+    {
+      "id": "M02",
+      "type": "mutant",
+      "clause": "R2",
+      "tier": "basic",
+      "category": "运算",
+      "path": "mutants/M02.py",
+      "sha256": "c40d0271ba42f57d7f7a5848ccc899c5824bec876c2ee71262096e6ab11dba13"
+    },
+    {
+      "id": "M03",
+      "type": "mutant",
+      "clause": "R5",
+      "tier": "basic",
+      "category": "删除",
+      "path": "mutants/M03.py",
+      "sha256": "0901e238de4a06f9eb0541a6e4af5be03802d25ff74e700e37acc8618e76d5da"
+    },
+    {
+      "id": "M04",
+      "type": "mutant",
+      "clause": "R7",
+      "tier": "basic",
+      "category": "常量",
+      "path": "mutants/M04.py",
+      "sha256": "214f04e6b9a140d7bd8eca315afa14070bdda150d8377984c864be4c308a68bf"
+    },
+    {
+      "id": "M05",
+      "type": "mutant",
+      "clause": "R8",
+      "tier": "basic",
+      "category": "运算",
+      "path": "mutants/M05.py",
+      "sha256": "aa22051af7018eaed0a2316bac6b737bff63ef8432f17888fc58f5201f3da274"
+    },
+    {
+      "id": "M06",
+      "type": "mutant",
+      "clause": "R8",
+      "tier": "basic",
+      "category": "运算",
+      "path": "mutants/M06.py",
+      "sha256": "39a112bfa44533ac4269bce4fa5f957724323fe02096aae0a53d9c4f5638ed43"
+    },
+    {
+      "id": "M07",
+      "type": "mutant",
+      "clause": "R3",
+      "tier": "basic",
+      "category": "删除",
+      "path": "mutants/M07.py",
+      "sha256": "40020713cb72ef02b6216d0523da122dd58627fe0fba7764ee51dd780cf4c435"
+    },
+    {
+      "id": "M08",
+      "type": "mutant",
+      "clause": "R7",
+      "tier": "basic",
+      "category": "运算",
+      "path": "mutants/M08.py",
+      "sha256": "248465bf53b5851184b28de6865c9f973c2cac7700c67d47a9e702137d7f1e8b"
+    },
+    {
+      "id": "M09",
+      "type": "mutant",
+      "clause": "R4",
+      "tier": "basic",
+      "category": "条件",
+      "path": "mutants/M09.py",
+      "sha256": "25191bd2828a780a13ad13b0ef13a956be1ecdd0659a0c0c004fd3268ae616c5"
+    },
+    {
+      "id": "M10",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "basic",
+      "category": "删除",
+      "path": "mutants/M10.py",
+      "sha256": "10232fef8dcc9138328396100dd0e1862c4c800c14279eae96660ec1ba074eed"
+    },
+    {
+      "id": "M11",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "条件",
+      "path": "mutants/M11.py",
+      "sha256": "e01508723f8e873f41ed4864a46d9de97d0e4d7aa9be09f870feef813bff0d8c"
+    },
+    {
+      "id": "M12",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "条件",
+      "path": "mutants/M12.py",
+      "sha256": "9d281a6138db75e0ecd43059ac3f4a60577f06250445fe635f5ae92eccbcc19f"
+    },
+    {
+      "id": "M13",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "边界",
+      "path": "mutants/M13.py",
+      "sha256": "871e99c084b95462ebda16b61ee4a2bd42fd7ff9367c72c4a5438db811e06270"
+    },
+    {
+      "id": "M14",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "删除",
+      "path": "mutants/M14.py",
+      "sha256": "23c6ebfab41233f03fa44caa0488fd2777686ab03420b50a4e6705e2128fcaf1"
+    },
+    {
+      "id": "M15",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "边界",
+      "path": "mutants/M15.py",
+      "sha256": "e59c1836da93dbb401a490cad82db42ce0a4a86a0c6898c958135e01927e6acf"
+    },
+    {
+      "id": "M16",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "边界",
+      "path": "mutants/M16.py",
+      "sha256": "dc0aeb2d75fa3e8e8b2bcf7121f54d6867d27fd0a8bf65d289c70bac82237d64"
+    },
+    {
+      "id": "M17",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "边界",
+      "path": "mutants/M17.py",
+      "sha256": "fc3b2e4c60a3ee61e4571818c5b6f2914275bae4d3cee615b1c4ffc48630d907"
+    },
+    {
+      "id": "M18",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "删除",
+      "path": "mutants/M18.py",
+      "sha256": "7a745ff9b35027aa9208412caa6ceddc6cb2cf2548e762f4e8a1bce9340f0fde"
+    },
+    {
+      "id": "M19",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "删除",
+      "path": "mutants/M19.py",
+      "sha256": "bb2a5d44952d513fc6d9fdc6c4df418ed2d1dd97c09b09995840207f1ac4eadf"
+    },
+    {
+      "id": "M20",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "删除",
+      "path": "mutants/M20.py",
+      "sha256": "61204edf81c620a013e888815db122e0706bcc3c1aaa8d31353c2caa0454ad60"
+    },
+    {
+      "id": "M21",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "删除",
+      "path": "mutants/M21.py",
+      "sha256": "aa49304e237e5f438e398f41dae554971f41962d82501971067dcb2c78fcbbf6"
+    },
+    {
+      "id": "M22",
+      "type": "mutant",
+      "clause": "R1",
+      "tier": "boundary",
+      "category": "边界",
+      "path": "mutants/M22.py",
+      "sha256": "8d26a13c6689b204da60440ec24108ae135748b82b8cc9209f22e34d70192c6a"
+    },
+    {
+      "id": "M23",
+      "type": "mutant",
+      "clause": "R5",
+      "tier": "boundary",
+      "category": "常量",
+      "path": "mutants/M23.py",
+      "sha256": "074f1935ce6358a3937eeca86bf6187a2e4bd91e5785842f10a4784d1820a517"
+    },
+    {
+      "id": "M24",
+      "type": "mutant",
+      "clause": "R3",
+      "tier": "boundary",
+      "category": "边界",
+      "path": "mutants/M24.py",
+      "sha256": "31e9fb69f1186838f39df1d295c0661e073d9f66c140b90a6be6788c78dec5ca"
+    },
+    {
+      "id": "M25",
+      "type": "mutant",
+      "clause": "G1",
+      "tier": "clarification",
+      "category": "删除",
+      "path": "mutants/M25.py",
+      "sha256": "537b198932145c1d0f32f4e6f3687cbe6a2874f0e4b46b701b4427f2a238c6b1"
+    },
+    {
+      "id": "M26",
+      "type": "mutant",
+      "clause": "G1",
+      "tier": "clarification",
+      "category": "删除",
+      "path": "mutants/M26.py",
+      "sha256": "2ea75c98cb0c6cd9a70b6a8b1f4c895e5b478f11f4c9aebbea948b8499010681"
+    },
+    {
+      "id": "M27",
+      "type": "mutant",
+      "clause": "G2",
+      "tier": "clarification",
+      "category": "常量",
+      "path": "mutants/M27.py",
+      "sha256": "23f9b20793f84007c270b8c4eed0a36919883339f834b3abf50dcdb019ac8837"
+    },
+    {
+      "id": "M28",
+      "type": "mutant",
+      "clause": "G2",
+      "tier": "clarification",
+      "category": "常量",
+      "path": "mutants/M28.py",
+      "sha256": "efb3df212dc4aa7246e04a618d57f4f26a4e3822a12a0c012e3e7f49aab46b74"
+    },
+    {
+      "id": "M29",
+      "type": "mutant",
+      "clause": "G3",
+      "tier": "clarification",
+      "category": "常量",
+      "path": "mutants/M29.py",
+      "sha256": "cd22628e87f7d3bfc12bf2dcf0dc9989e495bd155dc05e5aff0c6edf5cebe2e0"
+    },
+    {
+      "id": "M30",
+      "type": "mutant",
+      "clause": "G3",
+      "tier": "clarification",
+      "category": "条件",
+      "path": "mutants/M30.py",
+      "sha256": "85b33e4779ef7b2f4c74f2f587ae7b3045b2a4c044a4e31e7ba66cee2aa1d5ad"
+    },
+    {
+      "id": "M31",
+      "type": "mutant",
+      "clause": "G1",
+      "tier": "clarification",
+      "category": "运算",
+      "path": "mutants/M31.py",
+      "sha256": "86e6148bef7a20cb70a658e2d19756454f1512b47eeccf2a52047438c141f1cb"
+    },
+    {
+      "id": "M32",
+      "type": "mutant",
+      "clause": "G3",
+      "tier": "clarification",
+      "category": "条件",
+      "path": "mutants/M32.py",
+      "sha256": "716fba590b10771abec8316b396e43baa73bd2bf9e62643bb72581b8d4c9911d"
+    },
+    {
+      "id": "M33",
+      "type": "mutant",
+      "clause": "CH1",
+      "tier": "change",
+      "category": "运算",
+      "path": "mutants/M33.py",
+      "sha256": "f57d1a01f1c726818f0c7d9d37bec684604afa500ff2085e818312aa8840f25d"
+    },
+    {
+      "id": "M34",
+      "type": "mutant",
+      "clause": "R6",
+      "tier": "change",
+      "category": "删除",
+      "path": "mutants/M34.py",
+      "sha256": "e7b1043a84c7757937e9b324babe9ea18346409de3016f2e6c576653a6a3a333"
+    },
+    {
+      "id": "M35",
+      "type": "mutant",
+      "clause": "CH1",
+      "tier": "change",
+      "category": "运算",
+      "path": "mutants/M35.py",
+      "sha256": "7324569760469286adc5d8ea4a2d08488b37676ed3d7e0981477d062da23ba43"
+    },
+    {
+      "id": "M36",
+      "type": "mutant",
+      "clause": "CH2",
+      "tier": "change",
+      "category": "条件",
+      "path": "mutants/M36.py",
+      "sha256": "e10510eb4991ff79021a641eb574f4cf1a83ba724e52380ad0f7168885b352f0"
+    },
+    {
+      "id": "M37",
+      "type": "mutant",
+      "clause": "CH2",
+      "tier": "change",
+      "category": "删除",
+      "path": "mutants/M37.py",
+      "sha256": "28ce9eded99ef7a3b06e296a404faa44353c514acd0822d63e497ad51128a40b"
+    },
+    {
+      "id": "M38",
+      "type": "mutant",
+      "clause": "CH2",
+      "tier": "change",
+      "category": "条件",
+      "path": "mutants/M38.py",
+      "sha256": "3a3cbd8c14a70e476f9f4b86b07c017a847b42c65fc96460c2848eaab70cb444"
+    },
+    {
+      "id": "M39",
+      "type": "mutant",
+      "clause": "CH2",
+      "tier": "change",
+      "category": "运算",
+      "path": "mutants/M39.py",
+      "sha256": "e5e635d1048784d9be4e6b055d2b0164e9cbc64cd918d0f567cab1a863d659e9"
+    },
+    {
+      "id": "M40",
+      "type": "mutant",
+      "clause": "CH1",
+      "tier": "change",
+      "category": "运算",
+      "path": "mutants/M40.py",
+      "sha256": "c75b3cedb85a3ecbb88d6237498e742036bba9b7418cf4a35c854bd58a4859c2"
+    }
+  ]
+}

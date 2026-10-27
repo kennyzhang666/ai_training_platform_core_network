@@ -1,0 +1,21 @@
+{
+  "id": "coupon-stacking-evaluator",
+  "version": "1.0.0",
+  "mode": "PACKAGED",
+  "agent": {
+    "instructionPath": "instruction.md",
+    "skillPaths": [
+      "skills/evaluation"
+    ]
+  },
+  "input": {
+    "format": "JSON",
+    "schemaVersion": "1.1",
+    "contractPath": "contracts/evaluation-agent-batch-v1.1.schema.json"
+  },
+  "output": {
+    "format": "JSON",
+    "schemaVersion": "1.0",
+    "contractPath": "contracts/evaluation-result.schema.json"
+  }
+}
